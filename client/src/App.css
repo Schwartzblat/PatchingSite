@@ -1,0 +1,110 @@
+/* css */
+/* client/src/App.css */
+
+/* Base */
+:root {
+  --bg: #06070a;
+  --card: #0b0f14;
+  --text: #eef3ff;
+  --muted: rgba(255,255,255,0.08);
+  --radius-xl: 16px;
+  --gap-lg: 2.5rem;
+  --gap-md: 1.5rem;
+  --gap-sm: 1rem;
+  align-items: center;
+  justify-content: center;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+html { font-size: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Layout utilities */
+.min-h-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.w-full { width: 100%; }
+.py-6 { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+
+.text-center { text-align: center; }
+.text-3xl { font-size: clamp(1.5rem, 2vw + 1rem, 2.25rem); line-height: 1.2; }
+.font-bold { font-weight: 700; }
+.text-gray-800 { color: var(--text); }
+
+/* Spacing */
+.gap-10 { gap: var(--gap-lg); }
+
+/* Buttons row */
+.buttons,
+.center-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-lg);
+}
+
+/* Card / button */
+.w-48 { width: 12rem; }
+.h-48 { height: 12rem; }
+.rounded-2xl { border-radius: var(--radius-xl); }
+.bg-white { background-color: var(--card); }
+
+button {
+  border: 1px solid var(--muted);
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  width: 100%;
+  max-width: 12rem;
+  aspect-ratio: 1 / 1;
+}
+
+button:focus {
+  outline: 2px solid rgba(99,102,241,0.18);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+.shadow-xl { box-shadow: 0 14px 40px rgba(0,0,0,0.85), 0 6px 18px rgba(0,0,0,0.6); }
+.hover\:shadow-2xl:hover { box-shadow: 0 30px 80px rgba(0,0,0,0.9); }
+.transition { transition: box-shadow 200ms ease, transform 140ms ease, background-color 160ms ease; }
+button:hover { transform: translateY(-4px); }
+
+/* Icons */
+.app_icon {
+  display: block;
+  width: clamp(72px, 12vw, 120px);
+  height: clamp(72px, 12vw, 120px);
+  object-fit: contain;
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,0.9));
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .py-6 { padding-top: 1rem; padding-bottom: 1rem; }
+  .gap-10 { gap: var(--gap-sm); }
+}
