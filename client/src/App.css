@@ -201,3 +201,7 @@ button:focus-visible {
     font-size: 2rem;
   }
 }
+
+.title {
+  margin-bottom: 50%;
+}

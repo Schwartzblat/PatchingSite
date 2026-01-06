@@ -10,13 +10,13 @@ function Icon({ path }) {
 
 function App() {
     useEffect(() => {
-        document.title = 'My App Title'
+        document.title = 'Patching Site'
     }, []);
 
     return (
         <div className="min-h-screen flex items-center w-full">
             <div className="flex flex-col items-center" style={{ textAlign: 'center' }}>
-                <h1 className="text-3xl font-bold text-gray-800">My App Title</h1>
+                <h1 className="text-3xl font-bold text-gray-800 title">Patching Site</h1>
                 <div className="flex items-center justify-center gap-10">
                     <button className="w-48 h-48 flex items-center justify-center rounded-2xl bg-white shadow-xl hover:shadow-2xl transition">
                         <Icon path="/whatsapp.webp"/>
