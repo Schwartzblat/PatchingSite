@@ -1,0 +1,9 @@
+[submodule "server/apps/com.whatsapp"]
+	path = server/apps/com.whatsapp
+	url = git@github.com:Schwartzblat/WhatsAppPatcher.git
+[submodule "server/apps/com.keshet.mako.VOD"]
+	path = server/apps/com.keshet.mako.VOD
+	url = git@github.com:Schwartzblat/MakoPatcher.git
+[submodule "server/apps/com.tranzmate"]
+	path = server/apps/com.tranzmate
+	url = git@github.com:Schwartzblat/MoovitPatcher.git

@@ -14,7 +14,7 @@ export const apps = {
     },
     mako: {
         name: "Mako",
-        package: "com.mako.app",
+        package: "com.keshet.mako.VOD",
         icon: "/mako.webp",
         path: "/mako",
     }
