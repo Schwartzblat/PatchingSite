@@ -1,13 +1,14 @@
+import datetime
 import os
 from pathlib import Path
 from typing import List
-import datetime
+
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse
 
-from config import PATCHED_APPS_PATH, APPS
-from utils import is_valid_package, check_package_name
+from config import PATCHED_APPS_PATH
+from utils import check_package_name
 
 app = FastAPI()
 
@@ -36,6 +37,7 @@ def list_versions(package_name: str) -> List[dict]:
         filename: str,
         size: int,  # in bytes
         updated_at: str,
+        href: str  # download link
     }]
     :param package_name:
     :return:
@@ -73,7 +75,7 @@ def patch_latest(package_name: str):
 @check_package_name
 def download_version(package_name: str, version: str):
     version_path = PATCHED_APPS_PATH / Path(package_name).name / Path(version).name
-    if not version_path.exists():
+    if not version_path.exists() or version_path.is_dir():
         return {"error": "Version not found"}
 
     apk_file = version_path / os.listdir(version_path)[0]

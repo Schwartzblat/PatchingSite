@@ -89,8 +89,8 @@ function PatchedAppPage({app_name}) {
                         <img src={app.icon} alt={`${app.name} icon`}/>
                     </div>
                     <div className="app-meta">
-                        <p className="app-label">{app.name}</p>
-                        <h1 className="app-package">{app.package}</h1>
+                        <p className="app-label">{app.package}</p>
+                        <h1 className="app-package">{app.name}</h1>
                     </div>
                 </header>
 
@@ -118,7 +118,6 @@ function PatchedAppPage({app_name}) {
                                 <div className="version-type">{version.type}</div>
                                 <div>
                                     <p className="version-name">{version.version}</p>
-                                    <p className="version-meta">Ready to download</p>
                                     <p className="version-meta">Download Size: {version.size}</p>
                                     <p className="version-meta">Updated at: {version.updated_at}</p>
                                 </div>
