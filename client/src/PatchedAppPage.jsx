@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { apps } from './apps.js';
 import './PatchedAppPage.css';
+import {NavLink, Outlet} from "react-router";
 
 function PatchedAppPage({ app_name }) {
     const app = apps[app_name];
@@ -96,6 +97,17 @@ function PatchedAppPage({ app_name }) {
     return (
         <div className="patched-app-page">
             <div className="page-panel" aria-busy={loading}>
+                <div className="app_shell">
+                    <header className="app_header">
+                        <NavLink to="/" className="back_home" aria-label="Back to Home">
+                            ← Back to Home
+                        </NavLink>
+                    </header>
+
+                    <main className="app_main">
+                        <Outlet />
+                    </main>
+                </div>
                 <header className="app-header">
                     <div className="app-icon-ring">
                         <img src={app.icon} alt={`${app.name} icon`} />
