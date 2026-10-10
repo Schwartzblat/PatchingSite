@@ -12,13 +12,13 @@ const COPY = {
     en: {
         nav: 'Site', install: 'How to install', terms: 'Terms', privacy: 'Privacy', refunds: 'Refunds',
         contact: 'Contact', analytics: 'Analytics choice', bug: 'Report a bug',
-        note: 'Not affiliated with or endorsed by WhatsApp, Moovit, Keshet 12 or OkCupid. App names and icons '
-            + 'belong to their owners.',
+        note: 'Not affiliated with or endorsed by WhatsApp, Moovit, Keshet 12, Reshet 13 or OkCupid. App names '
+            + 'and icons belong to their owners.',
     },
     he: {
         nav: 'האתר', install: 'איך מתקינים', terms: 'תנאי שימוש', privacy: 'פרטיות', refunds: 'החזרים',
         contact: 'צור קשר', analytics: 'הסכמה לאנליטיקס', bug: 'דיווח על תקלה',
-        note: 'האתר אינו קשור ל-WhatsApp, ל-Moovit, לקשת 12 או ל-OkCupid ואינו מאושר על ידן. שמות האפליקציות '
+        note: 'האתר אינו קשור ל-WhatsApp, ל-Moovit, לקשת 12, לרשת 13 או ל-OkCupid ואינו מאושר על ידן. שמות האפליקציות '
             + 'והסמלים שלהן שייכים לבעליהם.',
     },
 };

@@ -122,6 +122,12 @@ APPS = (
         features=("No Ads",),
     ),
     AppConfig(
+        name="Reshet 13+", package="com.applicaster.iReshet", key="reshet",
+        # The ReshetPatcher README's feature list, regrouped by what a viewer
+        # sees: the player's video ads, then every other ad in the app.
+        features=("No Video Ads", "No Full-Screen or Banner Ads"),
+    ),
+    AppConfig(
         name="OkCupid", package="com.okcupid.okcupid", key="okcupid",
         # A deliberate subset of the OkCupidPremiumPatcher README's feature
         # list: the patched build also unblurs and names the gated "Interested

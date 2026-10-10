@@ -594,7 +594,8 @@ def test_apps_endpoint_lists_the_catalogue(client):
 
     body = response.json()
     assert {app["package"] for app in body} == {
-        "com.whatsapp", "com.tranzmate", "com.keshet.mako.VOD", "com.okcupid.okcupid",
+        "com.whatsapp", "com.tranzmate", "com.keshet.mako.VOD", "com.applicaster.iReshet",
+        "com.okcupid.okcupid",
     }
 
     whatsapp = next(app for app in body if app["package"] == "com.whatsapp")

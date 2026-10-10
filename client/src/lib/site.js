@@ -24,10 +24,10 @@ export const LEGAL_UPDATED = 'September 30, 2026';
    launch and the Terms and Refund pages did not change with it. Re-dating all
    three from one constant would claim revisions that never happened. */
 export const PRIVACY_UPDATED = 'October 6, 2026';
-/* The Terms likewise, after OkCupid joined the list of apps whose developers the
-   non-affiliation clause names; the Terms promise a new date whenever they
-   change. LEGAL_UPDATED above is now the Refund Policy's alone. */
-export const TERMS_UPDATED = 'October 7, 2026';
+/* The Terms likewise, after OkCupid and then Reshet 13+ joined the list of apps
+   whose developers the non-affiliation clause names; the Terms promise a new
+   date whenever they change. LEGAL_UPDATED above is now the Refund Policy's alone. */
+export const TERMS_UPDATED = 'October 11, 2026';
 // Who runs the site, as the legal pages name it. The owner chose not to name a
 // country or a governing law on the site.
 export const OPERATOR_NAME = 'sudorm';

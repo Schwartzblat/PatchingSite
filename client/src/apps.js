@@ -21,7 +21,7 @@ import {appsHe} from './apps.he.js';
  *
  * `intro`, each feature's `detail` and `faq` are the app page's text. Every
  * claim in them comes from the patcher's own code and docs (the WhatsApp,
- * Moovit, Mako and OkCupid patcher projects), not from the feature's name:
+ * Moovit, Mako, Reshet and OkCupid patcher projects), not from the feature's name:
  * where the code does less than the name suggests, the detail says what it
  * does. Change them when a patch changes.
  *
@@ -212,6 +212,51 @@ export const apps = {
                 q: "What happens when 12+ updates?",
                 a: "The patched 12+ does not update from the Play Store. When a newer patched build is listed "
                     + "here and in the store app, install it over yours.",
+            },
+        ],
+    },
+    reshet: {
+        name: "Reshet 13+",
+        about: "The Channel 13 TV app",
+        package: "com.applicaster.iReshet",
+        category: "EntertainmentApplication",
+        description:
+            "Patched Reshet 13+ for Android, the Channel 13 TV app, without its video ads on demand "
+            + "and live, or its full-screen, banner and web ads.",
+        icon: "/reshet.webp",
+        intro:
+            "Reshet 13+ is Reshet's app for Channel 13: the live channel and full episodes on demand. This "
+            + "build plays them without the app's video ads, and leaves out its full-screen, banner and web ads.",
+        features: [
+            {
+                name: "No Video Ads",
+                detail: "Removes the video ads before a show and in the middle of an episode on demand, and the "
+                    + "ads the app adds to the live channel. The live channel's commercial breaks stay: they show "
+                    + "the channel's own TV commercials, exactly as on TV.",
+            },
+            {
+                name: "No Full-Screen or Banner Ads",
+                detail: "No full-screen ads when the app opens or between screens, no banners, and no ads on the "
+                    + "web pages the app shows inside it.",
+            },
+        ],
+        faq: [
+            {
+                q: "Why are there still commercials on the live channel?",
+                a: "The live channel is the broadcast itself, and its commercial breaks are part of it, so they "
+                    + "play as they air on TV. What the patch removes are the ads the app adds on its own: before "
+                    + "a show, during episodes on demand, and in place of the broadcast's commercials. If the "
+                    + "broadcast's own stream cannot be reached, the app's stream plays instead, with each of its "
+                    + "ads replaced by a black, silent screen of the same length.",
+            },
+            {
+                q: "Does everything else work as usual?",
+                a: "Yes. It is the same app and the same Reshet 13 service; the patch only changes the ads.",
+            },
+            {
+                q: "What happens when Reshet 13+ updates?",
+                a: "The patched Reshet 13+ does not update from the Play Store. When a newer patched build is "
+                    + "listed here and in the store app, install it over yours.",
             },
         ],
     },
