@@ -1,0 +1,88 @@
+/* Shell chrome. Class names are prefixed `layout-` so page CSS cannot collide. */
+
+.layout-shell {
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap);
+}
+
+.layout-main {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.layout-main:focus {
+    outline: none;
+}
+
+/* Keyboard users can jump the nav; the link only shows while focused. */
+.layout-skip {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+.layout-skip:focus {
+    position: fixed;
+    top: var(--pap-gap-sm);
+    inset-inline-start: var(--pap-gap-sm);
+    z-index: 10;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip: auto;
+    padding: 0.55rem 1rem;
+    border-radius: var(--pap-radius-sm);
+    border: 1px solid var(--pap-border-strong);
+    background: var(--pap-card);
+    color: var(--pap-text);
+    text-decoration: none;
+}
+
+.layout-pending {
+    margin: var(--pap-gap-lg) auto;
+    color: var(--pap-muted);
+}
+
+.layout-crash {
+    margin: auto;
+    padding: var(--pap-gap-lg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+    text-align: center;
+    max-width: 32rem;
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-lg);
+    background: var(--pap-card);
+    box-shadow: var(--pap-shadow-sm);
+}
+
+.layout-crash-title {
+    margin: 0;
+    font-size: clamp(1.4rem, 4vw, 1.9rem);
+    color: var(--pap-text);
+}
+
+.layout-crash-text {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+/* .main-button sets align-self: flex-start, which fights the centred card. */
+.layout-crash .main-button {
+    align-self: center;
+}

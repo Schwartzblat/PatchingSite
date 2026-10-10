@@ -1,0 +1,7 @@
+# Everything public may be crawled. /api/ is JSON for the site's own pages and
+# holds nothing a search result should link to.
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://androidmod.site/sitemap.xml

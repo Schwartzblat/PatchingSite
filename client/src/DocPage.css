@@ -1,0 +1,159 @@
+/*
+ * Long-form pages (Terms, Privacy, Refunds, install guide). Namespaced `doc-`.
+ * `.page-panel` (App.css) centres its children; prose reads better
+ * left-aligned at a fixed measure, so the panel is overridden here.
+ */
+.doc-panel {
+    align-items: stretch;
+    gap: var(--pap-gap-lg);
+    padding: clamp(1.25rem, 4vw, 2.75rem);
+}
+
+.doc-header,
+.doc-body {
+    width: 100%;
+    max-width: 72ch;
+    margin: 0 auto;
+}
+
+.doc-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-xs);
+}
+
+.doc-title {
+    margin: 0;
+    font-size: clamp(1.8rem, 5vw, 2.5rem);
+    font-weight: 800;
+    color: var(--pap-text);
+}
+
+.doc-updated {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--pap-faint);
+}
+
+.doc-lead {
+    margin: var(--pap-gap-xs) 0 0;
+    font-size: 1.1rem;
+    color: var(--pap-muted);
+}
+
+.doc-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-lg);
+    line-height: 1.65;
+    color: var(--pap-muted);
+}
+
+.doc-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-sm);
+    /* Fragment links land with the heading clear of the viewport edge. */
+    scroll-margin-top: var(--pap-gap);
+}
+
+.doc-heading {
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--pap-text);
+}
+
+.doc-subheading {
+    margin: var(--pap-gap-xs) 0 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--pap-text);
+}
+
+.doc-body p,
+.doc-body ul,
+.doc-body ol {
+    margin: 0;
+}
+
+.doc-body ul,
+.doc-body ol {
+    padding-inline-start: 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-xs);
+}
+
+.doc-body strong {
+    color: var(--pap-text);
+    font-weight: 600;
+}
+
+.doc-body code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    padding: 0.1rem 0.35rem;
+    border-radius: 6px;
+    background: var(--pap-input-bg);
+    color: var(--pap-text);
+    overflow-wrap: anywhere;
+}
+
+/* Warnings that cost something if skipped (lost chats, a refused install). */
+.doc-callout {
+    padding: var(--pap-gap-sm) var(--pap-gap);
+    border-radius: var(--pap-radius-sm);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    background: var(--pap-warning-bg);
+    color: var(--pap-text);
+}
+
+/* Only the lead-in is amber; menu names further in stay plain bold. */
+.doc-callout > strong:first-child {
+    color: var(--pap-warning);
+}
+
+/* Numbered steps with the number in a badge, for the install guide. */
+/* `.doc-body` in the selector outranks the generic list padding above. */
+.doc-body .doc-steps {
+    list-style: none;
+    counter-reset: doc-step;
+    padding-inline-start: 0;
+}
+
+.doc-steps > li {
+    counter-increment: doc-step;
+    position: relative;
+    padding-inline-start: 2.4rem;
+    min-height: 1.8rem;
+}
+
+.doc-steps > li::before {
+    content: counter(doc-step);
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0.05rem;
+    width: 1.7rem;
+    height: 1.7rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--pap-text);
+    background: var(--pap-fill);
+}
+
+.doc-body .doc-toc {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--pap-gap-xs) var(--pap-gap-sm);
+    padding: 0;
+    list-style: none;
+    font-size: 0.95rem;
+}
+
+.doc-body .store-download {
+    margin-top: var(--pap-gap-xs);
+}

@@ -1,0 +1,226 @@
+/*
+ * Home page only. `html`, `body` and `#root` live in index.css; redefining them
+ * here made two files fight over the page shell.
+ * `.page-panel` is shared with other pages, so nothing page-specific goes on it
+ * (the old `.page-panel div {…}` centred every div any page put inside a panel).
+ */
+.page-panel {
+    width: min(100%, 1100px);
+    background: var(--pap-panel);
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-lg);
+    box-shadow: var(--pap-shadow);
+    color: var(--pap-text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.home-panel {
+    gap: var(--pap-gap);
+    padding: clamp(1.25rem, 3vw, 2.25rem);
+}
+
+.home-header {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap-xs);
+    text-align: center;
+}
+
+.home-title {
+    font-size: clamp(2rem, 6vw, 3rem);
+    font-weight: 800;
+    margin: 0;
+    /* The headline is a sentence now, not a one-word brand. Without a measure it
+       runs the full 1100px panel at 800 weight and wraps wherever it happens to
+       land; .home-header centres it, so no auto margin is needed. */
+    max-width: 26ch;
+    color: var(--pap-text);
+}
+
+.home-tagline {
+    margin: 0;
+    max-width: 44ch;
+    color: var(--pap-muted);
+}
+
+.home-pricing {
+    margin: 0;
+    max-width: 60ch;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+.home-pricing strong {
+    color: var(--pap-text);
+}
+
+.home-grid {
+    display: grid;
+    /* `min(100%, …)` keeps the track from being wider than the panel itself,
+       which is what used to force a horizontal scrollbar on phones. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    /* Each card is as tall as its own list. Stretching every card in a row to
+       the tallest one (WhatsApp's fifteen features) pushed the shorter cards'
+       View Patches button below the fold at 1366x900. */
+    align-items: start;
+    gap: var(--pap-gap);
+    width: 100%;
+}
+
+.home-card {
+    position: relative;
+    min-height: 140px;
+    border-radius: var(--pap-radius-md);
+    border: 1px solid var(--pap-border);
+    background: var(--pap-card);
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    transition: transform 180ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.home-card:hover,
+.home-card:focus-within {
+    transform: translateY(-4px);
+    border-color: rgba(109, 213, 250, 0.4);
+    box-shadow: 0 25px 45px rgba(0, 0, 0, 0.55);
+}
+
+.home-card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+}
+
+.home-card-icon {
+    width: 72px;
+    height: 72px;
+    flex: none;
+    object-fit: contain;
+    border-radius: var(--pap-radius-sm);
+    filter: drop-shadow(0 12px 25px rgba(0, 0, 0, 0.65));
+}
+
+.home-card-name {
+    font-size: 1.5rem;
+    font-weight: 800;
+    margin: 0;
+    color: var(--pap-text);
+}
+
+.home-features {
+    list-style: disc;
+    padding-inline-start: 1.5rem;
+    margin: 0;
+    flex: 1;
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--pap-muted);
+}
+
+.home-feature {
+    margin-bottom: 0.25rem;
+}
+
+.home-card-action {
+    /* .main-button is `align-self: flex-start`; the card CTA sits under the list. */
+    margin-top: auto;
+}
+
+/* Only where the card name alone means nothing abroad ("12+" is Mako). */
+.home-card-about {
+    margin: 0.15rem 0 0;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+/* The Android store app offer, under the grid. */
+.store-download {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--pap-gap);
+    padding: 1.25rem;
+    border-radius: var(--pap-radius-md);
+    border: 1px solid rgba(109, 213, 250, 0.25);
+    background: var(--pap-accent-soft);
+}
+
+.store-download-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-xs);
+    flex: 1 1 280px;
+}
+
+.store-download-title {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: var(--pap-text);
+}
+
+.store-download-body,
+.store-download-meta {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.store-download-meta {
+    font-size: 0.9rem;
+    color: var(--pap-faint);
+}
+
+.store-download-steps {
+    margin: var(--pap-gap-xs) 0;
+    padding-inline-start: 1.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+.store-download-steps strong {
+    color: var(--pap-text);
+}
+
+/* The normal link blue is 3.97:1 on this tinted box; see --pap-accent-light. */
+.store-download-guide {
+    color: var(--pap-accent-light);
+    font-weight: 600;
+}
+
+.store-download-action {
+    align-self: center;
+}
+
+@media (max-width: 640px) {
+    .store-download {
+        padding: 1rem;
+    }
+
+    .store-download-action {
+        align-self: stretch;
+    }
+
+    .home-card {
+        padding: 1rem;
+    }
+
+    .home-card-icon {
+        width: 56px;
+        height: 56px;
+    }
+
+    .home-features {
+        font-size: 1rem;
+    }
+}

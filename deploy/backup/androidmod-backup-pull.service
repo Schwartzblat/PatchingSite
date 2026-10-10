@@ -1,0 +1,17 @@
+# ~/.config/systemd/user/androidmod-backup-pull.service - on the dev machine.
+# Copies the host's database snapshots here (deploy/backup/pull-backups.sh). A user
+# unit, so it uses the desktop session's ssh-agent and only pulls while you are
+# logged in. Install from the checkout, with its path filled in:
+#
+#   sed "s|@REPO@|$PWD|" deploy/backup/androidmod-backup-pull.service > ~/.config/systemd/user/androidmod-backup-pull.service
+#   cp deploy/backup/androidmod-backup-pull.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now androidmod-backup-pull.timer
+
+[Unit]
+Description=Pull androidmod.site database backups
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@REPO@/deploy/backup/pull-backups.sh

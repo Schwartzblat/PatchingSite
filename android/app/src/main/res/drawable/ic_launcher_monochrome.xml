@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Download arrow over a tray: "get builds onto this device", which is the
+         whole app. Sits inside the 72dp safe zone (18..90) so no launcher mask
+         can clip it. -->
+    <path android:fillColor="#FF000000"
+        android:pathData="M48,23L60,23L60,49L74,49L54,71L34,49L48,49Z" />
+    <path android:fillColor="#FF000000"
+        android:pathData="M34,77h40a4,4 0 0 1 0,8h-40a4,4 0 0 1 0,-8z" />
+</vector>

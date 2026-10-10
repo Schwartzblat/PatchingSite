@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Without this the system uninstaller starts and exits without drawing its
+         dialog, logging only "Uid ... does not have
+         android.permission.REQUEST_DELETE_PACKAGES". A normal permission: granted
+         at install, no runtime prompt. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Lets the store update ITSELF without the "Do you want to update this app?"
+         dialog on Android 12+. A normal permission that silences nothing by itself:
+         a session must also ask for USER_ACTION_NOT_REQUIRED, and SessionInstaller
+         asks only when the package being installed is this app. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- The catalogue is server-driven, so the set of packages to inspect is not
+         known at build time. This app is self-distributed, never shipped through
+         Play, so the broad permission is available to it.
+         QueryAllPackagesPermission is suppressed for that reason: it enforces Play's
+         policy, which does not apply here. The narrower alternative, a <queries>
+         for MAIN/LAUNCHER intents, would hide any catalogue app without a launcher
+         icon, and was turned down in favour of keeping this. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- No backups and no device-to-device transfer; res/xml/data_extraction_rules.xml
+         says why. allowBackup="false" stays for the platform versions that read it,
+         but from Android 12 it no longer stops a device transfer, which is what
+         dataExtractionRules is for. targetApi because that attribute is 31+ and
+         minSdk is 30; Android 11 reads fullBackupContent instead. -->
+    <application
+        android:name=".StoreApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.PatchedStore"
+        tools:targetApi="31">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".download.DownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".install.InstallReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="site.androidmod.store.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Not exported: MY_PACKAGE_REPLACED comes from the system, which delivers
+             to unexported receivers, and no other app has any business sending it. -->
+        <receiver
+            android:name=".update.UpdatedReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

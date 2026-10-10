@@ -1,0 +1,45 @@
+/* Class names are prefixed `notfound-` so page CSS cannot collide. */
+
+.notfound {
+    margin: auto;
+    width: min(100%, 34rem);
+    padding: clamp(1.5rem, 5vw, 2.5rem);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+    text-align: center;
+    background: var(--pap-panel);
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-lg);
+    box-shadow: var(--pap-shadow);
+}
+
+.notfound-code {
+    margin: 0;
+    font-size: clamp(3rem, 14vw, 4.5rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.05em;
+    background: var(--pap-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.notfound-title {
+    margin: 0;
+    font-size: clamp(1.3rem, 4vw, 1.8rem);
+    color: var(--pap-text);
+}
+
+.notfound-text {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+/* .main-button sets align-self: flex-start, which fights the centred card. */
+.notfound-home {
+    align-self: center;
+    margin-top: var(--pap-gap-xs);
+}

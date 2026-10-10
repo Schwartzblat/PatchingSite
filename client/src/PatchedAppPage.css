@@ -1,0 +1,386 @@
+/*
+ * App detail page. Everything is namespaced `pap-` so nothing here reaches the
+ * home grid or another agent's page. `html`, `body` and `#root` belong to
+ * index.css and are no longer redefined here.
+ */
+.pap-panel {
+    gap: var(--pap-gap);
+    padding: clamp(1.25rem, 3vw, 2.25rem);
+    align-items: stretch;
+}
+
+.pap-header {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: var(--pap-gap-sm) var(--pap-gap);
+}
+
+.pap-icon {
+    width: 72px;
+    height: 72px;
+    object-fit: contain;
+    border-radius: var(--pap-radius-sm);
+    filter: drop-shadow(0 12px 25px rgba(0, 0, 0, 0.65));
+}
+
+.pap-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.pap-package {
+    letter-spacing: 0.15em;
+    font-size: 0.85rem;
+    color: var(--pap-muted);
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.pap-name {
+    font-size: clamp(1.6rem, 2vw, 2.4rem);
+    font-weight: 700;
+    margin: 0;
+    color: var(--pap-text);
+}
+
+.pap-about {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.pap-install-hint {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+.pap-note {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--pap-muted);
+}
+
+.pap-status-bar {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pap-gap-sm);
+}
+
+.pap-pill {
+    padding: 0.4rem 1.2rem;
+    border-radius: 999px;
+    background: rgba(169, 227, 248, 0.12);
+    border: 1px solid rgba(166, 235, 255, 0.2);
+    color: var(--pap-accent-light);
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.pap-pill--error {
+    background: var(--pap-danger-bg);
+    border-color: rgba(255, 107, 107, 0.4);
+    color: var(--pap-danger);
+}
+
+.pap-notices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-sm);
+}
+
+/* The live region stays mounted even while empty: a region that was
+   display:none when it gained content is not reliably announced. */
+.pap-notices:empty {
+    display: none;
+}
+
+.pap-job-alert {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--pap-gap-sm);
+    margin: 0;
+}
+
+.pap-dismiss {
+    flex: none;
+    border: 1px solid var(--pap-border-strong);
+    background: transparent;
+    color: inherit;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.7rem;
+    border-radius: 999px;
+}
+
+.pap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: var(--pap-gap);
+    width: 100%;
+}
+
+.pap-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-height: 140px;
+    padding: 1.25rem;
+    border-radius: var(--pap-radius-md);
+    border: 1px solid var(--pap-border);
+    background: var(--pap-card);
+}
+
+.pap-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--pap-gap-sm);
+}
+
+.pap-version {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--pap-text);
+    overflow-wrap: anywhere;
+}
+
+/* Was `position: absolute` inside a card that never established a containing
+   block, so it only landed correctly by accident. */
+.pap-type {
+    flex: none;
+    text-transform: uppercase;
+    font-weight: 600;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    color: var(--pap-success);
+    border: 1px solid var(--pap-success);
+    border-radius: 999px;
+    padding: 0.15rem 0.7rem;
+}
+
+.pap-details {
+    margin: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    font-size: 0.9rem;
+    color: var(--pap-muted);
+}
+
+.pap-detail {
+    display: flex;
+    gap: var(--pap-gap-xs);
+}
+
+.pap-detail dt::after {
+    content: ':';
+}
+
+.pap-detail dd {
+    margin: 0;
+    color: var(--pap-text);
+}
+
+.pap-progress-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-xs);
+}
+
+.pap-progress {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--pap-input-bg);
+    border: 1px solid var(--pap-border);
+    overflow: hidden;
+}
+
+.pap-progress-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: var(--pap-gradient);
+    transition: width 250ms ease;
+}
+
+/* Queued: the server has no real percentage yet, so the bar sweeps. */
+.pap-progress-fill--pending {
+    width: 35%;
+    animation: pap-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes pap-sweep {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(285%);
+    }
+}
+
+.pap-progress-label {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--pap-muted);
+}
+
+.pap-progress-percent {
+    color: var(--pap-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.pap-download {
+    align-self: stretch;
+}
+
+.pap-message {
+    grid-column: 1 / -1;
+    border-radius: var(--pap-radius-md);
+    border: 1px dashed var(--pap-border);
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--pap-muted);
+}
+
+.pap-message--error {
+    border-color: rgba(255, 107, 107, 0.5);
+    color: var(--pap-danger);
+}
+
+.pap-skeleton {
+    overflow: hidden;
+    justify-content: flex-start;
+}
+
+.pap-skeleton-line {
+    display: block;
+    width: 80%;
+    height: 16px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.pap-skeleton-line--title {
+    width: 65%;
+    height: 20px;
+}
+
+.pap-skeleton-line--meta {
+    width: 40%;
+}
+
+.pap-skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transform: translateX(-100%);
+    animation: pap-shimmer 1.6s infinite;
+}
+
+@keyframes pap-shimmer {
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+.pap-missing {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap);
+    text-align: center;
+    padding: var(--pap-gap-lg) 0;
+}
+
+.pap-missing-title {
+    margin: 0;
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+}
+
+.pap-missing-text {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.pap-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--pap-input-bg);
+    border-radius: var(--pap-radius-sm);
+    padding: 0.1rem 0.4rem;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+    .pap-icon {
+        width: 56px;
+        height: 56px;
+    }
+
+    .pap-card {
+        padding: 1rem;
+    }
+
+    .pap-job-alert {
+        align-items: flex-start;
+    }
+}
+
+/* What the build is, for a visitor who arrived from a search result. */
+.pap-intro {
+    margin: 0;
+    max-width: 72ch;
+    font-size: 1.05rem;
+    line-height: 1.6;
+    color: var(--pap-muted);
+}
+
+/* "What the patched X changes": each patch with a sentence on what it does. */
+.pap-section {
+    width: 100%;
+    max-width: 72ch;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap);
+}
+
+.pap-section-title {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--pap-text);
+}
+
+.pap-patches {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-sm);
+    line-height: 1.6;
+}
+
+.pap-patch {
+    padding-inline-start: var(--pap-gap-sm);
+    border-inline-start: 2px solid var(--pap-accent-soft);
+}
+
+.pap-patch-name {
+    font-weight: 700;
+    color: var(--pap-text);
+}
+
+.pap-patch-detail {
+    margin: 0;
+    color: var(--pap-muted);
+}

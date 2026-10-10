@@ -1,0 +1,21 @@
+# Runtime dependencies, pinned to what the deployed venv runs.
+# Regenerate with: .venv/bin/python -m pip freeze
+fastapi==0.141.1
+starlette==1.6.0
+uvicorn==0.53.0
+pydantic==2.13.5
+# database.RegisterRequest uses pydantic.EmailStr
+email-validator==2.3.0
+# is_device_allowed parses a form-encoded body
+python-multipart==0.0.32
+PyJWT==2.14.0
+stripe==15.6.1
+python-dotenv==1.2.3
+argon2-cffi==25.1.0
+
+# stitch is NOT on PyPI. It is a local checkout installed in editable mode:
+#     git clone <internal stitch repo> /path/to/Stitch
+#     pip install -e /path/to/Stitch
+# 1.4.0 is the minimum: it replaced uber-apk-signer with the fastsigner binary
+# utils/apps_utils.py signs with.
+# It pulls in androguard, pyaxml and PyYAML itself, so they are not listed here.

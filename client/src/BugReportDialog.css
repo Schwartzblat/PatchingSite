@@ -1,0 +1,128 @@
+/*
+ * The bug report modal. Field styling (.authField, .authInput, hints, errors)
+ * is shared with the auth forms via AuthForm.css; only the dialog shell and
+ * its layout live here. Namespaced `bug-dialog-`.
+ */
+.bug-dialog {
+    width: min(560px, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    padding: 0;
+    overflow: auto;
+    color: var(--pap-text);
+    /* The top layer takes it out of the footer's box, not its inheritance:
+       without this it inherits the footer's centred text. */
+    text-align: start;
+    /* The panel gradient is slightly translucent; the solid base keeps the
+       page from showing through a modal. */
+    background: var(--pap-panel), var(--pap-bg);
+    border: 1px solid var(--pap-border-strong);
+    border-radius: var(--pap-radius-lg);
+    box-shadow: var(--pap-shadow);
+}
+
+.bug-dialog::backdrop {
+    background: rgba(2, 3, 8, 0.72);
+}
+
+.bug-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--pap-gap-sm);
+    padding: var(--pap-gap) var(--pap-gap) 0;
+}
+
+.bug-dialog-title {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+
+.bug-dialog-close {
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 1px solid var(--pap-border-strong);
+    background: var(--pap-input-bg);
+    font-size: 1.35rem;
+    line-height: 1;
+    color: var(--pap-muted);
+}
+
+.bug-dialog-close:hover {
+    color: var(--pap-text);
+    background: var(--pap-card-hover);
+}
+
+.bug-dialog-body {
+    display: grid;
+    gap: var(--pap-gap-sm);
+    padding: var(--pap-gap);
+}
+
+.bug-dialog-text,
+.bug-dialog-context {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.bug-dialog-context {
+    font-size: 0.85rem;
+    color: var(--pap-faint);
+    overflow-wrap: anywhere;
+}
+
+.bug-dialog-message {
+    min-height: 8rem;
+    resize: vertical;
+    line-height: 1.45;
+}
+
+.bug-dialog-hint {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--pap-gap-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.bug-dialog-status {
+    margin: 0;
+}
+
+.bug-dialog-status:focus-visible {
+    outline-offset: 0;
+}
+
+.bug-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--pap-gap-sm);
+    margin-top: var(--pap-gap-xs);
+}
+
+.bug-dialog-actions .main-button {
+    align-self: auto;
+}
+
+.bug-dialog-secondary {
+    padding: 0.55rem 1.3rem;
+    border-radius: 999px;
+    border: 1px solid var(--pap-border-strong);
+    background: var(--pap-input-bg);
+    font-weight: 600;
+    font-size: 1.05rem;
+}
+
+.bug-dialog-secondary:hover {
+    background: var(--pap-card-hover);
+}
+
+@media (max-width: 420px) {
+    .bug-dialog-actions > * {
+        flex: 1 1 auto;
+    }
+}

@@ -1,0 +1,239 @@
+/*
+ * Single source of truth for theme tokens.
+ * The site is deliberately dark-only: `color-scheme: dark` makes native
+ * controls (inputs, scrollbars, date pickers) render dark to match. The Vite
+ * starter's `prefers-color-scheme: light` block used to live here and made the
+ * auth pages dark-on-dark whenever the OS was set to light.
+ */
+:root {
+    color-scheme: dark;
+
+    /* surfaces */
+    --pap-bg: #05060a;
+    --pap-panel: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(3, 7, 18, 0.92));
+    --pap-card: rgba(9, 13, 24, 0.85);
+    --pap-card-hover: rgba(14, 20, 34, 0.92);
+    --pap-input-bg: rgba(255, 255, 255, 0.06);
+
+    /* lines */
+    --pap-border: rgba(255, 255, 255, 0.08);
+    --pap-border-strong: rgba(255, 255, 255, 0.14);
+    --pap-focus-ring: rgba(113, 164, 255, 0.45);
+
+    /* text
+       Ratios below are WCAG contrast against the lightest surface each colour
+       sits on, which is the accent-tinted .store-download box. --pap-faint was
+       0.38 alpha, 3.07-3.40:1 everywhere, under the 4.5:1 body text needs. */
+    --pap-text: #f4f6ff;
+    --pap-muted: rgba(244, 246, 255, 0.62); /* 5.60:1 */
+    --pap-faint: rgba(244, 246, 255, 0.55); /* 4.76:1 */
+
+    /* accents */
+    --pap-accent: #007aa4;
+    --pap-accent-strong: #1791fc;
+    /* Links and small accent text on the tinted box, where --pap-accent-strong
+       falls to 3.97:1. 5.99:1 there. */
+    --pap-accent-light: #68b7ff;
+    --pap-accent-soft: rgba(109, 213, 250, 0.15);
+    /* Decorative only: underlines, progress fills, the 404 numerals. */
+    --pap-gradient: linear-gradient(120deg, var(--pap-accent), var(--pap-accent-strong));
+    /* Anything with text on it. White on #1791fc is 3.0:1, so the fill keeps
+       the gradient's hues but darkens both ends until --pap-text reaches 4.6:1
+       on each (#0078a2 4.63:1, #0370d0 4.60:1). The Android client solved the
+       same problem with near-black text instead (PapOnAccent), which fails on
+       the #007aa4 end here. */
+    --pap-fill: linear-gradient(120deg, #0078a2, #0370d0);
+
+    /* status */
+    --pap-danger: #ff6b6b;
+    --pap-danger-bg: rgba(255, 107, 107, 0.12);
+    --pap-success: #4ade80;
+    --pap-success-bg: rgba(74, 222, 128, 0.12);
+    --pap-warning: #fbbf24;
+    --pap-warning-bg: rgba(251, 191, 36, 0.12);
+
+    /* shape */
+    --pap-radius-lg: 26px;
+    --pap-radius-md: 18px;
+    --pap-radius-sm: 10px;
+    --pap-shadow: 0 35px 65px rgba(0, 0, 0, 0.55);
+    --pap-shadow-sm: 0 12px 25px rgba(0, 0, 0, 0.35);
+
+    /* rhythm */
+    --pap-gap-xs: 0.4rem;
+    --pap-gap-sm: 0.75rem;
+    --pap-gap: 1.25rem;
+    --pap-gap-lg: 2rem;
+
+    font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    color: var(--pap-text);
+    background-color: var(--pap-bg);
+
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    height: 100%;
+}
+
+/*
+ * The old rule was `display: flex; place-items: center`, which vertically
+ * centred every page and left short pages floating in the middle of the
+ * viewport. Pages now flow from the top and scroll normally.
+ */
+body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100%;
+    color: var(--pap-text);
+    background: radial-gradient(circle at top, var(--pap-accent-soft), transparent 60%),
+    var(--pap-bg);
+}
+
+#root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: clamp(1rem, 3vw, 2.5rem) clamp(0.75rem, 3vw, 2rem);
+}
+
+a {
+    font-weight: 500;
+    color: var(--pap-accent-strong);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Inherit typography rather than the UA's, but leave sizing to components.
+   The previous global `button { width: 100%; height: 100% }` in App.css
+   stretched every button on the site. */
+button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--pap-accent-strong);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Shared primary action, used on the home grid and app pages. */
+.main-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--pap-gap-xs);
+    align-self: flex-start;
+    border: none;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--pap-text);
+    padding: 0.55rem 1.3rem;
+    border-radius: 999px;
+    background: var(--pap-fill);
+    box-shadow: 0 12px 25px rgba(23, 145, 252, 0.28);
+    transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.main-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 30px rgba(23, 145, 252, 0.38);
+    text-decoration: none;
+}
+
+.main-button:disabled {
+    background: var(--pap-input-bg);
+    box-shadow: none;
+    transform: none;
+}
+
+/* Shared inline status banners (replaces alert()/confirm() usage). */
+.alert {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    border-radius: var(--pap-radius-sm);
+    border: 1px solid transparent;
+    font-size: 0.95rem;
+}
+
+.alert-error {
+    color: var(--pap-danger);
+    background: var(--pap-danger-bg);
+    border-color: rgba(255, 107, 107, 0.35);
+}
+
+.alert-success {
+    color: var(--pap-success);
+    background: var(--pap-success-bg);
+    border-color: rgba(74, 222, 128, 0.35);
+}
+
+.alert-info {
+    color: var(--pap-text);
+    background: var(--pap-input-bg);
+    border-color: var(--pap-border-strong);
+}
+
+/* The accent blue drops to 4.38:1 on the green success tint. A link in a
+   banner takes the banner's own (passing) colour and is told apart by its
+   underline instead. */
+.alert a {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* LegalConsent.jsx: the agreement line under Register and Subscribe. */
+.legal-consent {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: var(--pap-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

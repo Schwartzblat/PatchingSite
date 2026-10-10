@@ -1,0 +1,63 @@
+# /etc/systemd/system/patchingsite.service
+#
+# A template: @USER@ and @REPO@ are filled in at install. Run from the checkout,
+# as the user the service should run as:
+#
+#   sed -e "s|@USER@|$USER|g" -e "s|@REPO@|$PWD|g" deploy/patchingsite.service |
+#       sudo tee /etc/systemd/system/patchingsite.service >/dev/null
+#   sudo systemctl daemon-reload && sudo systemctl enable --now patchingsite
+
+[Unit]
+Description=PatchingSite API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@USER@
+Group=@USER@
+WorkingDirectory=@REPO@/server
+
+# config.py loads ../.env itself, so this is belt-and-braces. ENVIRONMENT now
+# defaults to production, but naming it here makes the intent visible in
+# `systemctl cat`.
+Environment=ENVIRONMENT=production
+Environment=PYTHONUNBUFFERED=1
+
+# ONE worker, deliberately. The download job registry and the rate limiter are
+# both in-process; a second worker would give each its own copy, so job ids
+# would 404 half the time and rate limits would be N times looser. Scaling out
+# means moving both to Redis first.
+ExecStartPre=@REPO@/server/.venv/bin/python manage.py doctor
+ExecStart=@REPO@/server/.venv/bin/uvicorn \
+    main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1
+
+Restart=always
+RestartSec=5
+
+# Shutdown drains in-flight signings. SIGNING_TIMEOUT_SECONDS defaults to 1200,
+# so give systemd more than that before it resorts to SIGKILL.
+TimeoutStopSec=1320
+KillSignal=SIGTERM
+
+# Sandboxing. PrivateTmp matters here: signing copies 100MB+ APKs through
+# /tmp, and this keeps them off the shared one.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/server_data
+ReadOnlyPaths=/opt/patched
+
+# Everything the service creates - the database, app.log, cached signed APKs -
+# is private to its user. The default 0022 left users.db and the logs readable
+# by every account on the host. (The live host gets this from a drop-in,
+# patchingsite.service.d/umask.conf, installed by deploy/launch-setup.sh.)
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,53 @@
+/* Class names are prefixed `site-footer-` so page CSS cannot collide. */
+
+.site-footer {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap-xs);
+    padding: var(--pap-gap) var(--pap-gap-sm) var(--pap-gap-xs);
+    border-top: 1px solid var(--pap-border);
+    text-align: center;
+}
+
+.site-footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.2rem 1.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* Links and the bug-report button look identical; the button just opens a
+   dialog instead of navigating. The vertical padding keeps each target at
+   least 24px tall on touch screens. */
+.site-footer-link {
+    display: inline-block;
+    padding: 0.3rem 0;
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--pap-muted);
+}
+
+.site-footer-link:hover {
+    color: var(--pap-text);
+    text-decoration: underline;
+}
+
+.site-footer-button {
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 0.92rem;
+    font-weight: 500;
+}
+
+.site-footer-note {
+    margin: 0;
+    max-width: 60ch;
+    font-size: 0.8rem;
+    color: var(--pap-faint);
+}

@@ -1,0 +1,7 @@
+/* client/src/LoginPage.css
+   Only the bits that differ from the shared auth card live here; everything
+   else comes from AuthForm.css. */
+
+.authCard.loginCard {
+    width: min(420px, 100%);
+}

@@ -1,0 +1,111 @@
+/* Email verification: the site banner (VerifyEmailBanner.jsx), the resend
+   button and its answer (ResendVerification.jsx), and the bits of
+   /verify-email that AuthForm.css does not already cover. Prefixed `verify-`. */
+
+/* Amber, not the red of an error: nothing is broken, one step is left. The
+   text stays --pap-text; amber text on the amber tint would be the only thing
+   carrying the message. */
+.verify-banner {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pap-gap-xs) var(--pap-gap-sm);
+    padding: 0.7rem clamp(0.75rem, 2vw, 1.15rem);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    border-radius: var(--pap-radius-md);
+    background: var(--pap-warning-bg);
+    color: var(--pap-text);
+    font-size: 0.95rem;
+}
+
+.verify-banner--done {
+    border-color: rgba(74, 222, 128, 0.35);
+    background: var(--pap-success-bg);
+    color: var(--pap-success);
+}
+
+.verify-banner-text {
+    margin: 0;
+    flex: 1 1 20rem;
+    min-width: 0;
+    /* A long address must wrap on a 320px screen rather than widen the page. */
+    overflow-wrap: anywhere;
+}
+
+.verify-banner-text strong {
+    font-weight: 600;
+}
+
+.verify-banner-why {
+    color: var(--pap-muted);
+}
+
+/* The answer to a resend takes its own line under the text and the button. */
+.verify-banner .verify-resend-result {
+    flex: 1 0 100%;
+}
+
+/* A secondary pill like the header's, so it reads as an action without
+   competing with the page's own primary button. */
+.verify-resend-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    padding: 0.4rem 0.95rem;
+    border-radius: 999px;
+    border: 1px solid var(--pap-border-strong);
+    background: var(--pap-card-hover);
+    color: var(--pap-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.verify-resend-button:hover:not(:disabled) {
+    border-color: var(--pap-accent-strong);
+    box-shadow: var(--pap-shadow-sm);
+}
+
+.verify-resend-button:focus-visible {
+    border-radius: 999px;
+}
+
+.verify-resend-result {
+    margin: 0;
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+}
+
+.verify-resend-result--success {
+    color: var(--pap-success);
+}
+
+.verify-resend-result--error {
+    color: var(--pap-danger);
+}
+
+/* Same treatment as .alert a: the result's own colour, told apart by the underline. */
+.verify-resend-result a {
+    color: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* /verify-email: the address in "Send a new link to ...". */
+.verify-address {
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+    .verify-banner {
+        align-items: flex-start;
+    }
+
+    .verify-banner-text {
+        flex-basis: 100%;
+    }
+}

@@ -1,0 +1,16 @@
+/* client/src/RegisterPage.css
+   Only the bits that differ from the shared auth card live here; everything
+   else comes from AuthForm.css. The register form carries four fields, so it
+   gets a slightly wider card and a tighter rhythm between them. */
+
+.authCard.registerCard {
+    width: min(480px, 100%);
+}
+
+.registerCard .authForm {
+    gap: var(--pap-gap-xs);
+}
+
+.registerCard .authField + .authField {
+    margin-top: var(--pap-gap-xs);
+}

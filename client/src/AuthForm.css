@@ -1,0 +1,227 @@
+/* client/src/AuthForm.css
+   Shared presentation for the auth pages (login, register, password reset);
+   the bug report dialog reuses the field classes. Dark-only: every colour
+   comes from the --pap-* tokens in index.css. */
+
+.authPage {
+    display: grid;
+    place-items: start center;
+    width: 100%;
+    /* Fills the shell so BareLayout's footer sits at the bottom of the screen. */
+    flex: 1;
+    padding: var(--pap-gap) 0;
+}
+
+.authCard {
+    display: grid;
+    gap: var(--pap-gap-sm);
+    width: min(440px, 100%);
+    padding: clamp(1.1rem, 4vw, 1.9rem);
+
+    background: var(--pap-panel);
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-lg);
+    box-shadow: var(--pap-shadow);
+}
+
+.authCardTop {
+    display: flex;
+}
+
+.authBackHome {
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+.authBackHome:hover {
+    color: var(--pap-text);
+}
+
+.authHeader {
+    display: grid;
+    gap: var(--pap-gap-xs);
+}
+
+.authTitle {
+    margin: 0;
+    font-size: clamp(1.35rem, 5vw, 1.6rem);
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.authSubtitle {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+.authForm {
+    display: grid;
+    gap: var(--pap-gap-sm);
+}
+
+.authField {
+    display: grid;
+    gap: var(--pap-gap-xs);
+    min-width: 0;
+}
+
+.authLabel {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--pap-text);
+}
+
+/* The colour is explicit on purpose: this used to be `color: inherit`, which
+   picked up the old light-mode :root colour and rendered dark slate on the
+   dark card whenever the OS theme was light. */
+.authInput {
+    width: 100%;
+    min-width: 0;
+    padding: 0.6rem 0.75rem;
+    font: inherit;
+    font-size: 1rem;
+
+    color: var(--pap-text);
+    background: var(--pap-input-bg);
+    border: 1px solid var(--pap-border-strong);
+    border-radius: var(--pap-radius-sm);
+}
+
+.authInput::placeholder {
+    color: var(--pap-muted);
+    opacity: 1;
+}
+
+.authInput:hover {
+    border-color: var(--pap-focus-ring);
+}
+
+.authInput:focus-visible,
+.authToggle:focus-visible {
+    border-color: var(--pap-accent-strong);
+    border-radius: var(--pap-radius-sm);
+}
+
+.authInput[aria-invalid="true"] {
+    border-color: var(--pap-danger);
+}
+
+.authPasswordRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--pap-gap-xs);
+    align-items: stretch;
+}
+
+.authToggle {
+    padding: 0.6rem 0.8rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--pap-muted);
+    background: var(--pap-input-bg);
+    border: 1px solid var(--pap-border-strong);
+    border-radius: var(--pap-radius-sm);
+}
+
+.authToggle:hover {
+    color: var(--pap-text);
+    background: var(--pap-card-hover);
+}
+
+.authToggle[aria-pressed="true"] {
+    color: var(--pap-text);
+    border-color: var(--pap-accent-strong);
+}
+
+.authFieldHint {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--pap-muted);
+}
+
+.authFieldError {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--pap-danger);
+}
+
+.authStatus {
+    margin: 0;
+}
+
+.authStatus:focus-visible {
+    outline-offset: 0;
+}
+
+/* .main-button is `align-self: flex-start`; the auth CTA spans the card. */
+.authSubmit {
+    align-self: stretch;
+    width: 100%;
+    margin-top: var(--pap-gap-xs);
+}
+
+/* The global focus ring squares corners off with `border-radius: 4px`; keep
+   the pill and the rounded inputs intact. */
+.authSubmit:focus-visible {
+    border-radius: 999px;
+}
+
+.authFooter {
+    margin: 0;
+    font-size: 0.95rem;
+    text-align: center;
+    color: var(--pap-muted);
+}
+
+.authFooterLink {
+    font-weight: 600;
+}
+
+/* "Forgot password?" under the password field. */
+.authInlineLinks {
+    margin: calc(-1 * var(--pap-gap-xs)) 0 0;
+    display: flex;
+    justify-content: flex-end;
+    font-size: 0.9rem;
+}
+
+.authNote {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+}
+
+.authStrong {
+    color: var(--pap-text);
+    font-weight: 600;
+}
+
+/* An action phrased as a link inside running text ("send it again"). */
+.authLinkButton {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--pap-accent-strong);
+}
+
+.authLinkButton:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 420px) {
+    .authPage {
+        padding: 0;
+    }
+
+    .authCard {
+        border-radius: var(--pap-radius-md);
+        box-shadow: var(--pap-shadow-sm);
+    }
+
+    .authToggle {
+        padding: 0.6rem 0.6rem;
+    }
+}

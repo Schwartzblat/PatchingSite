@@ -1,0 +1,35 @@
+# Local development overrides.
+#
+#     cp .dev_env.example .dev_env      # then fill in the values
+#
+# Anything set here overrides the matching line in .env, so .env can keep the
+# live credentials untouched while this machine talks to Stripe's test mode.
+# .dev_env is gitignored; this example file is not, and must never hold a real
+# key. Only the settings you actually want to change need to be present - every
+# other setting falls through to .env.
+#
+#     process environment  >  .dev_env  >  .env
+#
+# `python manage.py doctor` prints which mode the keys resolve to.
+
+# --- Stripe test mode --------------------------------------------------------
+
+# A test-mode key. A full secret key (sk_test_...) is simplest. A restricted key
+# (rk_test_...) works only if it can WRITE Customers, Checkout Sessions, Billing
+# Portal Sessions and Subscriptions, and READ Products and Prices.
+STRIPE_API_KEY="sk_test_REPLACE_ME"
+
+# A test-mode product that has a default price set, and whose default price is
+# recurring. create-checkout runs in subscription mode and always charges the
+# product's default price - never a price id the client sends - so a product
+# without one makes every checkout answer 503.
+STRIPE_PRODUCT_ID="prod_REPLACE_ME"
+
+# --- Optional ----------------------------------------------------------------
+
+# Where Stripe Checkout sends the browser when it finishes. The Android client
+# does not read this: it notices checkout ending by returning to the foreground.
+# But the Custom Tab still navigates here, and "localhost" on a phone means the
+# phone, so leaving the default shows a dead page after a successful payment.
+# Point it at something the phone can actually reach.
+# FRONTEND_URL="http://10.0.0.20:5173"

@@ -1,0 +1,34 @@
+/* The question/answer block shared by the home page and the app pages. */
+.faq {
+    width: 100%;
+    max-width: 72ch;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap);
+    line-height: 1.6;
+}
+
+.faq-title {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--pap-text);
+}
+
+.faq-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.faq-q {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--pap-text);
+}
+
+.faq-a {
+    margin: 0;
+    color: var(--pap-muted);
+}

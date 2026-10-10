@@ -1,0 +1,582 @@
+/*
+ * Subscription + post-checkout pages. Everything here is namespaced to those
+ * two pages; shared pieces (.alert*, .main-button, focus ring, tokens) live in
+ * index.css and are reused rather than restated. Dark-only by design.
+ */
+
+.subscription-page {
+    width: 100%;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: var(--pap-gap-lg) var(--pap-gap);
+    text-align: center;
+}
+
+.subscription-page--narrow {
+    max-width: 560px;
+}
+
+.subscription-title {
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    margin: 0 0 var(--pap-gap-xs);
+    color: var(--pap-text);
+}
+
+.subscription-subtitle {
+    margin: 0 0 var(--pap-gap-lg);
+    color: var(--pap-muted);
+}
+
+/* Banners: the global .alert classes handle colour, this only stacks them. */
+.subscription-alerts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-sm);
+    text-align: left;
+    margin-bottom: var(--pap-gap);
+}
+
+.subscription-alerts:empty {
+    margin-bottom: 0;
+}
+
+.subscription-alerts .alert {
+    display: flex;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+    margin: 0;
+}
+
+.subscription-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--pap-gap-sm);
+    padding: var(--pap-gap-lg) 0;
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.subscription-spinner {
+    display: inline-block;
+    flex: none;
+    width: 0.95em;
+    height: 0.95em;
+    border: 2px solid var(--pap-border-strong);
+    border-top-color: var(--pap-accent-strong);
+    border-radius: 50%;
+    animation: subscription-spin 700ms linear infinite;
+}
+
+@keyframes subscription-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Current subscription panel */
+.subscription-panel {
+    background: var(--pap-card);
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-md);
+    box-shadow: var(--pap-shadow-sm);
+    padding: var(--pap-gap);
+    margin-bottom: var(--pap-gap-lg);
+    text-align: left;
+}
+
+.subscription-panel__title {
+    font-size: 1.25rem;
+    margin: 0 0 var(--pap-gap);
+    color: var(--pap-text);
+}
+
+.subscription-panel__body {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--pap-gap);
+}
+
+.subscription-summary {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--pap-gap-xs);
+    min-width: 0;
+}
+
+.subscription-plan-badge {
+    padding: 0.2rem 0.8rem;
+    border-radius: 999px;
+    background: var(--pap-fill);
+    color: var(--pap-text);
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.subscription-status {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.subscription-status__pill {
+    display: inline-block;
+    padding: 0.1rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.subscription-status__pill--ok {
+    color: var(--pap-success);
+    background: var(--pap-success-bg);
+    border-color: rgba(74, 222, 128, 0.35);
+}
+
+.subscription-status__pill--warn {
+    color: var(--pap-warning);
+    background: var(--pap-warning-bg);
+    border-color: rgba(251, 191, 36, 0.35);
+}
+
+.subscription-status__pill--danger {
+    color: var(--pap-danger);
+    background: var(--pap-danger-bg);
+    border-color: rgba(255, 107, 107, 0.35);
+}
+
+.subscription-status__pill--neutral {
+    color: var(--pap-text);
+    background: var(--pap-input-bg);
+    border-color: var(--pap-border-strong);
+}
+
+.subscription-period {
+    margin: 0;
+    color: var(--pap-faint);
+    font-size: 0.9rem;
+}
+
+.subscription-hint {
+    margin: 0;
+    max-width: 42ch;
+    color: var(--pap-muted);
+    font-size: 0.9rem;
+}
+
+.subscription-hint--warn {
+    color: var(--pap-warning);
+}
+
+.subscription-empty {
+    margin: 0 0 var(--pap-gap-lg);
+    color: var(--pap-muted);
+}
+
+.subscription-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pap-gap-sm);
+}
+
+/* Secondary / destructive actions. Primary ones reuse .main-button. */
+.subscription-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--pap-gap-xs);
+    padding: 0.55rem 1.3rem;
+    border-radius: 999px;
+    border: 1px solid var(--pap-border-strong);
+    background: var(--pap-input-bg);
+    color: var(--pap-text);
+    font-size: 1.05rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.subscription-btn:hover:not(:disabled) {
+    background: var(--pap-card-hover);
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+
+.subscription-btn--danger {
+    color: var(--pap-danger);
+    background: var(--pap-danger-bg);
+    border-color: rgba(255, 107, 107, 0.35);
+}
+
+.subscription-btn--danger:hover:not(:disabled) {
+    background: rgba(255, 107, 107, 0.2);
+}
+
+/* In-page replacement for the old blocking confirm() dialog. */
+.subscription-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-sm);
+    width: auto;
+    max-width: 34rem;
+}
+
+.subscription-confirm__text {
+    margin: 0;
+}
+
+.subscription-confirm__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pap-gap-sm);
+}
+
+/* Pricing cards */
+.subscription-plans {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: stretch;
+    gap: var(--pap-gap-lg);
+    margin-top: var(--pap-gap);
+}
+
+.subscription-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-xs);
+    width: 320px;
+    max-width: 100%;
+    padding: var(--pap-gap-lg) var(--pap-gap);
+    text-align: left;
+    background: var(--pap-card);
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-lg);
+    box-shadow: var(--pap-shadow-sm);
+    transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.subscription-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--pap-border-strong);
+    box-shadow: var(--pap-shadow);
+}
+
+.subscription-card--highlighted {
+    border-color: var(--pap-accent-strong);
+    background: var(--pap-card-hover);
+}
+
+.subscription-card--current {
+    border-color: var(--pap-success);
+}
+
+.subscription-card__badge {
+    position: absolute;
+    top: -0.8rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.15rem 0.9rem;
+    border-radius: 999px;
+    background: var(--pap-success-bg);
+    border: 1px solid var(--pap-success);
+    color: var(--pap-success);
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.subscription-card__tag {
+    align-self: flex-start;
+    padding: 0.15rem 0.7rem;
+    border-radius: 999px;
+    background: var(--pap-accent-soft);
+    border: 1px solid var(--pap-border-strong);
+    color: var(--pap-text);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.subscription-card__name {
+    margin: var(--pap-gap-xs) 0 0;
+    font-size: 1.5rem;
+}
+
+.subscription-card__price {
+    display: flex;
+    align-items: baseline;
+    gap: 0.25rem;
+    margin: 0 0 var(--pap-gap-sm);
+}
+
+.subscription-card__amount {
+    font-size: 2.4rem;
+    font-weight: 700;
+    color: var(--pap-accent-strong);
+}
+
+.subscription-card__period {
+    color: var(--pap-faint);
+}
+
+.subscription-card__features {
+    flex: 1 1 auto;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    color: var(--pap-muted);
+}
+
+.subscription-card__features li {
+    padding: var(--pap-gap-xs) 0;
+    border-bottom: 1px solid var(--pap-border);
+}
+
+.subscription-card__features li:last-child {
+    border-bottom: none;
+}
+
+.subscription-card__features li::before {
+    content: '\2713';
+    margin-right: var(--pap-gap-xs);
+    color: var(--pap-accent-strong);
+}
+
+/* What Free does not include, said as plainly as what it does. */
+.subscription-card__features li.subscription-card__feature--excluded {
+    color: var(--pap-faint);
+}
+
+.subscription-card__features li.subscription-card__feature--excluded::before {
+    content: '\2715';
+    color: var(--pap-faint);
+}
+
+/* Holds the amount row's height while the price loads. */
+.subscription-card__amount--pending {
+    display: inline-block;
+    width: 4ch;
+    border-radius: var(--pap-radius-sm);
+    background: var(--pap-input-bg);
+}
+
+.subscription-card__button {
+    align-self: stretch;
+    margin-top: var(--pap-gap);
+}
+
+.subscription-card__consent {
+    margin-top: var(--pap-gap-xs);
+    text-align: center;
+}
+
+/* Under a Subscribe button disabled until the address is verified. */
+.subscription-card__verify {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap-xs);
+    margin-top: var(--pap-gap-xs);
+    padding: var(--pap-gap-sm);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    border-radius: var(--pap-radius-sm);
+    background: var(--pap-warning-bg);
+    text-align: center;
+}
+
+.subscription-card__verify-text {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--pap-text);
+    overflow-wrap: anywhere;
+}
+
+.subscription-card__verify-text strong {
+    font-weight: 600;
+}
+
+/* Devices card (DevicesCard.jsx) */
+.subscription-devices__summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-xs);
+    /* Not a length basis: under 768px the panel body stacks as a column, and a
+       22rem basis became 22rem of empty height there. */
+    flex: 1 1 auto;
+    max-width: 34rem;
+    min-width: 0;
+}
+
+.subscription-devices__count {
+    margin: 0;
+    font-size: 1.1rem;
+    color: var(--pap-muted);
+}
+
+.subscription-devices__count strong {
+    color: var(--pap-text);
+}
+
+.subscription-meter {
+    width: min(100%, 22rem);
+    height: 8px;
+    border-radius: 999px;
+    background: var(--pap-input-bg);
+    border: 1px solid var(--pap-border);
+    overflow: hidden;
+}
+
+.subscription-meter__fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--pap-gradient);
+}
+
+.subscription-devices__actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--pap-gap-xs);
+    max-width: 18rem;
+}
+
+.subscription-devices__error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--pap-gap-sm);
+}
+
+.subscription-devices__result {
+    margin: var(--pap-gap) 0 0;
+}
+
+/* Password card (ChangePasswordCard.jsx) */
+.subscription-password__form {
+    max-width: 26rem;
+}
+
+.subscription-password__done {
+    margin: var(--pap-gap) 0 0;
+}
+
+.subscription-loading--inline {
+    justify-content: flex-start;
+    padding: 0;
+}
+
+.subscription-login-prompt {
+    margin-top: var(--pap-gap-lg);
+    color: var(--pap-muted);
+}
+
+/* Post-checkout landing page */
+.subscription-success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--pap-gap);
+    padding: var(--pap-gap-lg) var(--pap-gap);
+    background: var(--pap-card);
+    border: 1px solid var(--pap-border);
+    border-radius: var(--pap-radius-lg);
+    box-shadow: var(--pap-shadow-sm);
+}
+
+.subscription-success__mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    margin: 0;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    font-size: 2.2rem;
+    line-height: 1;
+}
+
+.subscription-success__mark--ok {
+    color: var(--pap-success);
+    background: var(--pap-success-bg);
+    border-color: rgba(74, 222, 128, 0.35);
+}
+
+.subscription-success__mark--error {
+    color: var(--pap-danger);
+    background: var(--pap-danger-bg);
+    border-color: rgba(255, 107, 107, 0.35);
+}
+
+.subscription-success__title {
+    margin: 0;
+    font-size: clamp(1.5rem, 4vw, 2rem);
+}
+
+.subscription-success__text {
+    margin: 0;
+    color: var(--pap-muted);
+}
+
+.subscription-success .main-button,
+.subscription-success .subscription-btn {
+    align-self: center;
+}
+
+@media (max-width: 768px) {
+    .subscription-page {
+        padding: var(--pap-gap) var(--pap-gap-sm);
+    }
+
+    .subscription-panel__body {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .subscription-plans {
+        gap: var(--pap-gap);
+    }
+
+    .subscription-card {
+        width: 100%;
+        max-width: 340px;
+        padding: var(--pap-gap-lg) var(--pap-gap-sm);
+    }
+
+    .subscription-card:hover {
+        transform: none;
+    }
+
+    .subscription-actions .subscription-btn,
+    .subscription-confirm__actions .subscription-btn,
+    .subscription-actions .main-button {
+        flex: 1 1 12rem;
+    }
+
+    .subscription-confirm {
+        max-width: none;
+    }
+
+    .subscription-success {
+        padding: var(--pap-gap) var(--pap-gap-sm);
+    }
+}
+
+@media (max-width: 400px) {
+    .subscription-btn,
+    .subscription-card__amount {
+        font-size: 1rem;
+    }
+
+    .subscription-card__amount {
+        font-size: 2rem;
+    }
+}

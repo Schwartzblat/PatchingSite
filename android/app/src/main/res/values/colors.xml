@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors pap-bg in client/src/index.css and PapBg in ui/theme/Color.kt.
+         Used for the window background so the frame drawn before Compose starts is
+         already the right colour. -->
+    <color name="pap_bg">#FF05060A</color>
+</resources>

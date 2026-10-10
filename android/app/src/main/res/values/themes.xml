@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose draws the whole UI through MaterialTheme; this XML theme only styles
+         the window before Compose takes over.
+
+         Do NOT reach for Theme.Material3.* here: those ship in the View-system
+         library com.google.android.material:material, which this app does not depend
+         on and should not pull in for one XML style.
+
+         The parent is the plain (dark) DeviceDefault rather than the DayNight one
+         because this app is dark-only - see ui/theme/Theme.kt. That also sidesteps
+         the platform having DayNight and NoActionBar as separate branches with no
+         combined variant: nothing here needs DayNight, so NoActionBar can be the
+         parent directly and the action bar needs no switching off by hand.
+
+         windowBackground is pinned to the same near-black the Compose scheme uses, so
+         cold start shows the app's own colour instead of a pale default frame. The
+         two windowLight* flags keep the status and navigation icons light; without
+         them a device in light mode draws dark icons onto our dark background. -->
+    <style name="Theme.PatchedStore" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/pap_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

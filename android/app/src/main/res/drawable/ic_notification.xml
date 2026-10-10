@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification small icons are silhouettes: the system ignores colour and uses
+     only the alpha channel, so this is a solid fill rather than the stroked style
+     the in-app icons use. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M10.6,3h2.8v8.1h3.3L12,16.6L7.3,11.1h3.3Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M5,18.4h14a1,1 0 0 1 0,2.4h-14a1,1 0 0 1 0,-2.4z" />
+</vector>

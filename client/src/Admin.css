@@ -1,0 +1,159 @@
+/*
+ * The admin panel (/admin). Cards, buttons, pills, notices and form fields are
+ * Subscription.css's, index.css's and AuthForm.css's; this is only the
+ * two-pane layout, the table and the few pieces those have no equivalent for.
+ * English only, but written with logical properties like the rest of the site.
+ */
+
+.admin-page {
+    max-width: 1280px;
+    text-align: start;
+}
+
+.admin-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--pap-gap);
+    align-items: start;
+}
+
+@media (min-width: 960px) {
+    .admin-layout {
+        grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
+    }
+}
+
+.admin-list .authField {
+    margin-bottom: var(--pap-gap-sm);
+}
+
+.admin-detail {
+    min-width: 0;
+}
+
+/* The table scrolls inside its own box, never the page, at phone width. */
+.admin-table-wrap {
+    overflow-x: auto;
+}
+
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+
+.admin-table th,
+.admin-table td {
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--pap-border);
+    text-align: start;
+    white-space: nowrap;
+}
+
+.admin-table th {
+    color: var(--pap-muted);
+    font-weight: 600;
+}
+
+.admin-table tr[aria-current="true"] {
+    background: var(--pap-accent-soft);
+}
+
+.admin-table__email {
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-badge {
+    display: inline-block;
+    margin-inline-start: 0.4rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    background: var(--pap-accent-soft);
+    color: var(--pap-accent-light);
+    font-size: 0.75rem;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+.admin-badge--warn {
+    background: var(--pap-warning-bg);
+    color: var(--pap-warning);
+}
+
+.admin-flag--warn {
+    color: var(--pap-warning);
+}
+
+.admin-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.35rem var(--pap-gap);
+    margin: 0 0 var(--pap-gap-sm);
+}
+
+.admin-facts dt {
+    color: var(--pap-muted);
+}
+
+.admin-facts dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.admin-action {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--pap-gap-sm);
+    padding-block: var(--pap-gap);
+    border-top: 1px solid var(--pap-border);
+}
+
+.admin-action:first-of-type {
+    padding-top: 0;
+    border-top: 0;
+}
+
+.admin-action__title {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+.admin-action .authForm {
+    width: 100%;
+}
+
+.admin-check {
+    display: flex;
+    align-items: center;
+    gap: var(--pap-gap-xs);
+}
+
+.admin-choice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pap-gap-xs) var(--pap-gap);
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.admin-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--pap-gap-sm);
+    width: 100%;
+    padding: var(--pap-gap);
+    border: 1px solid var(--pap-border-strong);
+    border-radius: var(--pap-radius-sm);
+}
+
+.admin-result {
+    margin: 0;
+}
+
+.admin-danger {
+    border-color: rgba(255, 107, 107, 0.35);
+}

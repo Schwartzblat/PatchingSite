@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      All files access, not READ_MEDIA_*: the thing being moved is a
+      .crypt14, which is not a media type, so the media permissions cannot
+      see it. Measured on 2026-10-01: this grant reaches
+      /sdcard/Android/media/com.whatsapp/ for read, write and rename, while
+      Android/data and Android/obb stay closed to it.
+
+      ScopedStorage is suppressed for the reason the store's QUERY_ALL_PACKAGES is:
+      it enforces Play's policy, and the store is self-distributed, never on Play.
+    -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage"/>
+
+    <!--
+      Without this, getPackageInfo("com.whatsapp", ...) throws NameNotFoundException
+      on Android 11+ (minSdk 30), making WhatsApp invisible: whatsAppInstalled reads
+      false while WhatsApp is installed, and the put-back refusal that depends on the
+      signature comparison silently stops working. The uninstall still ahead would then
+      delete /sdcard/Android/media/com.whatsapp/ — the only copy.
+    -->
+    <queries>
+        <package android:name="com.whatsapp"/>
+    </queries>
+</manifest>

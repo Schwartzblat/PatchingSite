@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <!-- The Patched Store launcher mark (android/app/src/main/res/drawable/ic_launcher_*.xml):
+       the site gradient behind a download arrow over a tray. The glyph is scaled up from
+       the launcher's 72dp safe zone because a tab icon has no mask to leave room for. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="94" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#007aa4"/>
+      <stop offset="1" stop-color="#1791fc"/>
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" rx="24" fill="url(#g)"/>
+  <g fill="#fff" transform="translate(54 54) scale(1.25) translate(-54 -54)">
+    <path d="M48,23L60,23L60,49L74,49L54,71L34,49L48,49Z"/>
+    <path d="M34,77h40a4,4 0 0 1 0,8h-40a4,4 0 0 1 0,-8z"/>
+  </g>
+</svg>

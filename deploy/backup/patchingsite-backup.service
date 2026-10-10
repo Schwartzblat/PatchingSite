@@ -1,0 +1,26 @@
+# /etc/systemd/system/patchingsite-backup.service - nightly database snapshot.
+# Started by patchingsite-backup.timer; runs deploy/backup/patchingsite-backup.py,
+# installed as /usr/local/bin/patchingsite-backup.
+
+[Unit]
+Description=PatchingSite database snapshot
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+UMask=0077
+
+# systemd creates /var/lib/patchingsite-backups owned by User with mode 0700,
+# and it is the only path this unit may write besides the database directory.
+StateDirectory=patchingsite-backups
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /usr/local/bin/patchingsite-backup /opt/server_data/users.db /var/lib/patchingsite-backups --keep 14
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# A WAL-mode reader still writes its read lock into users.db-shm, so the
+# database directory has to stay writable for the snapshot to open it.
+ReadWritePaths=/opt/server_data

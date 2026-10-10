@@ -1,0 +1,160 @@
+/* Class names are prefixed `topbar-` so page CSS cannot collide. */
+
+.topbar {
+    width: 100%;
+    border-bottom: 1px solid var(--pap-border);
+    background: var(--pap-card);
+    border-radius: var(--pap-radius-md);
+}
+
+.topbar-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+    padding: 0.7rem clamp(0.75rem, 2vw, 1.15rem);
+}
+
+.topbar-brand {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--pap-text);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.topbar-brand:hover {
+    color: var(--pap-accent-strong);
+    text-decoration: none;
+}
+
+.topbar-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--pap-gap-xs);
+    flex: 1 1 auto;
+}
+
+.topbar-link {
+    position: relative;
+    padding: 0.4rem 0.7rem;
+    border-radius: var(--pap-radius-sm);
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--pap-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 150ms ease, background-color 150ms ease;
+}
+
+.topbar-link:hover {
+    color: var(--pap-text);
+    background: var(--pap-input-bg);
+    text-decoration: none;
+}
+
+/* Active state the old two-NavLink header never had. */
+.topbar-link--active {
+    color: var(--pap-text);
+    background: var(--pap-accent-soft);
+}
+
+.topbar-link--active::after {
+    content: '';
+    position: absolute;
+    left: 0.7rem;
+    right: 0.7rem;
+    bottom: 0.1rem;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--pap-gradient);
+}
+
+.topbar-account {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--pap-gap-xs);
+    margin-inline-start: auto;
+}
+
+.topbar-user {
+    max-width: 12ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--pap-muted);
+}
+
+/* Holds the account slot's width while /api/users/me is in flight, so the
+   header does not jump once the session resolves. */
+.topbar-pending {
+    display: inline-block;
+    width: 5.5rem;
+    height: 2rem;
+    border-radius: 999px;
+    background: var(--pap-input-bg);
+}
+
+.topbar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    height: auto;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--pap-border-strong);
+    background: var(--pap-card-hover);
+    color: var(--pap-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.topbar-btn:hover {
+    border-color: var(--pap-accent-strong);
+    box-shadow: var(--pap-shadow-sm);
+    text-decoration: none;
+}
+
+.topbar-btn--primary {
+    border-color: transparent;
+    background: var(--pap-fill);
+}
+
+/* 360px: brand + account stay on the first row, the nav takes the second. */
+@media (max-width: 560px) {
+    .topbar-inner {
+        row-gap: var(--pap-gap-xs);
+    }
+
+    .topbar-nav {
+        order: 3;
+        flex: 1 0 100%;
+        justify-content: flex-start;
+    }
+
+    .topbar-brand {
+        font-size: 1rem;
+    }
+
+    .topbar-user {
+        max-width: 8ch;
+    }
+
+    .topbar-btn {
+        padding: 0.35rem 0.7rem;
+    }
+}
+
+/* The language switch sits between the nav and the account buttons. Its label
+   is always in the other language ("עברית" on English pages), so it carries its
+   own lang attribute and is not translated with the rest of the header. */
+.topbar-lang {
+    font-weight: 500;
+}

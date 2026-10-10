@@ -1,0 +1,14 @@
+# ~/.config/systemd/user/androidmod-backup-pull.timer - on the dev machine.
+
+[Unit]
+Description=Pull androidmod.site database backups
+
+[Timer]
+# Every six hours while the machine is on, and shortly after login, so a PC that
+# is off overnight still picks up the 03:30 UTC snapshot the same day.
+OnStartupSec=10min
+OnCalendar=00/6:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

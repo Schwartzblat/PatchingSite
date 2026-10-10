@@ -1,0 +1,89 @@
+/*
+ * The analytics prompt. Pinned to the bottom so it never covers a page's
+ * heading, and narrow enough on a wide screen that it reads as a notice rather
+ * than a wall. Colours are the shared tokens from index.css; nothing here
+ * introduces a new one.
+ */
+.consent {
+    position: fixed;
+    /* Clear of the iOS home indicator and Android gesture bar, which otherwise
+       sit on top of the buttons. */
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(calc(100% - 2rem), 640px);
+    z-index: 50;
+
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+    padding: 1rem 1.15rem;
+
+    /* --pap-panel is up to 8% transparent, which is invisible on a panel but not
+       on something floating over the page: the footer links read through it.
+       Layering it over the page colour keeps the panel's look and makes it opaque. */
+    background: var(--pap-panel), var(--pap-bg);
+    border: 1px solid var(--pap-border-strong);
+    border-radius: var(--pap-radius-md);
+    box-shadow: var(--pap-shadow);
+    color: var(--pap-text);
+}
+
+.consent-text {
+    flex: 1 1 18rem;
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--pap-muted);
+}
+
+/* strong and the link need the full-contrast colour: --pap-muted is 5.6:1 on
+   the panel, which is fine for body text but dulls the one sentence that
+   matters. */
+.consent-text strong {
+    color: var(--pap-text);
+}
+
+.consent-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--pap-gap-sm);
+    margin-inline-start: auto;
+}
+
+/* .main-button sets align-self: flex-start for the column layouts it was
+   written for, which in this row would hang the button off the top edge. */
+.consent-accept {
+    align-self: auto;
+    font-size: 0.98rem;
+}
+
+.consent-decline {
+    border: 1px solid var(--pap-border-strong);
+    background: transparent;
+    color: var(--pap-text);
+    font-weight: 600;
+    font-size: 0.98rem;
+    padding: 0.5rem 1.1rem;
+    border-radius: 999px;
+    cursor: pointer;
+}
+
+.consent-decline:hover {
+    background: var(--pap-input-bg);
+}
+
+@media (max-width: 30rem) {
+    /* Two buttons plus the text do not fit one line on a phone; letting the row
+       wrap leaves the actions full width and easy to hit. */
+    .consent-actions {
+        margin-inline-start: 0;
+        width: 100%;
+    }
+
+    .consent-accept,
+    .consent-decline {
+        flex: 1;
+    }
+}
