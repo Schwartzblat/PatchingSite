@@ -18,3 +18,4 @@ include(":app")
 // The WhatsApp chat-move engine, lifted from migrate_app; see "Moving WhatsApp chats"
 // in README.md.
 include(":migrate")
+include(":patch-engine")

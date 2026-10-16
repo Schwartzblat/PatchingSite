@@ -22,6 +22,9 @@ okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver3-
 serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version = "1.11.0" }
 coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+commons-compress = { group = "org.apache.commons", name = "commons-compress", version = "1.27.1" }
+arsclib = { group = "io.github.reandroid", name = "ARSCLib", version = "1.4.0" }
+apksig = { group = "com.android.tools.build", name = "apksig", version.ref = "agp" }
 junit = { group = "junit", name = "junit", version = "4.13.2" }
 
 [plugins]
@@ -29,3 +32,4 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
