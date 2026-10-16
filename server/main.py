@@ -6,7 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 import config
 import database
-from api import admin, apps, auth, bug_reports, email_verification, password_reset, payment, store, users
+from api import admin, apps, auth, bug_reports, email_verification, password_reset, patching, payment, store, users
 from utils.downloads import start_workers, stop_workers
 from utils.logging_config import logger
 
@@ -67,3 +67,4 @@ app.include_router(payment.router, prefix="/api")
 app.include_router(store.router, prefix="/api")
 app.include_router(bug_reports.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(patching.router, prefix="/api")
