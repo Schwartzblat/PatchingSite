@@ -460,6 +460,14 @@ def cmd_doctor(_args) -> int:
         else:
             print(f"[{OK}] {label}: {path}")
 
+    # On-device patching: the bundle store is only a failure when it exists and
+    # the service can't write to it (an upload would 500). Absent is fine: the
+    # first upload creates it.
+    bundles_dir = Path(config.BUNDLES_DIR)
+    if bundles_dir.exists() and not os.access(bundles_dir, os.W_OK):
+        print(f"[{BAD}] BUNDLES_DIR not writable: {bundles_dir}")
+        problems += 1
+
     try:
         import stitch  # noqa: F401
         from stitch.common import FASTSIGNER_PATH
@@ -534,6 +542,27 @@ def cmd_doctor(_args) -> int:
             print(f"[{WARN}] ADMIN_USERNAMES lists {name!r}, which has no account. /register refuses")
             print(f"         listed names: take it off the list, register it, then list it again.")
             warnings += 1
+
+    # On-device patching settings. Unset ones only switch their endpoints off
+    # (503 "Not configured"), so these are warnings, never failures.
+    for name, value in (("CRAWLER_SECRET", config.CRAWLER_SECRET),
+                        ("BUNDLE_UPLOAD_SECRET", config.BUNDLE_UPLOAD_SECRET)):
+        if value:
+            print(f"[{OK}] {name} is set")
+        else:
+            print(f"[{WARN}] {name} is not set: the matching /api/internal endpoint answers 503")
+            warnings += 1
+    if config.SIGNING_KEYS_MASTER_KEY:
+        print(f"[{OK}] SIGNING_KEYS_MASTER_KEY is set (back it up apart from the database)")
+    else:
+        print(f"[{WARN}] SIGNING_KEYS_MASTER_KEY is not set: GET /api/signing-key answers 503")
+        warnings += 1
+    if Path(config.BUNDLE_PUBLIC_KEY_PATH).is_file():
+        print(f"[{OK}] bundle public key: {config.BUNDLE_PUBLIC_KEY_PATH}")
+    else:
+        print(f"[{WARN}] BUNDLE_PUBLIC_KEY_PATH does not point at a file: bundle uploads answer 503")
+        print(f"         ({config.BUNDLE_PUBLIC_KEY_PATH})")
+        warnings += 1
 
     cutoff = config.LEGACY_APP_TOKEN_CUTOFF
     if cutoff is None:

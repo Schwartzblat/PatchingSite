@@ -223,6 +223,95 @@ as `NOT MAILED`).
 Downloads (`/downloads/{id}/file`, `/store/download`) honour `Range`, so the
 Android client resumes interrupted transfers.
 
+## On-device patching endpoints
+
+The patcher can run on the phone instead of the server. A crawler publishes one
+**record** per supported app build and a signed **bundle** per patcher version;
+the store app reads them, fetches its signing key and builds the patched APK
+locally. All under `/api`; errors keep the `{"detail": "..."}` shape.
+
+### Internal endpoints (crawler and bundle uploader)
+
+Both need the header `X-Internal-Token`, compared in constant time: **401** when
+it is missing or wrong, **503** `Not configured` when the server has no secret.
+
+- `POST /internal/records` (token = `CRAWLER_SECRET`): a JSON object with
+  exactly `package, version_name, version_code (int), apk_sha256, dex_sha256,
+  patcher_version, artifacts (string to string), missing_keys (array),
+  features_off (array), supported (bool), source` (e.g. `"whatsapp.com"`). Extra
+  or mistyped fields are 422, an unknown package 404. Answers `{"revision": n}`.
+  It is an upsert by (package, `dex_sha256`, `patcher_version`): resending an
+  identical record keeps its revision; a changed one gets a new one.
+- `POST /internal/bundles` (token = `BUNDLE_UPLOAD_SECRET`): the **raw zip** as
+  the request body, at most 16 MiB (413 above that; nginx allows 17m on this
+  exact path only). The zip is verified against the key at
+  `BUNDLE_PUBLIC_KEY_PATH` (503 when that file is missing, 400 when the bundle
+  fails verification or its metadata is wrong). It is stored content-addressed
+  as `BUNDLES_DIR/<pkg>/<ver>-<sha16>.zip`, older content for the same version
+  is removed, and the answer is `{"package", "patcher_version", "revision"}`.
+
+### Store endpoints
+
+These need a signed-in account with an active subscription (401/402 otherwise).
+
+- `GET /patch/{pkg}/latest`: the newest supported build. The optional header
+  `X-Store-Version-Code` (integer; absent or invalid counts as 0) is the store
+  app's own version, so it is only offered builds whose bundle it can run. Answers
+  `package, version_code, version_name, apk_url, apk_sha256, dex_sha256,
+  patcher_version, revision, features_off`; 404 `No supported version yet`.
+- `GET /patch/{pkg}/artifacts?patcher_version=...&apk_sha256=...` (or
+  `dex_sha256=...`; exactly one of the two, else 422): the full record,
+  including `artifacts`, for a build the phone already has. 404 `Unknown build`.
+- `GET /patch/{pkg}/bundle/{patcher_version}`: the bundle zip, with its SHA-256
+  as the `ETag`. 404 `Unknown bundle`.
+- `POST /app-token` `{"package": ...}`: the same paywall token a server-patched
+  APK is built with, as `{"token": ...}`.
+- `GET /signing-key` (signed in; no subscription needed): the account's own
+  signing key, created on first use, as `{pkcs12 (base64), password, alias,
+  cert_sha256, cert_sha1}` with `Cache-Control: no-store`. 503 without
+  `SIGNING_KEYS_MASTER_KEY`.
+
+`patcher_version` must match `^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$` (422 otherwise);
+packages must be in the app catalogue (404 otherwise). `GET /apps` reports
+`on_device` for each app.
+
+Rate limits: each endpoint is limited **per account after authentication** and
+by a per-IP flood guard in front of it. `/patch/...` reads 120/minute per
+account and 1200/minute per IP; `/app-token` 60/hour per account and 600/hour per
+IP; `/signing-key` 20/hour per account and 600/hour per IP. Past a limit the
+answer is 429 with `Retry-After`.
+
+### Settings
+
+| Variable | Meaning |
+| --- | --- |
+| `CRAWLER_SECRET` | token for `POST /internal/records` |
+| `BUNDLE_UPLOAD_SECRET` | token for `POST /internal/bundles` |
+| `SIGNING_KEYS_MASTER_KEY` | base64 of 32 random bytes; encrypts the stored signing keys |
+| `BUNDLE_PUBLIC_KEY_PATH` | public key the bundles are verified against (default `DATA_DIR/bundle-signing.pub.pem`) |
+| `BUNDLES_DIR` | where bundles are stored (default `DATA_DIR/bundles`) |
+| `ON_DEVICE_PACKAGES` | comma-separated packages switched to on-device patching (default empty) |
+
+None is needed to start; an endpoint whose setting is missing answers 503.
+`manage.py doctor` warns about each unset one (and about a missing public key),
+and fails only when `BUNDLES_DIR` exists but cannot be written. Make a master key
+with:
+
+```bash
+python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+```
+
+**Losing `SIGNING_KEYS_MASTER_KEY` makes every stored signing key unreadable**,
+and users' patched apps would then be signed with new keys. Back it up
+separately from the database: a backup of both together protects nothing, and
+the database alone is useless without it. Don't rotate it.
+
+### Launch day
+
+Deploying this changes nothing for current subscribers: `ON_DEVICE_PACKAGES`
+is empty. Once the crawler has published records and a bundle for WhatsApp,
+set `ON_DEVICE_PACKAGES=com.whatsapp` in `.env` and restart the service.
+
 ## Operations
 
 ```bash
