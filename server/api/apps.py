@@ -36,6 +36,7 @@ def list_apps() -> List[dict]:
             "name": app.name,
             "package": app.package,
             "features": list(app.features),
+            "on_device": app.package in config.ON_DEVICE_PACKAGES,
         }
         for app in config.APPS
     ]
@@ -53,6 +54,8 @@ def list_versions(package_name: ValidPackage) -> List[dict]:
         updated_at: str
     }]
     """
+    if package_name in config.ON_DEVICE_PACKAGES:
+        return []
     package_path = package_dir(package_name)
     versions = []
     for version_directory in sorted(os.listdir(package_path)):
@@ -90,6 +93,11 @@ def create_download(request: DownloadRequest, token: RequiredToken, subscription
     it signed in.
     """
     package_name = validate_package_name(request.package)
+    if package_name in config.ON_DEVICE_PACKAGES:
+        raise HTTPException(
+            status_code=410,
+            detail="This app is now patched on your phone. Open the androidmod store app to install it.",
+        )
     apk_file = _resolve_patched_apk(package_name, request.version)
     logger.debug('Download requested: %s %s by %s', package_name, request.version, token.username)
     try:

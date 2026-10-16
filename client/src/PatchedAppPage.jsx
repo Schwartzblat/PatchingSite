@@ -9,6 +9,7 @@ import {localPath, useLang} from './lib/i18n.js';
 import PageTitle from './PageTitle.jsx';
 import AppSchema from './AppSchema.jsx';
 import Faq from './Faq.jsx';
+import StoreDownload from './StoreDownload.jsx';
 import './PatchedAppPage.css';
 
 /*
@@ -43,6 +44,8 @@ const COPY = {
         listFailed: 'Failed to load builds.',
         listErrorPill: 'Something went wrong',
         noBuilds: 'No patched builds yet. Check back soon.',
+        onDeviceHeading: 'Get it through the store app',
+        onDeviceText: (name) => `${name} is now patched on your phone, so there is nothing to download here. Install the store app, sign in, and it does the rest.`,
         fetching: 'Fetching builds\u2026',
         count: (n) => `${n} build${n === 1 ? '' : 's'} ready`,
         xapk: (to) => (
@@ -99,6 +102,8 @@ const COPY = {
         listFailed: 'לא הצלחנו לטעון את הגרסאות.',
         listErrorPill: 'משהו השתבש',
         noBuilds: 'עדיין אין גרסאות משופרות. כדאי לבדוק שוב בקרוב.',
+        onDeviceHeading: 'מקבלים אותה דרך אפליקציית החנות',
+        onDeviceText: (name) => `${name} עוברת עכשיו שיפור ישירות בטלפון, ולכן אין כאן מה להוריד. מתקינים את אפליקציית החנות, מתחברים, והיא עושה את השאר.`,
         fetching: 'טוענים גרסאות\u2026',
         count: (n) => (n === 1 ? 'גרסה אחת מוכנה' : `${n} גרסאות מוכנות`),
         xapk: (to) => (
@@ -276,6 +281,8 @@ function AppVersions({app, lang, t}) {
     const [subscription, setSubscription] = useState(undefined);
     const [subscriptionError, setSubscriptionError] = useState(null);
     const [job, setJob] = useState(null);
+    // From the catalogue; a failed lookup just leaves the usual build list.
+    const [onDevice, setOnDevice] = useState(false);
 
     const mountedRef = useRef(true);
     useEffect(() => {
@@ -301,6 +308,17 @@ function AppVersions({app, lang, t}) {
             });
         return () => controller.abort();
     }, [app.package, t]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        api.listApps({signal: controller.signal})
+            .then((items) => {
+                const mine = Array.isArray(items) ? items.find((item) => item.package === app.package) : null;
+                setOnDevice(mine?.on_device === true);
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [app.package]);
 
     // Entitlement is only a hint for the UI; the server is the authority, so a
     // failure here surfaces a notice instead of silently blocking downloads.
@@ -539,7 +557,15 @@ function AppVersions({app, lang, t}) {
                 from a search result rather than from the home page's card. */}
             <p className="pap-intro">{app.intro}</p>
 
-            <div className="pap-notices">
+            {onDevice && (
+                <section className="pap-section" aria-labelledby="pap-on-device-title">
+                    <h2 id="pap-on-device-title" className="pap-section-title">{t.onDeviceHeading}</h2>
+                    <p>{t.onDeviceText(app.name)}</p>
+                    <StoreDownload/>
+                </section>
+            )}
+
+            {!onDevice && <div className="pap-notices">
                 {!authLoading && !signedIn && (
                     <p className="alert alert-info">{t.guest(signInTo)}</p>
                 )}
@@ -578,9 +604,9 @@ function AppVersions({app, lang, t}) {
                         </p>
                     )}
                 </div>
-            </div>
+            </div>}
 
-            <section className="pap-grid" aria-live="polite" aria-busy={listLoading}>
+            {!onDevice && <section className="pap-grid" aria-live="polite" aria-busy={listLoading}>
                 <p className="visually-hidden">{statusText}</p>
                 {listLoading && skeletons}
                 {!listLoading && listError && (
@@ -668,7 +694,7 @@ function AppVersions({app, lang, t}) {
                         </article>
                     );
                 })}
-            </section>
+            </section>}
 
             {/* The page used to be little more than the build list, which loads
                 from the API and so is not in the prerendered file: a search engine

@@ -176,6 +176,9 @@ export const api = {
     listVersions: (packageName, opts) =>
         request(`/list/${encodeURIComponent(packageName)}`, opts),
 
+    // the public catalogue; each item has on_device (patched on the phone, not built here)
+    listApps: (opts) => request('/apps', opts),
+
     // the Android store app itself; the file is a plain GET on storeDownloadUrl
     getStore: (opts) => request('/store', opts),
 
