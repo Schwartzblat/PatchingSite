@@ -19,3 +19,4 @@ include(":app")
 // in README.md.
 include(":migrate")
 include(":patch-engine")
+include(":patch-cli")
