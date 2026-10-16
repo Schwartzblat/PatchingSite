@@ -274,23 +274,55 @@ class PatchJobTest {
         assertEquals(emptyList<String>(), f.workFiles())
     }
 
+    /**
+     * `latest` still names the old build (its hashes, 2.26.1.1, revision 7) and the server
+     * still has that build's record under those hashes, while whatsapp.com already serves
+     * the new one ([OFFICIAL_BYTES], dex [DEX_SHA]).
+     */
+    private fun Fixture.latestNamesTheOldBuild() {
+        latestAnswer = { latest.copy(apkSha256 = OLD_APK_SHA, dexSha256 = OLD_DEX_SHA) }
+        val stale = recordJson(apkSha256 = OLD_APK_SHA, dexSha256 = OLD_DEX_SHA, revision = 7)
+        recordsByApk[OLD_APK_SHA] = stale
+        recordsByDex[OLD_DEX_SHA] = stale
+        inspectedVersionCode = 262029
+    }
+
+    private fun Fixture.assertBuiltTheNewRecord(outcome: PatchOutcome) {
+        assertEquals(PatchOutcome.Ready(finalFile("2.26.2.9"), "2.26.2.9", 262029, 9), outcome)
+        val request = requests.single()
+        assertEquals("2.26.2.9", request.record.versionName)
+        assertEquals(262029L, request.record.versionCode)
+        assertEquals(DEX_SHA, request.record.dexSha256)
+        assertEquals(9, request.revision)
+        assertEquals(listOf("2.26.2.9"), finalNames)
+        assertEquals(emptyList<String>(), workFiles())
+    }
+
     @Test
     fun `whatsapp com moved on uses the dex hash record`() = runTest {
         val f = fixture()
+        f.latestNamesTheOldBuild()
+        // The new build is known only by its dex hash (same code, repackaged APK).
         f.recordsByDex[DEX_SHA] = recordJson(versionName = "2.26.2.9", versionCode = 262029, apkSha256 = "e".repeat(64), revision = 9)
-        f.inspectedVersionCode = 262029
 
         val outcome = f.run()
 
-        assertEquals(PatchOutcome.Ready(f.finalFile("2.26.2.9"), "2.26.2.9", 262029, 9), outcome)
+        f.assertBuiltTheNewRecord(outcome)
         assertEquals(listOf(f.official), f.dexHashCalls)
         assertEquals(listOf("record apk", "dex hash", "record dex"), f.events.filter { it.startsWith("record") || it == "dex hash" })
-        val request = f.requests.single()
-        assertEquals("2.26.2.9", request.record.versionName)
-        assertEquals(262029L, request.record.versionCode)
-        assertEquals(9, request.revision)
-        assertEquals(listOf("2.26.2.9"), f.finalNames)
-        assertEquals(emptyList<String>(), f.workFiles())
+    }
+
+    @Test
+    fun `whatsapp com moved on uses the file's apk hash record`() = runTest {
+        val f = fixture()
+        f.latestNamesTheOldBuild()
+        f.recordsByApk[OFFICIAL_SHA] = recordJson(versionName = "2.26.2.9", versionCode = 262029, revision = 9)
+
+        val outcome = f.run()
+
+        f.assertBuiltTheNewRecord(outcome)
+        assertTrue(f.dexHashCalls.isEmpty())
+        assertEquals(listOf("record apk"), f.events.filter { it.startsWith("record") || it == "dex hash" })
     }
 
     @Test
@@ -776,6 +808,8 @@ class PatchJobTest {
         val OFFICIAL_BYTES = "the official whatsapp apk".toByteArray()
         val OFFICIAL_SHA = MessageDigest.getInstance("SHA-256").digest(OFFICIAL_BYTES).joinToString("") { "%02x".format(it) }
         val DEX_SHA = "d".repeat(64)
+        val OLD_APK_SHA = "1".repeat(64)
+        val OLD_DEX_SHA = "2".repeat(64)
         val OFFICIAL_CERT = "c".repeat(64)
         val USER_CERT = "a".repeat(64)
         val PATCHED = "+patched".toByteArray()
