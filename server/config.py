@@ -92,11 +92,11 @@ APPS = (
     AppConfig(
         name="WhatsApp", package="com.whatsapp", key="whatsapp",
         # The available rows of the WhatsAppPatcher README's feature table, in
-        # its order and its wording, minus one: "Signature Verifier Bypass" is
-        # what makes a re-signed build run at all rather than something anyone
-        # subscribes for.
+        # its order and its wording, minus the ones nobody subscribes for:
+        # "Signature Verifier Bypass" is what makes a re-signed build run at all,
+        # and "Enable all AB tests" is a developer screen. "Restore a backup
+        # without reinstalling" is part of the Google Drive backup row.
         features=(
-            "Enable All A/B Tests",
             "Keep Revoked Messages",
             "Trash Icon on Revoked Messages",
             "Unlimited Time to Delete for Everyone",
@@ -111,6 +111,7 @@ APPS = (
             "Send More Group History to New Members",
             "Shared Members Between Groups",
             "Back Up Chats to Your Own Google Drive",
+            "Unlimited Pinned Chats",
         ),
     ),
     AppConfig(

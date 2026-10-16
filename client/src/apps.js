@@ -43,12 +43,6 @@ export const apps = {
             + "move over from the Play Store version with the backup WhatsApp keeps on your phone.",
         features: [
             {
-                name: "Enable All A/B Tests",
-                detail: "A developer screen that lists WhatsApp's server-controlled feature flags and lets you "
-                    + "override them, one at a time or several at once, to try features before they reach you. "
-                    + "It is off until you turn it on.",
-            },
-            {
                 name: "Keep Revoked Messages",
                 detail: "When someone deletes a message for everyone, your copy stays in the chat. It covers "
                     + "deletions that arrive while the option is on.",
@@ -121,6 +115,12 @@ export const apps = {
                 detail: "WhatsApp's own Drive backup cannot work in a re-signed app, so this one copies WhatsApp's "
                     + "nightly chat backup to a folder in your Google Drive about once a day, and restores it "
                     + "without reinstalling. Chats only, not media. It is off until you turn it on.",
+            },
+            {
+                name: "Unlimited Pinned Chats",
+                detail: "Pin as many chats as you like, instead of WhatsApp's three, or twenty with WhatsApp "
+                    + "Premium. Pinning or unpinning a chat on a linked device such as WhatsApp Web, or linking a "
+                    + "new one, keeps only the twenty chats you pinned most recently.",
             },
         ],
         faq: [
