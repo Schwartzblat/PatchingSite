@@ -2,7 +2,7 @@
 import json
 import zipfile
 
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from pyaxml import AXML
 from stitch.bundle import BundleModule, build_bundle
@@ -50,3 +50,19 @@ def make_bundle(tmp_path, key_pem, package="com.whatsapp", patcher_version="3.0.
                         ["com.smali_generator.InitProvider"], features, key_pem,
                         min_store_version_code=min_store_version_code)
     return out, meta
+
+
+def resign_bundle(src, dest, key_pem, mutate):
+    """Copy a bundle with bundle.json altered by `mutate(meta)` and re-signed with key_pem."""
+    with zipfile.ZipFile(src) as zf:
+        entries = {n: zf.read(n) for n in zf.namelist()}
+    meta = json.loads(entries["bundle.json"])
+    mutate(meta)
+    meta_bytes = json.dumps(meta, sort_keys=True).encode()
+    key = serialization.load_pem_private_key(key_pem.read_bytes(), None)
+    entries["bundle.json"] = meta_bytes
+    entries["bundle.sig"] = key.sign(meta_bytes, ec.ECDSA(hashes.SHA256()))
+    with zipfile.ZipFile(dest, "w") as zf:
+        for name, data in entries.items():
+            zf.writestr(name, data)
+    return dest

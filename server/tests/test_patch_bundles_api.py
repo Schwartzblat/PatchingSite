@@ -1,10 +1,13 @@
+import hashlib
+import stat
+
 import pytest
 from fastapi.testclient import TestClient
 
 import config
 import main
 from utils import patch_store
-from tests.bundle_helpers import ec_keypair, make_bundle
+from tests.bundle_helpers import ec_keypair, make_bundle, resign_bundle
 
 URL = "/api/internal/bundles"
 HDR = {"X-Internal-Token": "test-bundles", "Content-Type": "application/zip"}
@@ -31,7 +34,9 @@ def test_upload_valid_bundle_is_stored(env):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["package"] == "com.whatsapp" and body["patcher_version"] == "3.0.0"
-    stored = bundles / "com.whatsapp" / "3.0.0.zip"
+    stored = patch_store.bundle_path("com.whatsapp", "3.0.0", hashlib.sha256(data).hexdigest())
+    assert stored.name.startswith("3.0.0-") and stored.parent == bundles / "com.whatsapp"
+    assert stat.S_IMODE(stored.stat().st_mode) == 0o644
     assert stored.read_bytes() == data
     row = patch_store.get_bundle("com.whatsapp", "3.0.0")
     assert row["size"] == len(data) and row["min_store_version_code"] == 7
@@ -103,3 +108,40 @@ def test_reupload_bumps_revision(env):
     first = client.post(URL, content=data, headers=HDR).json()["revision"]
     second = client.post(URL, content=data, headers=HDR).json()["revision"]
     assert second > first
+
+
+def test_reupload_different_bytes_switches_file(env):
+    client, key_pem, work, bundles = env
+    first, _ = make_bundle(work, key_pem, min_store_version_code=7)
+    assert client.post(URL, content=first.read_bytes(), headers=HDR).status_code == 200
+    second, _ = make_bundle(work, key_pem, min_store_version_code=9, name="b2.zip")
+    data2 = second.read_bytes()
+    assert data2 != first.read_bytes()
+    assert client.post(URL, content=data2, headers=HDR).status_code == 200
+    row = patch_store.get_bundle("com.whatsapp", "3.0.0")
+    sha = hashlib.sha256(data2).hexdigest()
+    assert row["sha256"] == sha and row["min_store_version_code"] == 9
+    files = [p for p in bundles.rglob("*") if p.is_file()]
+    assert files == [patch_store.bundle_path("com.whatsapp", "3.0.0", sha)]
+
+
+def test_upload_rejects_missing_meta_keys(env):
+    client, key_pem, work, bundles = env
+    path, _ = make_bundle(work, key_pem)
+    bad = resign_bundle(path, work / "bad.zip", key_pem, lambda m: m.pop("min_sdk"))
+    r = client.post(URL, content=bad.read_bytes(), headers=HDR)
+    assert r.status_code == 400 and "min_sdk" in r.json()["detail"]
+    assert not [p for p in bundles.rglob("*") if p.is_file()]
+    assert patch_store.get_bundle("com.whatsapp", "3.0.0") is None
+
+
+def test_upload_rejects_oversized_chunked_body(env):
+    client, _, _, bundles = env
+
+    def chunks():
+        for _ in range(17):
+            yield b"\0" * (1024 * 1024)
+
+    r = client.post(URL, content=chunks(), headers=HDR)
+    assert r.status_code == 413
+    assert not [p for p in bundles.rglob("*") if p.is_file()]

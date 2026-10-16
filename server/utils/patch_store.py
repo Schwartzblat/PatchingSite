@@ -7,8 +7,10 @@ two writers can never hand out the same value.
 import json
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
+import config
 import database
 
 _RECORD_COLUMNS = ("package", "version_code", "version_name", "apk_sha256", "dex_sha256",
@@ -117,6 +119,11 @@ def upsert_bundle(meta: dict, sha256: str, size: int) -> int:
     finally:
         conn.close()
     return seq
+
+
+def bundle_path(package: str, patcher_version: str, sha256: str) -> Path:
+    """Where the bundle with this content hash lives. The row's sha256 names the live file."""
+    return Path(config.BUNDLES_DIR) / package / f"{patcher_version}-{sha256[:16]}.zip"
 
 
 def get_bundle(package: str, patcher_version: str) -> Optional[dict]:

@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.routing import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +49,43 @@ def _too_large() -> HTTPException:
     return HTTPException(status_code=413, detail="Bundle too large")
 
 
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _finalize_bundle(tmp: Path, public_key: bytes, digest: str, size: int) -> dict:
+    """Verify the uploaded temp file, move it into place and record it (blocking work)."""
+    try:
+        meta = verify_bundle(tmp, public_key)
+    except BundleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    package = meta.get("package")
+    patcher_version = meta.get("patcher_version")
+    if package not in config.APPS_BY_PACKAGE:
+        raise HTTPException(status_code=404, detail="Unknown package")
+    if not isinstance(patcher_version, str) or not re.fullmatch(PATCHER_VERSION, patcher_version):
+        raise HTTPException(status_code=422, detail="Invalid patcher_version")
+    for key in ("min_store_version_code", "min_sdk"):
+        if not _is_int(meta.get(key)):
+            raise HTTPException(status_code=400, detail=f"Bundle metadata {key} must be an integer")
+
+    dest = patch_store.bundle_path(package, patcher_version, digest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, dest)
+    revision = patch_store.upsert_bundle(meta, digest, size)
+
+    # The row names the live file; drop older content for this version (best effort).
+    for other in dest.parent.glob(f"{patcher_version}-*.zip"):
+        if other != dest and re.fullmatch(r"[0-9a-f]{16}", other.name[len(patcher_version) + 1:-4]):
+            try:
+                other.unlink()
+            except OSError:
+                pass
+    return {"package": package, "patcher_version": patcher_version, "revision": revision}
+
+
 @router.post("/internal/bundles", dependencies=[Depends(require_internal("BUNDLE_UPLOAD_SECRET"))])
 async def post_bundle(request: Request):
     try:
@@ -72,25 +110,7 @@ async def post_bundle(request: Request):
                 if size > MAX_BUNDLE_BYTES:
                     raise _too_large()
                 digest.update(chunk)
-                out.write(chunk)
-
-        try:
-            meta = verify_bundle(tmp, public_key)
-        except BundleError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-
-        package = meta.get("package")
-        patcher_version = meta.get("patcher_version")
-        if package not in config.APPS_BY_PACKAGE:
-            raise HTTPException(status_code=404, detail="Unknown package")
-        if not isinstance(patcher_version, str) or not re.fullmatch(PATCHER_VERSION, patcher_version):
-            raise HTTPException(status_code=422, detail="Invalid patcher_version")
-
-        dest = bundles_dir / package / f"{patcher_version}.zip"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(tmp, dest)
+                await run_in_threadpool(out.write, chunk)
+        return await run_in_threadpool(_finalize_bundle, tmp, public_key, digest.hexdigest(), size)
     finally:
         tmp.unlink(missing_ok=True)
-
-    revision = patch_store.upsert_bundle(meta, digest.hexdigest(), size)
-    return {"package": package, "patcher_version": patcher_version, "revision": revision}
