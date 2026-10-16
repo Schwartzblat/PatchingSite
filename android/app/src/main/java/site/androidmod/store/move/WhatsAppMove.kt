@@ -31,11 +31,56 @@ const val FRESH_BACKUP_MILLIS = 60 * 60 * 1000L
  */
 const val MOVE_START_WINDOW_MILLIS = 24 * 60 * 60 * 1000L
 
+/** Which build a WhatsApp certificate belongs to, for the move; see [buildKind]. */
+enum class BuildKind {
+    /** Ours: the store's own certificate, or the user's own key once WhatsApp is patched on the phone. */
+    OURS,
+
+    /**
+     * A previous build: signed with the store's own (shared) certificate after WhatsApp
+     * moved to the user's key. Updates signed with the user's key can't install over it.
+     */
+    PREVIOUS,
+
+    /** The official WhatsApp, someone else's build, or a certificate that could not be read. */
+    OTHER,
+}
+
 /**
- * Which way the chats move. Read from the phone like the step, never chosen: the
- * manifest records the signature of the build the backup was parked from, and
- * before anything is parked the installed WhatsApp is the one there is to leave.
- * See [moveDirection].
+ * Which build [signature] (a certificate's SHA-256, as the engine hashes WhatsApp's)
+ * is: the spec's "Which key counts where" (2026-10-16, §7). Until the server marks
+ * WhatsApp on-device ([onDevice]), ours is the store's own certificate exactly as
+ * before. After that ours is the user's key ([userSignature]; none cached means
+ * nothing is ours) and the store's own is a previous build. Compared without regard
+ * to case, as the engine compares; an unreadable certificate is never ours, which
+ * keeps the guide on the cautious side.
+ */
+fun buildKind(signature: String?, ownSignature: String?, userSignature: String?, onDevice: Boolean): BuildKind {
+    if (signature.isNullOrEmpty()) return BuildKind.OTHER
+    fun matches(other: String?) = !other.isNullOrEmpty() && signature.equals(other, ignoreCase = true)
+    return when {
+        !onDevice -> if (matches(ownSignature)) BuildKind.OURS else BuildKind.OTHER
+        matches(userSignature) -> BuildKind.OURS
+        matches(ownSignature) -> BuildKind.PREVIOUS
+        else -> BuildKind.OTHER
+    }
+}
+
+/**
+ * Which way a move that has not begun goes: back to the official WhatsApp from ours,
+ * or from a previous build when the user chose that ("Going back to the regular
+ * WhatsApp?"); into ours from anything else. [moveDirection] reads it so, and
+ * MoveRepository stores exactly this as the move's direction when the backup is first
+ * saved or parked, so the guide and the stored hint cannot disagree.
+ */
+fun startsToOfficial(ours: Boolean, previous: Boolean, previousGoesBack: Boolean): Boolean =
+    ours || (previous && previousGoesBack)
+
+/**
+ * Which way the chats move. Read from the phone like the step, never chosen - except
+ * from a previous build, where the user picks between the two: the manifest records
+ * the signature of the build the backup was parked from, and before anything is
+ * parked the installed WhatsApp is the one there is to leave. See [moveDirection].
  */
 enum class MoveDirection {
     /** From the official WhatsApp into ours: the move the guide was first built for. */
@@ -173,10 +218,15 @@ data class MoveGuide(
     /**
      * The official WhatsApp is installed and its backup is still in its own folder:
      * removing it would lose the photos and videos, and, before a copy is saved, the
-     * chats too.
+     * chats too. A previous build counts here in either direction: like the official
+     * app, it is a WhatsApp the store's builds (signed with the user's key) can't
+     * install over, so an Install or Uninstall outside the guide asks first.
      */
     val officialAtRisk: Boolean,
-    /** The same for ours, while going back is on offer. */
+    /**
+     * The same for ours, while going back is on offer; and for a previous build before
+     * anything moved, from which going back is on offer too (it is the user's choice).
+     */
     val oursAtRisk: Boolean,
     /** Set once a move finished in this session: the guide shows "All done" in that move's words. */
     val finished: MoveDirection?,
@@ -202,10 +252,19 @@ data class MoveGuide(
     /** The backup put back, and the new WhatsApp's own: Finish up's sizes. */
     val putBackSize: Long = 0,
     val newBackupSize: Long = 0,
+    /**
+     * The WhatsApp being left is a previous build, in either direction: the move's own
+     * certificate once the backup has left it (so this holds after it is removed), the
+     * installed app before. Without file access, once the build is gone, it can't be told.
+     */
+    val fromPreviousBuild: Boolean = false,
 ) {
     val current: GuideStep? get() = (phase as? MovePhase.AtStep)?.step
 
-    /** Settings offers going back: ours is installed and nothing has moved, or a return is under way. */
+    /**
+     * Settings offers going back: ours (or a previous build) is installed and nothing
+     * has moved, or a return is under way.
+     */
     val offersReturn: Boolean get() = oursAtRisk || (inProgress && direction == MoveDirection.TO_OFFICIAL)
 
     /** Whether to tick [step] in the checklist. */
@@ -252,12 +311,29 @@ private val InProgressSteps = setOf(
 )
 
 /**
- * Which way the move goes. With access, the move's own certificate is the truth:
- * the manifest's, or the record's before anything was parked. Without either, the
- * installed WhatsApp is the one to leave. Without access neither can be read, and
- * only the stored hint can say which way a move under way is going. A hint written
- * before going back existed has no direction, which reads as TO_OURS: right, it
- * was the only way there was.
+ * Which way the move goes.
+ *
+ * A move under way ([moveActive]) goes the way it began: the stored hint decides,
+ * with file access or without. A hint written before going back existed has no
+ * direction, which reads as TO_OURS: right, it was the only way there was.
+ *
+ * Under the old rules (ours = the store's own certificate) this is what the guide
+ * always showed. MoveRepository writes the hint when the backup is first saved or
+ * parked, from the installed WhatsApp - the very build whose certificate the record
+ * and the manifest then carry - by the same comparison [parkedFromOurs] makes, so
+ * with access the two agree; until 2026-10-17 the hint was read only without access,
+ * where nothing else can be read. It is needed now because the rules change under a
+ * move: once WhatsApp is patched on the phone, ours is the user's key, and a return
+ * begun from the shared-key build would read from its own manifest as a move into
+ * ours, half way through. Moves under way when the store updates finish in their
+ * stored direction (the spec's §7).
+ *
+ * Otherwise, with access, the move's own certificate is the truth: the manifest's,
+ * or the record's before anything was parked. Without either, the installed
+ * WhatsApp is the one to leave ([startsToOfficial]). A previous build ([previous])
+ * goes into ours unless the user chose to go back ([previousGoesBack]); that choice
+ * also holds over a record saved from it before the hint could be written (the
+ * store died in between), since its certificate is the shared key, no longer ours.
  */
 fun moveDirection(
     status: Status,
@@ -265,12 +341,15 @@ fun moveDirection(
     parkedFromOurs: Boolean,
     moveActive: Boolean,
     toOfficialHint: Boolean,
+    previous: Boolean = false,
+    previousGoesBack: Boolean = false,
 ): MoveDirection {
     val f = status.facts
     val back = when {
-        f.hasAllFilesAccess && (f.manifest != null || f.record != null) -> parkedFromOurs
-        !f.hasAllFilesAccess && moveActive -> toOfficialHint
-        else -> ours
+        moveActive -> toOfficialHint
+        f.hasAllFilesAccess && (f.manifest != null || f.record != null) ->
+            parkedFromOurs || (previous && previousGoesBack)
+        else -> startsToOfficial(ours, previous, previousGoesBack)
     }
     return if (back) MoveDirection.TO_OFFICIAL else MoveDirection.TO_OURS
 }
@@ -337,6 +416,11 @@ private val PastTheOriginalSteps = setOf(Step.PUT_BACK, Step.INSTALL_PATCHED, St
  * UNINSTALL_WHATSAPP is left out on purpose: there the installed app is the one the
  * backup is still parked from, removing it is the guide's own next step, and
  * reinstalling ours over its kept data is the return's "kept its data" fix.
+ *
+ * [ours] is the strict MoveRepository.isOurs. Once WhatsApp is patched on the phone
+ * the store installs builds signed with the user's key, which can't install over a
+ * previous build either, so a previous build is someone else's here, whichever way
+ * the move goes.
  */
 fun storeInstallWouldStrandBackup(status: Status, ours: Boolean): Boolean {
     val f = status.facts
@@ -352,13 +436,20 @@ fun storeInstallWouldStrandBackup(status: Status, ours: Boolean): Boolean {
  * folders and manifests, and the guide words everything itself from the step and
  * the facts.
  *
- * [ours] is whether the installed WhatsApp carries the store's signing key;
- * [parkedFromOurs] whether the move's own certificate (the manifest's, or the
- * record's) does. [toOfficialHint] is the stored direction of a move under way.
- * [newestVersion] is null until the build list has loaded. [startedAt] is when the
- * user tapped Start; see [FRESH_BACKUP_MILLIS]. [seenInstalledAt] is when the store
- * last saw the WhatsApp being left installed after that Start; see
- * SettingsStore.whatsAppMoveSeenInstalledAt.
+ * [ours] is whether the installed WhatsApp is ours, [previous] whether it is a
+ * previous build (see [buildKind]); [parkedFromOurs] and [parkedFromPrevious] the same
+ * for the move's own certificate (the manifest's, or the record's). [toOfficialHint]
+ * is the stored direction of a move under way, [previousGoesBack] the user's choice to
+ * go back from a previous build. [newestVersion] is null until the build list has
+ * loaded. [startedAt] is when the user tapped Start; see [FRESH_BACKUP_MILLIS].
+ * [seenInstalledAt] is when the store last saw the WhatsApp being left installed after
+ * that Start; see SettingsStore.whatsAppMoveSeenInstalledAt.
+ *
+ * A previous build is not ours, so moving into ours it gets everything the official
+ * app gets ("official" below). Going back it is the build being left, as ours would
+ * be: [toOfficialPhase] reads only the move's own certificate, and [oursAtRisk] holds
+ * for it. It stays guarded as [MoveGuide.officialAtRisk] too, since the store's builds
+ * can't install over it.
  */
 fun moveGuide(
     status: Status,
@@ -372,11 +463,15 @@ fun moveGuide(
     startedAt: Long,
     acks: MoveAcks,
     seenInstalledAt: Long = 0L,
+    previous: Boolean = false,
+    parkedFromPrevious: Boolean = false,
+    previousGoesBack: Boolean = false,
 ): MoveGuide {
     val f = status.facts
     val manifest = f.manifest
     val record = f.record
-    val direction = moveDirection(status, ours, parkedFromOurs, moveActive, toOfficialHint)
+    val direction = moveDirection(status, ours, parkedFromOurs, moveActive, toOfficialHint, previous, previousGoesBack)
+    val hasMoveCertificate = f.hasAllFilesAccess && (manifest != null || record != null)
     val backupAge = when {
         f.newestBackupMs <= 0 -> BackupAge.NONE
         f.newestBackupMs >= startedAt && now - f.newestBackupMs < FRESH_BACKUP_MILLIS -> BackupAge.FRESH
@@ -392,7 +487,12 @@ fun moveGuide(
     // A saved copy is a move under way too, though the backup is still in WhatsApp's
     // folder: the cards say "Finish", and a new Start must not move the mark.
     val inProgress = pastBackup || (f.hasAllFilesAccess && record != null)
+    // A previous build included: it is not ours.
     val official = f.whatsAppInstalled && !f.whatsAppDataKept && !ours
+    // Going back is on offer from ours on its way back, and from a previous build
+    // either on its way back or before a move into ours begins.
+    val goingBack = direction == MoveDirection.TO_OFFICIAL
+    val returnOnOffer = (ours && goingBack) || (previous && (goingBack || !inProgress))
 
     val phase = when {
         removedBeforeSaved(status, now, startedAt, seenInstalledAt) -> MovePhase.RemovedBeforeSaved
@@ -409,7 +509,7 @@ fun moveGuide(
         // At risk while the backup is still in WhatsApp's own folder, saved copy or not:
         // removing WhatsApp still deletes its media, so the Library keeps asking first.
         officialAtRisk = official && !pastBackup,
-        oursAtRisk = ours && !pastBackup && direction == MoveDirection.TO_OFFICIAL,
+        oursAtRisk = returnOnOffer && !pastBackup,
         finished = acks.finished?.takeIf { !inProgress },
         backupAge = backupAge,
         newestBackupMs = f.newestBackupMs,
@@ -431,6 +531,7 @@ fun moveGuide(
         canCancel = status.canCancel,
         putBackSize = putBack?.size ?: 0L,
         newBackupSize = record?.evidenceSize?.takeIf { it > 0 } ?: f.newestBackupSize,
+        fromPreviousBuild = if (hasMoveCertificate) parkedFromPrevious else previous,
     )
 }
 

@@ -41,8 +41,14 @@ data class MoveState(
     val ours: Boolean = false,
     /** The backup left ours: a return. See MoveRepository.parkedFromOurs. */
     val parkedFromOurs: Boolean = false,
+    /** The installed WhatsApp is a previous build; see MoveRepository.isPreviousBuild. */
+    val previous: Boolean = false,
+    /** The backup left a previous build; see MoveRepository.parkedFromPrevious. */
+    val parkedFromPrevious: Boolean = false,
+    /** The user chose to go back from a previous build; see SettingsStore.whatsAppPreviousGoesBack. */
+    val previousGoesBack: Boolean = false,
     val moveActive: Boolean = false,
-    /** The stored direction of a move under way, for when the manifest cannot be read. */
+    /** The stored direction of a move under way, which it keeps; see moveDirection. */
     val toOfficialHint: Boolean = false,
     /** When the user tapped Start; see SettingsStore.whatsAppMoveStartedAt. */
     val startedAt: Long = 0,
@@ -67,6 +73,9 @@ private data class DeviceRead(
     val status: Status,
     val ours: Boolean,
     val parkedFromOurs: Boolean,
+    val previous: Boolean,
+    val parkedFromPrevious: Boolean,
+    val previousGoesBack: Boolean,
     val moveActive: Boolean,
     val toOfficialHint: Boolean,
     val seenInstalledAt: Long,
@@ -115,6 +124,9 @@ class MoveViewModel(
             startedAt = state.startedAt,
             acks = state.acks,
             seenInstalledAt = state.seenInstalledAt,
+            previous = state.previous,
+            parkedFromPrevious = state.parkedFromPrevious,
+            previousGoesBack = state.previousGoesBack,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MoveGuide.Empty)
 
@@ -151,6 +163,9 @@ class MoveViewModel(
                     status = status,
                     ours = container.move.isOurs(status.facts),
                     parkedFromOurs = container.move.parkedFromOurs(status.facts),
+                    previous = container.move.isPreviousBuild(status.facts),
+                    parkedFromPrevious = container.move.parkedFromPrevious(status.facts),
+                    previousGoesBack = container.move.previousGoesBack,
                     moveActive = container.move.moveActive,
                     toOfficialHint = container.move.moveToOfficial,
                     seenInstalledAt = container.move.seenInstalledAt,
@@ -160,6 +175,8 @@ class MoveViewModel(
             }
             _state.value = _state.value.copy(
                 status = read.status, ours = read.ours, parkedFromOurs = read.parkedFromOurs,
+                previous = read.previous, parkedFromPrevious = read.parkedFromPrevious,
+                previousGoesBack = read.previousGoesBack,
                 moveActive = read.moveActive, toOfficialHint = read.toOfficialHint,
                 seenInstalledAt = read.seenInstalledAt, saveProblem = read.saveProblem,
                 spareCopies = read.spareCopies,
@@ -194,6 +211,21 @@ class MoveViewModel(
         val now = System.currentTimeMillis()
         container.move.markStarted(now)
         _state.value = _state.value.copy(startedAt = container.move.startedAt)
+    }
+
+    /**
+     * "Going back to the regular WhatsApp?" with a previous build installed, whose guide
+     * otherwise moves into ours: the guide turns to the way back. Stored, because the
+     * move's direction is written from it once the backup is saved or parked; false
+     * undoes it. Only before anything has moved - after that the move keeps the way it
+     * began - and a no-op for any other WhatsApp, so every way into going back can call it.
+     */
+    fun chooseGoingBack(goingBack: Boolean = true) {
+        if (!_state.value.previous || guide.value.inProgress) return
+        container.move.previousGoesBack = goingBack
+        _state.value = _state.value.copy(previousGoesBack = goingBack)
+        // A read already under way took the old value; this one replaces it.
+        refresh()
     }
 
     /** The older backup is accepted, and saved straight away, as a fresh one is on the next read. */

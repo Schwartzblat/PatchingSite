@@ -132,7 +132,11 @@ fun AppDetailScreen(
         // only shows when there is something to do: see WhatsAppMoveCard.
         if (isWhatsApp) {
             WhatsAppMoveCard(moveGuide, onOpen = onOpenMoveGuide)
-            GoBackLink(moveGuide, onOpen = onOpenMoveGuide)
+            GoBackLink(moveGuide, onOpen = {
+                // From a previous build the guide would otherwise move into ours.
+                moveViewModel.chooseGoingBack()
+                onOpenMoveGuide()
+            })
         }
 
         ErrorBanner(state.error)

@@ -85,8 +85,9 @@ fun WhatsAppMoveCard(guide: MoveGuide, onOpen: () -> Unit) {
 }
 
 /**
- * The WhatsApp page's way back to the official WhatsApp, while ours is installed
- * and nothing has moved. A text button rather than a card: every subscriber with
+ * The WhatsApp page's way back to the official WhatsApp, while ours - or a previous
+ * build, whose guide otherwise moves into ours (MoveViewModel.chooseGoingBack) - is
+ * installed and nothing has moved. A text button rather than a card: every subscriber with
  * our WhatsApp sees this page, and a card would read as a nudge to leave. A return
  * already under way (a saved copy only, before the park) shows the "Finish moving
  * your chats" card instead, so the link would offer to start what has already started.

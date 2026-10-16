@@ -62,6 +62,29 @@ class MoveGuideReturnTest {
     }
 
     @Test
+    fun `an active move keeps its stored direction even with access`() {
+        // A return begun under the old rules, from the build signed with the store's
+        // shared key. Once WhatsApp is patched on the phone that key is no longer ours,
+        // so the manifest alone would turn the move around half way.
+        val parked = facts(installed = false, waFolder = false, parkFolder = true,
+            manifest = manifest(from = PREVIOUS_SIG, versionName = NEWEST, versionCode = 263974L))
+        assertEquals(MoveDirection.TO_OURS, guide(parked).direction)
+        val g = guide(parked, moveActive = true, toOfficialHint = true)
+        assertEquals(MoveDirection.TO_OFFICIAL, g.direction)
+        assertEquals(atStep(GuideStep.INSTALL_NEW), g.phase)
+        // The same with only its copy saved and the shared-key build still installed,
+        // which on its own reads as a previous build moving into ours.
+        val saved = facts(signature = PREVIOUS_SIG, versionName = NEWEST, versionCode = 263974L,
+            record = record(from = PREVIOUS_SIG, versionName = NEWEST, versionCode = 263974L))
+        assertEquals(MoveDirection.TO_OURS, guide(saved).direction)
+        val s = guide(saved, moveActive = true, toOfficialHint = true)
+        assertEquals(MoveDirection.TO_OFFICIAL, s.direction)
+        assertEquals(atStep(GuideStep.REMOVE_OLD), s.phase)
+        assertTrue(s.oursAtRisk)
+        assertTrue(s.fromPreviousBuild)
+    }
+
+    @Test
     fun `the return has six steps and its own titles`() {
         val d = MoveDirection.TO_OFFICIAL
         assertEquals(6, d.steps.size)

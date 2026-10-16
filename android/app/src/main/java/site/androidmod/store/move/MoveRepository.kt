@@ -32,8 +32,18 @@ sealed interface SaveProblem {
 /**
  * The store's one door to the move engine (`:migrate`). Everything here blocks on
  * disk or PackageManager, so callers run it off the main thread.
+ *
+ * [userCertSha256] is the SHA-256 of the user's own signing certificate, null while
+ * none is cached; [onDevice] whether the server has WhatsApp patched on the phone.
+ * Together they say which WhatsApp is ours ([buildKind]); with the defaults, ours is
+ * the store's own certificate, as it was before.
  */
-class MoveRepository(private val context: Context, private val settings: SettingsStore) {
+class MoveRepository(
+    private val context: Context,
+    private val settings: SettingsStore,
+    private val userCertSha256: () -> String? = { null },
+    private val onDevice: () -> Boolean = { false },
+) {
 
     private val migration = Migration(context)
 
@@ -78,6 +88,17 @@ class MoveRepository(private val context: Context, private val settings: Setting
 
     /** See SettingsStore.whatsAppMoveSeenInstalledAt. */
     val seenInstalledAt: Long get() = settings.whatsAppMoveSeenInstalledAt
+
+    /**
+     * The user chose to go back to the official WhatsApp from a previous build; see
+     * SettingsStore.whatsAppPreviousGoesBack. Read when the move's direction is first
+     * stored (setHint), cleared when the move ends.
+     */
+    var previousGoesBack: Boolean
+        get() = settings.whatsAppPreviousGoesBack
+        set(value) {
+            settings.whatsAppPreviousGoesBack = value
+        }
 
     /**
      * Records the user starting the guide, unless a start under an hour old is
@@ -154,26 +175,44 @@ class MoveRepository(private val context: Context, private val settings: Setting
     }
 
     /**
-     * Whether the installed WhatsApp is one of ours. Compared the way the engine
-     * compares, so the two cannot disagree about which build is which. An
-     * unreadable signature is not ours: that keeps the guide on the cautious side.
+     * Which build [signature] is under the rules in force ([buildKind]). The user's key
+     * is read only once WhatsApp is on the phone, so off it nothing more is read than before.
      */
-    fun isOurs(facts: Facts): Boolean {
-        val installed = facts.installedSignatureSha256 ?: return false
-        val own = ownSignature ?: return false
-        return facts.whatsAppInstalled && !facts.whatsAppDataKept && installed.equals(own, ignoreCase = true)
+    private fun kindOf(signature: String?): BuildKind {
+        val on = onDevice()
+        return buildKind(signature, ownSignature, if (on) userCertSha256() else null, on)
     }
+
+    /** The installed WhatsApp's kind; a removed one, even with its data kept, is no build at all. */
+    private fun installedKind(facts: Facts): BuildKind = if (facts.whatsAppInstalled && !facts.whatsAppDataKept) {
+        kindOf(facts.installedSignatureSha256)
+    } else {
+        BuildKind.OTHER
+    }
+
+    /**
+     * Whether the installed WhatsApp is one of ours: the store's own certificate, or
+     * the user's key once WhatsApp is patched on the phone. Compared the way the engine
+     * compares, so the two cannot disagree about which build is which. An unreadable
+     * signature is not ours: that keeps the guide on the cautious side.
+     */
+    fun isOurs(facts: Facts): Boolean = installedKind(facts) == BuildKind.OURS
+
+    /**
+     * Whether the installed WhatsApp is a previous build: signed with the store's own
+     * certificate after WhatsApp moved to the user's key. Never true off the phone.
+     */
+    fun isPreviousBuild(facts: Facts): Boolean = installedKind(facts) == BuildKind.PREVIOUS
 
     /**
      * Whether the backup left ours, which makes the move a return to the official
      * WhatsApp: the manifest's certificate, or the record's before anything was
      * parked. Compared exactly as [isOurs] compares the installed one.
      */
-    fun parkedFromOurs(facts: Facts): Boolean {
-        val left = facts.originalSignature() ?: return false
-        val own = ownSignature ?: return false
-        return left.equals(own, ignoreCase = true)
-    }
+    fun parkedFromOurs(facts: Facts): Boolean = kindOf(facts.originalSignature()) == BuildKind.OURS
+
+    /** Whether the backup left a previous build, by the same certificate as [parkedFromOurs]. */
+    fun parkedFromPrevious(facts: Facts): Boolean = kindOf(facts.originalSignature()) == BuildKind.PREVIOUS
 
     /**
      * Parks WhatsApp's folder. The hint and its direction are written first, so a
@@ -184,9 +223,7 @@ class MoveRepository(private val context: Context, private val settings: Setting
      */
     fun park(): Result = oneAtATime.run {
         parking = true
-        // Ours is what is being left exactly when this is a return.
-        settings.whatsAppMoveToOfficial = isOurs(migration.status().facts)
-        settings.whatsAppMoveActive = true
+        setHint(migration.status().facts)
         try {
             migration.park()
         } finally {
@@ -222,12 +259,24 @@ class MoveRepository(private val context: Context, private val settings: Setting
         clearHint()
         settings.whatsAppMoveStartedAt = 0L
         settings.whatsAppMoveSeenInstalledAt = 0L
+        // The choice belonged to this move; the next one starts from the default.
+        settings.whatsAppPreviousGoesBack = false
         saveProblem = null
     }
 
+    /**
+     * Marks a move begun, direction first. A move already under way - the hint set and
+     * its record or manifest on disk - keeps the direction it began with: the rules for
+     * which WhatsApp is ours can change under it (moveDirection), and a return begun from
+     * the shared-key build must not turn into a move into ours when it is parked.
+     * Otherwise the direction is the guide's for a move not yet begun (startsToOfficial).
+     */
     private fun setHint(facts: Facts) {
-        // Ours is what is being left exactly when this is a return.
-        settings.whatsAppMoveToOfficial = isOurs(facts)
+        val underWay = settings.whatsAppMoveActive && (facts.record != null || facts.manifest != null)
+        if (!underWay) {
+            settings.whatsAppMoveToOfficial =
+                startsToOfficial(isOurs(facts), isPreviousBuild(facts), settings.whatsAppPreviousGoesBack)
+        }
         settings.whatsAppMoveActive = true
     }
 
@@ -285,8 +334,14 @@ class MoveRepository(private val context: Context, private val settings: Setting
         // and its failure must not get as far as offering "Uninstall and retry".
         if (storeInstallWouldStrandBackup(status, isOurs(facts))) {
             return InstallGate.Refused(
-                "The regular WhatsApp is installed, so ours can't be installed over it. Nothing was " +
-                    "changed. Open \"Move your chats\" on the WhatsApp page to see what to do."
+                if (isPreviousBuild(facts)) {
+                    "Your current patched WhatsApp is an older build, so the new one can't be installed " +
+                        "over it. Nothing was changed. Open \"Move your chats\" on the WhatsApp page to see " +
+                        "what to do."
+                } else {
+                    "The regular WhatsApp is installed, so ours can't be installed over it. Nothing was " +
+                        "changed. Open \"Move your chats\" on the WhatsApp page to see what to do."
+                }
             )
         }
         if (status.canPutBack) {
@@ -342,17 +397,21 @@ class MoveRepository(private val context: Context, private val settings: Setting
         append("Guide: ").append(describe(guide)).append('\n')
         append("Direction: ")
             .append(if (guide.direction == MoveDirection.TO_OFFICIAL) "to the regular WhatsApp" else "to ours")
+            .append(if (guide.fromPreviousBuild) ", from a previous build" else "")
             .append('\n')
+        append("Patched on the phone: ").append(if (onDevice()) "yes" else "no").append('\n')
         append("Engine step: ").append(status.step).append('\n')
         append("File access: ").append(if (f.hasAllFilesAccess) "yes" else "no").append('\n')
         append("Move hint: ").append(settings.whatsAppMoveActive)
-            .append(", to official: ").append(settings.whatsAppMoveToOfficial).append('\n')
+            .append(", to official: ").append(settings.whatsAppMoveToOfficial)
+            .append(", previous goes back: ").append(settings.whatsAppPreviousGoesBack).append('\n')
         append("WhatsApp: ")
         append(
             when {
                 !f.whatsAppInstalled -> "not installed"
                 f.whatsAppDataKept -> "removed, data kept"
                 isOurs(f) -> "ours"
+                isPreviousBuild(f) -> "previous build"
                 else -> "official"
             }
         )

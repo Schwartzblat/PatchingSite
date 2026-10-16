@@ -122,9 +122,11 @@ class SettingsStore(context: Context) {
 
     /**
      * Which way the move under way is going: true when it is going back to the
-     * official WhatsApp. Read only while [whatsAppMoveActive] is set and file access
-     * is missing, which is the one state where the manifest that records it cannot
-     * be read. A move begun before this existed has it unset, which reads as "into
+     * official WhatsApp. Read whenever [whatsAppMoveActive] is set, with file access
+     * or without: a move finishes in the direction it began, even when the rules for
+     * which WhatsApp is ours change under it (see moveDirection). Until 2026-10-17 it
+     * was read only without access, where the manifest that also records it cannot be
+     * read. A move begun before this existed has it unset, which reads as "into
      * ours": right, since that was the only direction there was.
      *
      * commit() for the same reason as whatsAppMoveActive: it is written just before
@@ -134,6 +136,21 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_WHATSAPP_MOVE_TO_OFFICIAL, false)
         set(value) {
             prefs.edit().putBoolean(KEY_WHATSAPP_MOVE_TO_OFFICIAL, value).commit()
+        }
+
+    /**
+     * The user chose "Going back to the regular WhatsApp?" with a previous build
+     * installed - one signed with the store's own certificate after WhatsApp moved to
+     * the user's key - whose guide otherwise moves into ours. Counts only until the
+     * move begins: from then on [whatsAppMoveToOfficial], written from it, carries the
+     * direction. Cleared when a move finishes or is cancelled.
+     *
+     * commit() like the move hints: one boolean on a tap, read when the hint is written.
+     */
+    var whatsAppPreviousGoesBack: Boolean
+        get() = prefs.getBoolean(KEY_WHATSAPP_PREVIOUS_GOES_BACK, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_WHATSAPP_PREVIOUS_GOES_BACK, value).commit()
         }
 
     /**
@@ -176,5 +193,6 @@ class SettingsStore(context: Context) {
         const val KEY_WHATSAPP_MOVE_STARTED_AT = "whatsapp_move_started_at"
         const val KEY_WHATSAPP_MOVE_TO_OFFICIAL = "whatsapp_move_to_official"
         const val KEY_WHATSAPP_MOVE_SEEN_INSTALLED_AT = "whatsapp_move_seen_installed_at"
+        const val KEY_WHATSAPP_PREVIOUS_GOES_BACK = "whatsapp_previous_goes_back"
     }
 }

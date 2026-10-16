@@ -171,12 +171,17 @@ fun SettingsScreen(
                 subtitle = "Permissions, Play Protect and other first-install questions",
                 onClick = { openLink(context, SiteLinks.INSTALL_HELP) },
             )
-            // Only while it applies: ours installed with nothing moved, or a return under way.
+            // Only while it applies: ours (or a previous build) installed with nothing moved,
+            // or a return under way.
             if (moveGuide.offersReturn) {
                 LinkRow(
                     title = "Go back to the regular WhatsApp",
                     subtitle = "Keep your chats when you switch",
-                    onClick = onOpenMoveGuide,
+                    onClick = {
+                        // From a previous build the guide would otherwise move into ours.
+                        moveViewModel.chooseGoingBack()
+                        onOpenMoveGuide()
+                    },
                 )
             }
             LinkRow(title = "Report a bug", subtitle = "Tell us what went wrong", onClick = onReportBug)

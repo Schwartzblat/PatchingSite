@@ -68,6 +68,17 @@ class MoveGuideForwardTest {
     }
 
     @Test
+    fun `a move into ours under way keeps its direction with access whatever is installed`() {
+        // Its stored direction decides, not the build installed now: ours over a park
+        // that went wrong does not turn the move into a return.
+        val f = facts(signature = OURS_SIG, parkFolder = true)
+        assertEquals(Step.NEEDS_ATTENTION, status(f).step)
+        val g = guide(f, moveActive = true)
+        assertEquals(MoveDirection.TO_OURS, g.direction)
+        assertEquals(MovePhase.Attention, g.phase)
+    }
+
+    @Test
     fun `an official app whose certificate cannot be read needs attention`() {
         val f = facts(signature = null)
         assertEquals(Step.BACK_UP_AND_PARK, status(f).step)

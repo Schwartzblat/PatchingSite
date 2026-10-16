@@ -6,8 +6,17 @@ import com.patcher.migrate.MoveRecord
 import com.patcher.migrate.ParkManifest
 import com.patcher.migrate.Status
 
-/** The store's own certificate in these tests: what ours is signed with. */
+/**
+ * What ours is signed with in these tests: the store's own certificate, or, once
+ * WhatsApp is patched on the phone, the user's own key (PreviousBuildTest).
+ */
 val OURS_SIG = "a".repeat(64)
+
+/**
+ * The store's own (shared) certificate once WhatsApp is patched on the phone, where
+ * OURS_SIG is the user's key: what a previous build is signed with.
+ */
+val PREVIOUS_SIG = "c".repeat(64)
 
 /** The Play Store WhatsApp's certificate. */
 val OFFICIAL_SIG = "b".repeat(64)
@@ -128,6 +137,10 @@ fun status(f: Facts): Status = EngineState.of(f)
 fun oursIn(f: Facts): Boolean =
     f.whatsAppInstalled && !f.whatsAppDataKept && f.installedSignatureSha256 == OURS_SIG
 
+/** Whether [f]'s WhatsApp is a previous build, compared the way MoveRepository.isPreviousBuild compares. */
+fun previousIn(f: Facts): Boolean =
+    f.whatsAppInstalled && !f.whatsAppDataKept && f.installedSignatureSha256 == PREVIOUS_SIG
+
 /** moveGuide over [f], with the store's inputs defaulted the way the phone would give them. */
 fun guide(
     f: Facts,
@@ -138,6 +151,8 @@ fun guide(
     acks: MoveAcks = MoveAcks(),
     startedAt: Long = STARTED_AT,
     seenInstalledAt: Long = 0L,
+    previous: Boolean = previousIn(f),
+    previousGoesBack: Boolean = false,
 ): MoveGuide = moveGuide(
     status = status(f),
     ours = oursIn(f),
@@ -151,4 +166,8 @@ fun guide(
     startedAt = startedAt,
     acks = acks,
     seenInstalledAt = seenInstalledAt,
+    previous = previous,
+    // As MoveRepository.parkedFromPrevious.
+    parkedFromPrevious = f.originalSignature() == PREVIOUS_SIG,
+    previousGoesBack = previousGoesBack,
 )

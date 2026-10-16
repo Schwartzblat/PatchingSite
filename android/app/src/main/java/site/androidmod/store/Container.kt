@@ -20,6 +20,7 @@ import site.androidmod.store.install.RootInstaller
 import site.androidmod.store.install.SessionInstaller
 import site.androidmod.store.install.useRootInstaller
 import site.androidmod.store.move.MoveRepository
+import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.patch.ApkSigner
 import site.androidmod.patch.DexHash
 import site.androidmod.patch.FastSigner
@@ -91,7 +92,14 @@ class Container(private val context: Context) {
     val storeUpdates by lazy { StoreUpdateRepository(api) }
     val selfInstaller: SelfInstaller by lazy { PackageSelfInstaller(context, this) }
     val bugReports by lazy { BugReportRepository(api) }
-    val move by lazy { MoveRepository(context, settings) }
+    val move by lazy {
+        MoveRepository(
+            context,
+            settings,
+            userCertSha256 = { signingKeys.cached()?.certSha256 },
+            onDevice = { WHATSAPP_PACKAGE in settings.onDevicePackages },
+        )
+    }
 
     /**
      * One on-device build of [pkg]. Each package has its own work directory, so jobs for
