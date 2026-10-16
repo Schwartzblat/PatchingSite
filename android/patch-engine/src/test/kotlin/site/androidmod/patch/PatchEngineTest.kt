@@ -131,7 +131,7 @@ class PatchEngineTest {
         assertEquals("""{"A":"a","ALPHA":"a","ZED":"z\"q"}""", String(read(req.output, "assets/patcher/artifactory.json")!!))
         assertEquals("""{"token":"tok\"en"}""", String(read(req.output, "assets/paywall.json")!!))
         assertEquals(
-            """{"patcher_version":"3.0.0","revision":7,"dex_sha256":"${s.record.dexSha256}"}""",
+            """{"patcher_version":"3.0.0","revision":7,"dex_sha256":"${s.record.dexSha256}","features_off":["f2","f1"]}""",
             String(read(req.output, "assets/patcher/patch-info.json")!!),
         )
         assertArrayEquals(SyntheticApks.dexApp1, read(req.output, "classes.dex"))
@@ -158,6 +158,11 @@ class PatchEngineTest {
         val result = engine.patch(req)
         assertEquals(listOf("f2"), result.featuresOff)
         assertEquals(emptyList<String>(), result.visibleFeaturesOff)
+    }
+
+    @Test fun featuresOffFunctionListsDerivedThenRecordOnly() {
+        val s = setup(artifacts = """{"A":"a"}""", featuresOff = """["f2","zz"]""")
+        assertEquals(listOf("f2", "zz"), featuresOff(s.bundle.features, s.record))
     }
 
     @Test fun emptyFeatureKeyAndRecordOnlyIdsUnion() {

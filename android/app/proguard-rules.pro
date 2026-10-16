@@ -25,3 +25,12 @@
 # only (CLASS retention) and not shipped to Android. R8 reports them as missing
 # classes; there is nothing to keep, so the warnings are silenced instead.
 -dontwarn com.google.errorprone.annotations.**
+
+# :patch-engine's commons-compress references optional codecs (zstd, xz, brotli)
+# that are not on the classpath; the engine only reads deflate/stored zips, so
+# the classes are never loaded. Listed per the plan; R8 reported no missing
+# classes when this was added because nothing in :app called the engine yet -
+# re-check once it does (the minified staging run on a device is the proof).
+-dontwarn com.github.luben.zstd.**
+-dontwarn org.tukaani.xz.**
+-dontwarn org.brotli.dec.**

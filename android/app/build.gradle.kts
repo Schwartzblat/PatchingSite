@@ -125,6 +125,22 @@ android {
             buildConfigField("String", "DEFAULT_BASE_URL", "\"https://androidmod.site\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // Release as shipped (minified, shared key, same versionCode rule) but pointed
+        // at a dev server; src/staging allows cleartext like debug does.
+        create("staging") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+            signingConfig = signingConfigs.findByName(sharedSigning)
+            val stagingBaseUrl = providers.gradleProperty("androidmod.stagingBaseUrl")
+                .getOrElse("http://127.0.0.1:8000")
+            buildConfigField("String", "DEFAULT_BASE_URL", "\"$stagingBaseUrl\"")
+        }
+    }
+
+    packaging {
+        // libfastsigner.so is an executable, not a library: it must exist as a real
+        // file in nativeLibraryDir to be exec'd, so it cannot stay inside the APK.
+        jniLibs { useLegacyPackaging = true }
     }
 
     compileOptions {
@@ -157,13 +173,17 @@ val releaseVersionCode = Duration.between(Instant.parse("2026-01-01T00:00:00Z"),
     .toMinutes().toInt()
 
 androidComponents {
-    onVariants(selector().withBuildType("release")) { variant ->
-        variant.outputs.forEach { it.versionCode.set(releaseVersionCode) }
+    // Staging gets the same code so it installs over a release store.
+    for (buildType in listOf("release", "staging")) {
+        onVariants(selector().withBuildType(buildType)) { variant ->
+            variant.outputs.forEach { it.versionCode.set(releaseVersionCode) }
+        }
     }
 }
 
 dependencies {
     implementation(project(":migrate"))
+    implementation(project(":patch-engine"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)
@@ -177,6 +197,7 @@ dependencies {
     implementation(libs.core.ktx)
     implementation(libs.browser)
     implementation(libs.security.crypto)
+    implementation(libs.work.runtime)
 
     implementation(libs.okhttp)
     implementation(libs.serialization.json)
@@ -193,7 +214,7 @@ dependencies {
 // reaches back into the project while the task runs.
 val releaseSigningGap = signingGap
 val envFilePath = rootDir.parentFile.resolve(".env").path
-tasks.matching { it.name == "assembleRelease" || it.name == "bundleRelease" }.configureEach {
+tasks.matching { it.name in setOf("assembleRelease", "bundleRelease", "assembleStaging") }.configureEach {
     doFirst {
         check(releaseSigningGap == null) {
             "A release build must be signed with the same keystore the server signs " +

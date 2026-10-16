@@ -3,6 +3,7 @@ package site.androidmod.patch
 import java.io.File
 import java.io.IOException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -23,6 +24,16 @@ data class PatchRequest(
 
 /** [visibleFeaturesOff] is [featuresOff] reduced to the titles worth showing the user. */
 data class PatchResult(val output: File, val featuresOff: List<String>, val visibleFeaturesOff: List<String>)
+
+/**
+ * Ids of the features a patched build of [record] leaves off: those whose keys the
+ * record lacks (or holds empty) first, then any ids only the record lists.
+ */
+fun featuresOff(features: Features, record: VersionRecord): List<String> {
+    val present = record.artifacts.filterValues { it.isNotEmpty() }.keys
+    val derivedOff = features.features.filter { f -> f.keys.any { it !in present } }.map { it.id }
+    return derivedOff + record.featuresOff.filter { it !in derivedOff }
+}
 
 /** Verifies the official APK against a bundle and record, then builds and signs the patched APK. */
 class PatchEngine(private val signer: ApkSigner) {
@@ -64,8 +75,7 @@ class PatchEngine(private val signer: ApkSigner) {
         if (missingRequired.isNotEmpty()) {
             throw PatchException.Unsupported("${record.packageName} ${record.versionName} lacks required keys: $missingRequired")
         }
-        val derivedOff = bundle.features.features.filter { f -> f.keys.any { it !in present } }.map { it.id }
-        val featuresOff = derivedOff + record.featuresOff.filter { it !in derivedOff }
+        val featuresOff = featuresOff(bundle.features, record)
         OfficialApk.verify(official, bundle.features.officialCertSha256)
         if (DexHash.dexSha256(official) != record.dexSha256) {
             throw PatchException.RecordMismatch("The record is for a different build of $appPackage")
@@ -82,6 +92,7 @@ class PatchEngine(private val signer: ApkSigner) {
                         put("patcher_version", bundle.meta.patcherVersion)
                         put("revision", request.revision)
                         put("dex_sha256", record.dexSha256)
+                        put("features_off", JsonArray(featuresOff.map(::JsonPrimitive)))
                     },
                 ),
             ),

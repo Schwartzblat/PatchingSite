@@ -286,3 +286,4 @@ deploy/deploy.env
 # full checkouts of other commits. Ignored here rather than in .git/info/exclude,
 # so the rule survives a fresh clone or a re-init.
 .claude/
+!android/app/src/main/jniLibs/**/libfastsigner.so

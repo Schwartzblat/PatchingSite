@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Debug and staging builds only. The dev server is plain HTTP on the LAN and its address
+         is user-overridable in Settings, so this cannot be pinned to one host. The
+         release build ships no such file and therefore refuses cleartext outright. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
