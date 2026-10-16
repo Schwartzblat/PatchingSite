@@ -15,8 +15,9 @@ from stitch.bundle import BundleError, verify_bundle
 
 import config
 from utils import patch_store, signing_keys
-from utils.jwt_utils import UserInDB, get_current_user
-from utils.ratelimit import (patch_ip_rate_limit, patch_rate_limit, signing_key_ip_rate_limit,
+from utils.jwt_utils import RequiredToken, UserInDB, create_app_jwt, get_current_user
+from utils.ratelimit import (RateLimiter, app_token_ip_rate_limit, app_token_rate_limit,
+                             patch_ip_rate_limit, patch_rate_limit, signing_key_ip_rate_limit,
                              signing_key_rate_limit)
 from utils.stripe_utils import RequiredSubscription
 from utils.internal_auth import require_internal
@@ -138,13 +139,18 @@ async def get_signing_key(user: UserInDB = Depends(get_current_user)):
         headers={"Cache-Control": "no-store"})
 
 
-def patch_reader(subscription: RequiredSubscription, user: UserInDB = Depends(get_current_user)) -> UserInDB:
-    """Signed in, subscribed and within the per-account read budget."""
-    wait = patch_rate_limit.retry_after(f"user:{user.id}")
-    if wait:
-        raise HTTPException(status_code=429, detail="Too many requests, please try again later.",
-                            headers={"Retry-After": str(wait)})
-    return user
+def _account_reader(limiter: RateLimiter):
+    """Dependency: signed in, subscribed and within `limiter`'s per-account budget."""
+    def reader(subscription: RequiredSubscription, user: UserInDB = Depends(get_current_user)) -> UserInDB:
+        wait = limiter.retry_after(f"user:{user.id}")
+        if wait:
+            raise HTTPException(status_code=429, detail="Too many requests, please try again later.",
+                                headers={"Retry-After": str(wait)})
+        return user
+    return reader
+
+
+patch_reader = _account_reader(patch_rate_limit)
 
 
 def _known_package(package: str) -> str:
@@ -208,3 +214,17 @@ async def get_bundle(package: str, patcher_version: str = PathParam(pattern=PATC
     if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="Unknown bundle")
     return FileResponse(path, media_type="application/zip", headers={"ETag": f'"{row["sha256"]}"'})
+
+
+class AppTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    package: str
+
+
+@router.post("/app-token", dependencies=[Depends(app_token_ip_rate_limit),
+                                         Depends(_account_reader(app_token_rate_limit))])
+def post_app_token(body: AppTokenRequest, token: RequiredToken, subscription: RequiredSubscription):
+    """The same paywall token POST /downloads bakes into a server-patched APK."""
+    _known_package(body.package)
+    return {"token": create_app_jwt(token, body.package, customer_id=subscription.client_id)}

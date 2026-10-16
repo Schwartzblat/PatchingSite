@@ -185,6 +185,10 @@ signing_key_ip_rate_limit = RateLimiter("signing-key-ip", limit=600, window_seco
 # the per-IP guard only stops a flood.
 patch_rate_limit = RateLimiter("patch-read", limit=120, window_seconds=60)
 patch_ip_rate_limit = RateLimiter("patch-read-ip", limit=1200, window_seconds=60)
+# Paywall token minting: each call signs a fresh JWT for the account. A phone
+# asks once per install or reinstall. Per account after auth; per-IP flood guard.
+app_token_rate_limit = RateLimiter("app-token", limit=60, window_seconds=60 * 60)
+app_token_ip_rate_limit = RateLimiter("app-token-ip", limit=600, window_seconds=60 * 60)
 
 
 def reset_all() -> None:
