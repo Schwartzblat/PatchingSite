@@ -1,0 +1,60 @@
+package site.androidmod.patch
+
+import java.io.File
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+
+class PatchBundleTest {
+    private val key = ecKeyPair()
+    private val featuresJson = """{"required_keys":["A"],"official_cert_sha256":["ff"],"features":[{"id":"f","title":"F","keys":["A"]}]}"""
+    private val files = mapOf(
+        "module.apk" to "module".toByteArray(), "paywall.apk" to "paywall".toByteArray(),
+        "manifest-additions.xml" to "xml".toByteArray(), "features.json" to featuresJson.toByteArray(),
+    )
+    private val meta = mapOf("format" to 1, "package" to "com.x", "patcher_version" to "1.2", "min_sdk" to 30,
+        "min_store_version_code" to 5, "dex_order" to listOf("module.apk", "paywall.apk"))
+
+    private fun tmp() = File.createTempFile("bundle", ".zip").also { it.deleteOnExit() }
+    private fun bundle(files: Map<String, ByteArray> = this.files, meta: Map<String, Any?> = this.meta,
+                        extra: List<Pair<String, ByteArray>> = emptyList()) = bundleZip(tmp(), files, meta, key.private, extra)
+
+    @Test fun validBundleOpens() {
+        val b = PatchBundle.open(bundle(), key.public)
+        assertEquals(BundleMeta(1, "com.x", "1.2", 30, 5L, listOf("module.apk", "paywall.apk"), b.meta.files), b.meta)
+        assertEquals(files.keys, b.meta.files.keys)
+        assertArrayEquals("module".toByteArray(), b.bytes("module.apk"))
+        assertEquals(listOf("A"), b.features.requiredKeys)
+    }
+    @Test(expected = PatchException.BadBundle::class) fun wrongKeyRejected() { PatchBundle.open(bundle(), ecKeyPair().public) }
+    @Test(expected = PatchException.BadBundle::class) fun tamperedFileRejected() {
+        val good = bundle()
+        val entries = org.apache.commons.compress.archivers.zip.ZipFile.builder().setFile(good).get().use { z ->
+            z.entries.toList().map { it.name to z.getInputStream(it).readBytes() }
+        }.map { if (it.first == "module.apk") it.first to "evil!!".toByteArray() else it }
+        PatchBundle.open(zip(tmp(), entries), key.public)
+    }
+    @Test(expected = PatchException.BadBundle::class) fun unlistedFileRejected() { PatchBundle.open(bundle(extra = listOf("evil.apk" to byteArrayOf(1))), key.public) }
+    @Test(expected = PatchException.BadBundle::class) fun missingListedFileRejected() {
+        val good = bundle()
+        val entries = org.apache.commons.compress.archivers.zip.ZipFile.builder().setFile(good).get().use { z ->
+            z.entries.toList().map { it.name to z.getInputStream(it).readBytes() }
+        }.filter { it.first != "paywall.apk" }
+        PatchBundle.open(zip(tmp(), entries), key.public)
+    }
+    @Test(expected = PatchException.BadBundle::class) fun duplicateEntryRejected() {
+        PatchBundle.open(bundle(extra = listOf("features.json" to featuresJson.toByteArray())), key.public)
+    }
+    @Test(expected = PatchException.BadBundle::class) fun unknownFormatRejected() { PatchBundle.open(bundle(meta = meta + ("format" to 2)), key.public) }
+
+    @Test fun realBundleOpens() {
+        val zip = fixtureFile(".patcher-work/bundle-com.whatsapp-3.0.0.zip"); assumeTrue(zip != null)
+        val keyFile = File(System.getProperty("patch.bundleKey")); assumeTrue(keyFile.isFile)
+        val b = PatchBundle.open(zip!!, publicKeyFromPem(keyFile.readText()))
+        assertEquals("com.whatsapp", b.meta.packageName)
+        assertEquals(33, b.meta.minSdk)
+        assertEquals(listOf("module.apk", "paywall.apk"), b.meta.dexOrder)
+        assertEquals(listOf("PACKAGE_SIGNATURE", "FMESSAGE_CLASS", "SETTINGS_ACTIVITY_CLASS_NAME"), b.features.requiredKeys)
+    }
+}
