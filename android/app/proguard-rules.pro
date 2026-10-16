@@ -28,9 +28,11 @@
 
 # :patch-engine's commons-compress references optional codecs (zstd, xz, brotli)
 # that are not on the classpath; the engine only reads deflate/stored zips, so
-# the classes are never loaded. Listed per the plan; R8 reported no missing
-# classes when this was added because nothing in :app called the engine yet -
-# re-check once it does (the minified staging run on a device is the proof).
+# the classes are never loaded. Re-checked once Container.patchJob made the engine
+# reachable (2026-10-17, :app:assembleRelease): R8 reported no further missing
+# classes for commons-compress, ARSCLib or apksig, so nothing else is listed.
+# Reflection/ServiceLoader use in those libraries is only provable by the
+# minified staging run on a device.
 -dontwarn com.github.luben.zstd.**
 -dontwarn org.tukaani.xz.**
 -dontwarn org.brotli.dec.**

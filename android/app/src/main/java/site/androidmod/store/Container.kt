@@ -1,6 +1,7 @@
 package site.androidmod.store
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.storage.StorageManager
 import site.androidmod.store.data.ApiClient
@@ -19,9 +20,21 @@ import site.androidmod.store.install.RootInstaller
 import site.androidmod.store.install.SessionInstaller
 import site.androidmod.store.install.useRootInstaller
 import site.androidmod.store.move.MoveRepository
+import site.androidmod.patch.ApkSigner
+import site.androidmod.patch.DexHash
+import site.androidmod.patch.FastSigner
+import site.androidmod.patch.OfficialApk
+import site.androidmod.patch.PatchBundle
+import site.androidmod.patch.PatchEngine
+import site.androidmod.store.patch.ArchiveInfo
 import site.androidmod.store.patch.BundleCache
 import site.androidmod.store.patch.BundleKey
+import site.androidmod.store.patch.LatestPatch
+import site.androidmod.store.patch.OfficialDownloader
 import site.androidmod.store.patch.PatchApi
+import site.androidmod.store.patch.PatchJob
+import site.androidmod.store.patch.PatchServer
+import site.androidmod.store.patch.SigningKey
 import site.androidmod.store.patch.SigningKeyStore
 import site.androidmod.store.ui.settings.bugReportContext
 import site.androidmod.store.update.InstalledBuild
@@ -29,6 +42,7 @@ import site.androidmod.store.update.PackageSelfInstaller
 import site.androidmod.store.update.SelfInstaller
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 
 /**
  * Manual dependency wiring. This app has few enough collaborators that a DI
@@ -70,6 +84,55 @@ class Container(private val context: Context) {
     val selfInstaller: SelfInstaller by lazy { PackageSelfInstaller(context, this) }
     val bugReports by lazy { BugReportRepository(api) }
     val move by lazy { MoveRepository(context, settings) }
+
+    /**
+     * One on-device build of [pkg]. Each package has its own work directory, so jobs for
+     * different packages never clear each other's files; StoreApp wipes `patch/work` at launch.
+     */
+    fun patchJob(pkg: String): PatchJob = PatchJob(
+        server = object : PatchServer {
+            override suspend fun latest(pkg: String): LatestPatch = patchApi.latest(pkg)
+            override suspend fun record(pkg: String, patcherVersion: String, apkSha256: String?, dexSha256: String?) =
+                patchApi.record(pkg, patcherVersion, apkSha256, dexSha256)
+            override suspend fun bundle(pkg: String, patcherVersion: String): PatchBundle = bundles.open(pkg, patcherVersion)
+            override suspend fun appToken(pkg: String): String = patchApi.appToken(pkg)
+            override suspend fun signingKey(): SigningKey = signingKeys.get()
+        },
+        downloader = object : OfficialDownloader {
+            override suspend fun size(url: String): Long? = api.size(url)
+            override suspend fun download(
+                url: String,
+                target: File,
+                digest: MessageDigest?,
+                onProgress: (bytesRead: Long, total: Long) -> Unit,
+            ) = api.download(url, target, digest = digest, onProgress = onProgress)
+        },
+        reserve = ::reserveSpace,
+        verifyOfficial = OfficialApk::verify,
+        dexHash = DexHash::dexSha256,
+        patcher = { request, signer -> PatchEngine(signer).patch(request) },
+        signerFor = { key -> fastSigner(key) },
+        inspector = ::inspectArchive,
+        signedIn = { tokens.token != null },
+        sdkInt = Build.VERSION.SDK_INT,
+        storeVersionCode = storeVersionCode,
+        workDir = File(context.filesDir, "patch/work/$pkg"),
+    )
+
+    // The binary ships as libfastsigner.so and is extracted (useLegacyPackaging) so it can be executed.
+    private fun fastSigner(key: SigningKey): ApkSigner =
+        FastSigner(File(context.applicationInfo.nativeLibraryDir, "libfastsigner.so"), key.keystore, key.password, key.alias)
+
+    /** What PackageManager makes of [file]: its package, version and the SHA-256 of each signer certificate. */
+    @Suppress("DEPRECATION")
+    private fun inspectArchive(file: File): ArchiveInfo? {
+        val info = context.packageManager.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES)
+            ?: return null
+        val signers = info.signingInfo?.apkContentsSigners.orEmpty().map { signature ->
+            MessageDigest.getInstance("SHA-256").digest(signature.toByteArray()).joinToString("") { "%02x".format(it) }
+        }
+        return ArchiveInfo(info.packageName, info.longVersionCode, signers.toSet())
+    }
 
     /** App version, OS and device, as a bug report and a support email carry them. */
     fun deviceContext(): Map<String, String> = bugReportContext(

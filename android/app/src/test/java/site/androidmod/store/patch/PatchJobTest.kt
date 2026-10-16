@@ -11,6 +11,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -729,6 +730,30 @@ class PatchJobTest {
             assertTrue(name, f.requests.isEmpty())
             f.assertNothingLeft()
         }
+    }
+
+    @Test
+    fun `a failure carries the exception it came from`() = runTest {
+        val server401 = ApiException(401, "Unauthorized")
+        val f = fixture()
+        f.recordsByApk[OFFICIAL_SHA] = recordJson()
+        f.latestAnswer = { throw server401 }
+        assertSame(server401, (f.run() as PatchOutcome.Failed).cause)
+
+        val dropped = IOException("Received 10 of 21 bytes")
+        val g = fixture()
+        g.recordsByApk[OFFICIAL_SHA] = recordJson()
+        g.downloadError = dropped
+        assertSame(dropped, (g.run() as PatchOutcome.Failed).cause)
+
+        val broken = PatchException.SignFailed("fastsigner exited 1")
+        val h = fixture()
+        h.recordsByApk[OFFICIAL_SHA] = recordJson()
+        h.patcherAction = { _, _ -> throw broken }
+        // Coroutine stack-trace recovery may hand back a copy of the same exception.
+        val engineCause = (h.run() as PatchOutcome.Failed).cause
+        assertTrue(engineCause is PatchException.SignFailed)
+        assertEquals(broken.message, engineCause?.message)
     }
 
     @Test

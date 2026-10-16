@@ -20,6 +20,7 @@ class StoreApp : Application() {
         // moment a parked backup has to go back. See WhatsAppInstallWatcher.
         WhatsAppInstallWatcher.register(this, container.move)
         pruneOrphanedDownloads()
+        wipePatchWork()
     }
 
     /**
@@ -40,6 +41,17 @@ class StoreApp : Application() {
                 }
                 .onFailure { Log.w(TAG, "Could not prune orphaned downloads", it) }
         }, "download-prune").apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Empties `filesDir/patch/work`: the process just started, so no patch job can be running
+     * and whatever an earlier process left there is an orphan of up to ~3x an APK. Off the main thread.
+     */
+    private fun wipePatchWork() {
+        Thread({
+            runCatching { File(filesDir, "patch/work").deleteRecursively() }
+                .onFailure { Log.w(TAG, "Could not wipe the patch work directory", it) }
+        }, "patch-work-wipe").apply { isDaemon = true }.start()
     }
 
     companion object {

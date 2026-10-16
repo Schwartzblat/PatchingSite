@@ -64,8 +64,24 @@ fun PatchFailure.message(bytesNeeded: Long = -1): String = when (this) {
 sealed interface PatchOutcome {
     data class Ready(val file: File, val versionName: String, val versionCode: Long, val revision: Int) : PatchOutcome
 
-    /** [message] is [PatchFailure.message]; [minStoreVersionCode] comes with STORE_UPDATE_REQUIRED. */
-    data class Failed(val reason: PatchFailure, val message: String, val minStoreVersionCode: Long? = null) : PatchOutcome
+    /**
+     * [message] is [PatchFailure.message]; [minStoreVersionCode] comes with STORE_UPDATE_REQUIRED.
+     * [cause] is the exception the failure was mapped from, for the log and for telling a 401 apart;
+     * it is not part of equality. Engine and HTTP messages carry no secrets.
+     */
+    class Failed(
+        val reason: PatchFailure,
+        val message: String,
+        val minStoreVersionCode: Long? = null,
+        val cause: Throwable? = null,
+    ) : PatchOutcome {
+        override fun equals(other: Any?) = other is Failed && reason == other.reason &&
+            message == other.message && minStoreVersionCode == other.minStoreVersionCode
+
+        override fun hashCode() = listOf(reason, message, minStoreVersionCode).hashCode()
+
+        override fun toString() = "Failed(reason=$reason, message=$message, minStoreVersionCode=$minStoreVersionCode)"
+    }
 
     /** The user declined the features-off alert. */
     data object Cancelled : PatchOutcome
@@ -204,7 +220,7 @@ class PatchJob(
         } catch (error: CancellationException) {
             throw error
         } catch (stop: Stop) {
-            return failed(stop.reason, stop.bytesNeeded)
+            return failed(stop.reason, stop.bytesNeeded, cause = stop.cause)
         } catch (error: Exception) {
             return failureFor(error)
         } finally {
@@ -229,20 +245,21 @@ class PatchJob(
                 onStage(PatchStage.Downloading(read, total))
             }
         } catch (error: NotEnoughSpaceException) {
-            throw Stop(PatchFailure.NOT_ENOUGH_SPACE, error.bytesNeeded)
+            throw Stop(PatchFailure.NOT_ENOUGH_SPACE, error.bytesNeeded, error)
         } catch (error: IOException) {
-            throw Stop(PatchFailure.NETWORK)
+            throw Stop(PatchFailure.NETWORK, cause = error)
         } catch (error: ApiException) {
             // whatsapp.com, not our server: only a transient answer is the network.
-            throw Stop(if (error.isTransient) PatchFailure.NETWORK else PatchFailure.FAILED)
+            throw Stop(if (error.isTransient) PatchFailure.NETWORK else PatchFailure.FAILED, cause = error)
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     /** A server call, the bundle, the engine or the disk failed. */
     private suspend fun failureFor(error: Exception): PatchOutcome.Failed = when (error) {
-        is StoreUpdateRequired -> failed(PatchFailure.STORE_UPDATE_REQUIRED, minStoreVersionCode = error.minStoreVersionCode)
-        is NotEnoughSpaceException -> failed(PatchFailure.NOT_ENOUGH_SPACE, error.bytesNeeded)
+        is StoreUpdateRequired ->
+            failed(PatchFailure.STORE_UPDATE_REQUIRED, minStoreVersionCode = error.minStoreVersionCode, cause = error)
+        is NotEnoughSpaceException -> failed(PatchFailure.NOT_ENOUGH_SPACE, error.bytesNeeded, cause = error)
         is ApiException -> failed(
             when {
                 error.isAuth -> PatchFailure.SIGNED_OUT
@@ -250,12 +267,15 @@ class PatchJob(
                 error.isTransient -> PatchFailure.NETWORK
                 else -> PatchFailure.FAILED
             },
+            cause = error,
         )
-        is PatchException.Unsupported, is PatchException.RecordMismatch -> failed(PatchFailure.NOT_SUPPORTED_YET)
-        is PatchException.NotOfficial -> failed(PatchFailure.NOT_OFFICIAL)
-        is PatchException.Storage -> failed(PatchFailure.NOT_ENOUGH_SPACE)
-        is IOException -> failed(if (isOutOfSpace(error)) PatchFailure.NOT_ENOUGH_SPACE else PatchFailure.FAILED)
-        else -> failed(PatchFailure.FAILED)
+        is PatchException.Unsupported, is PatchException.RecordMismatch ->
+            failed(PatchFailure.NOT_SUPPORTED_YET, cause = error)
+        is PatchException.NotOfficial -> failed(PatchFailure.NOT_OFFICIAL, cause = error)
+        is PatchException.Storage -> failed(PatchFailure.NOT_ENOUGH_SPACE, cause = error)
+        is IOException ->
+            failed(if (isOutOfSpace(error)) PatchFailure.NOT_ENOUGH_SPACE else PatchFailure.FAILED, cause = error)
+        else -> failed(PatchFailure.FAILED, cause = error)
     }
 
     /** A failure, unless the job was cancelled meanwhile: that is rethrown instead. */
@@ -263,9 +283,10 @@ class PatchJob(
         reason: PatchFailure,
         bytesNeeded: Long = -1,
         minStoreVersionCode: Long? = null,
+        cause: Throwable? = null,
     ): PatchOutcome.Failed {
         currentCoroutineContext().ensureActive()
-        return PatchOutcome.Failed(reason, reason.message(bytesNeeded), minStoreVersionCode)
+        return PatchOutcome.Failed(reason, reason.message(bytesNeeded), minStoreVersionCode, cause)
     }
 
     /** Runs blocking work off the caller's thread; cancelling the job interrupts it. */
@@ -302,7 +323,7 @@ class PatchJob(
         (Json.parseToJsonElement(recordJson).jsonObject["revision"] as? JsonPrimitive)?.intOrNull
 
     /** A failure already classified where it happened. */
-    private class Stop(val reason: PatchFailure, val bytesNeeded: Long = -1) : Exception()
+    private class Stop(val reason: PatchFailure, val bytesNeeded: Long = -1, cause: Throwable? = null) : Exception(cause)
 
     private companion object {
         /** ArtHooks needs Android 13. */

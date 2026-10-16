@@ -2,14 +2,11 @@ package site.androidmod.store.update
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import site.androidmod.store.StoreApp
 import site.androidmod.store.data.ApiException
 import site.androidmod.store.data.NotEnoughSpaceException
@@ -101,16 +98,20 @@ class UpdateViewModel(
                 return@launch
             }
 
-            val target = File(directory, FILENAME)
             // A successful self-update normally never returns here: Android kills
             // this process to replace its APK. What does return is a failure, or a
             // success the system reported before the kill.
             val error = try {
-                repository.download(target) { read, total ->
-                    _state.update { it.copy(phase = UpdatePhase.Downloading(read, total)) }
-                }
-                _state.update { it.copy(phase = UpdatePhase.Installing) }
-                (installer.install(target) as? InstallOutcome.Failure)?.message
+                val outcome = StoreSelfUpdate.downloadAndInstall(
+                    repository,
+                    installer,
+                    directory,
+                    onProgress = { read, total ->
+                        _state.update { it.copy(phase = UpdatePhase.Downloading(read, total)) }
+                    },
+                    onInstalling = { _state.update { it.copy(phase = UpdatePhase.Installing) } },
+                )
+                (outcome as? InstallOutcome.Failure)?.message
             } catch (error: ApiException) {
                 // A transfer that keeps dying mid-stream arrives here too: ApiClient
                 // resumes it a few times, then reports it as an ApiException.
@@ -122,11 +123,6 @@ class UpdateViewModel(
             } catch (error: IOException) {
                 // A failed write to local storage other than a full disk.
                 "The download was interrupted. Please try again."
-            } finally {
-                // Deleted BEFORE the terminal state is published, so nothing that
-                // observes Idle can still find the file. Either way it has done its
-                // job: installed, or failed in a way a re-download is the retry for.
-                withContext(NonCancellable + Dispatchers.IO) { target.delete() }
             }
             _state.update { it.copy(phase = UpdatePhase.Idle, error = error) }
         }
@@ -134,14 +130,5 @@ class UpdateViewModel(
 
     fun clearError() {
         _state.update { it.copy(error = null, needsInstallPermission = false) }
-    }
-
-    companion object {
-        /**
-         * In the downloads directory, which StoreApp prunes at every launch - so the
-         * copy left behind by a successful update (the process dies before this
-         * code can delete it) is reclaimed by the updated app's first start.
-         */
-        const val FILENAME = "store-update.apk"
     }
 }
