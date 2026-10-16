@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.IOException
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicInteger
 
 /** The account's signing key as cached on this phone. Secret: [toString] hides the password. */
 data class SigningKey(
@@ -50,6 +51,10 @@ class SigningKeyStore(
     private val metaFile get() = File(dir, "signing-key.json")
     private val lock = Mutex()
 
+    // Bumped by clear(): a fetch that began before a sign-out must not store its key after it.
+    private val epoch = AtomicInteger()
+    private val diskLock = Any()
+
     /** The cached key, or null when nothing (or something unreadable) is stored. */
     fun cached(): SigningKey? = try {
         if (!keystoreFile.isFile || keystoreFile.length() == 0L) {
@@ -63,15 +68,19 @@ class SigningKeyStore(
     }
 
     suspend fun get(): SigningKey = lock.withLock {
-        cached() ?: store(fetch())
+        cached() ?: run {
+            val started = epoch.get()
+            store(fetch(), started)
+        }
     }
 
-    fun clear() {
+    fun clear() = synchronized(diskLock) {
+        epoch.incrementAndGet()
         keystoreFile.delete()
         metaFile.delete()
     }
 
-    private fun store(response: SigningKeyResponse): SigningKey {
+    private fun store(response: SigningKeyResponse, started: Int): SigningKey {
         val bytes = try {
             Base64.getMimeDecoder().decode(response.pkcs12)
         } catch (error: IllegalArgumentException) {
@@ -83,8 +92,11 @@ class SigningKeyStore(
         }
         val meta = StoredKey(response.password, response.alias, response.certSha256, response.certSha1)
         // Metadata first: cached() keys off the keystore file, so a crash in between stores nothing usable.
-        writeAtomically(metaFile, Json.encodeToString(StoredKey.serializer(), meta).toByteArray())
-        writeAtomically(keystoreFile, bytes)
+        synchronized(diskLock) {
+            if (epoch.get() != started) throw IOException("Signed out while fetching the signing key")
+            writeAtomically(metaFile, Json.encodeToString(StoredKey.serializer(), meta).toByteArray())
+            writeAtomically(keystoreFile, bytes)
+        }
         return SigningKey(keystoreFile, response.password.toCharArray(), response.alias, response.certSha256, response.certSha1)
     }
 

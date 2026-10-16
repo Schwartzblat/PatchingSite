@@ -1,5 +1,7 @@
 package site.androidmod.store.patch
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -83,6 +85,21 @@ class SigningKeysTest {
             assertNull(store(dir).cached())
             assertFalse(File(dir, "signing-key.p12").exists())
         }
+    }
+
+    @Test
+    fun `sign out during a fetch discards the response`() = runTest(UnconfinedTestDispatcher()) {
+        val gate = kotlinx.coroutines.CompletableDeferred<SigningKeyResponse>()
+        val dir = File(folder.root, "signing")
+        val store = SigningKeyStore(dir) { gate.await() }
+        val result = async { runCatching { store.get() } }
+
+        store.clear()
+        gate.complete(response)
+
+        assertTrue(result.await().exceptionOrNull() is IOException)
+        assertNull(store.cached())
+        assertEquals(0, dir.listFiles().orEmpty().size)
     }
 
     @Test
