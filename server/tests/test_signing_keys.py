@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from cryptography.exceptions import InvalidTag
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -69,7 +70,7 @@ def test_seal_round_trip_and_aad_binds_user():
     nonce, ciphertext = signing_keys.seal(1, key)
     assert len(nonce) == 12
     assert signing_keys.open_sealed(1, nonce, ciphertext) == key
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         signing_keys.open_sealed(2, nonce, ciphertext)
 
 
@@ -86,13 +87,20 @@ def test_signing_keys_differ_between_users(users):
     assert signing_keys.get_or_create(alice.id).cert_sha256 != signing_keys.get_or_create(bob.id).cert_sha256
 
 
-def test_signing_key_concurrent_first_requests_agree(users):
+def test_signing_key_concurrent_first_requests_agree(users, monkeypatch):
     alice, _ = users
-    barrier = threading.Barrier(2)
+    barrier = threading.Barrier(2, timeout=10)
+    real_generate = signing_keys.generate
+
+    def generate_after_both_read(user_id):
+        # Both threads have read "no row" before either one inserts.
+        barrier.wait()
+        return real_generate(user_id)
+
+    monkeypatch.setattr(signing_keys, "generate", generate_after_both_read)
     results = []
 
     def worker():
-        barrier.wait()
         results.append(signing_keys.get_or_create(alice.id).cert_sha256)
 
     threads = [threading.Thread(target=worker) for _ in range(2)]
@@ -132,9 +140,27 @@ def test_endpoint_returns_no_store(client, users):
     assert again["cert_sha256"] == body["cert_sha256"] and again["password"] == body["password"]
 
 
-def test_endpoint_is_rate_limited(client, users):
-    codes = [client.get("/api/signing-key", headers=bearer(users[0])).status_code for _ in range(21)]
+def test_endpoint_is_rate_limited_per_account(client, users):
+    alice, bob = users
+    codes = [client.get("/api/signing-key", headers=bearer(alice)).status_code for _ in range(21)]
     assert codes[:20] == [200] * 20 and codes[20] == 429
+    limited = client.get("/api/signing-key", headers=bearer(alice))
+    assert int(limited.headers["retry-after"]) > 0
+    # Same client address, different account: its own quota.
+    assert [client.get("/api/signing-key", headers=bearer(bob)).status_code for _ in range(20)] == [200] * 20
+
+
+def test_unauthenticated_requests_do_not_spend_an_accounts_quota(client, users):
+    for _ in range(30):
+        assert client.get("/api/signing-key").status_code == 401
+    assert client.get("/api/signing-key", headers=bearer(users[0])).status_code == 200
+
+
+def test_endpoint_keys_differ_between_users(client, users):
+    alice, bob = users
+    a = client.get("/api/signing-key", headers=bearer(alice)).json()
+    b = client.get("/api/signing-key", headers=bearer(bob)).json()
+    assert a["cert_sha256"] != b["cert_sha256"]
 
 
 @pytest.mark.skipif(not FASTSIGNER.exists(), reason="fastsigner not present")

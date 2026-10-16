@@ -16,7 +16,7 @@ from stitch.bundle import BundleError, verify_bundle
 import config
 from utils import patch_store, signing_keys
 from utils.jwt_utils import UserInDB, get_current_user
-from utils.ratelimit import signing_key_rate_limit
+from utils.ratelimit import signing_key_ip_rate_limit, signing_key_rate_limit
 from utils.internal_auth import require_internal
 
 router = APIRouter()
@@ -120,8 +120,12 @@ async def post_bundle(request: Request):
         tmp.unlink(missing_ok=True)
 
 
-@router.get("/signing-key", dependencies=[Depends(signing_key_rate_limit)])
+@router.get("/signing-key", dependencies=[Depends(signing_key_ip_rate_limit)])
 async def get_signing_key(user: UserInDB = Depends(get_current_user)):
+    wait = signing_key_rate_limit.retry_after(f"user:{user.id}")
+    if wait:
+        raise HTTPException(status_code=429, detail="Too many requests, please try again later.",
+                            headers={"Retry-After": str(wait)})
     try:
         key = await run_in_threadpool(signing_keys.get_or_create, user.id)
     except signing_keys.NotConfigured:

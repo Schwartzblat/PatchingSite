@@ -175,7 +175,11 @@ bug_report_mail_budget = RateLimiter("bug-report-mail-budget", limit=100, window
 device_check_rate_limit = RateLimiter("is_device_allowed", limit=60, window_seconds=60)
 # Each call decrypts the user's signing key. The phone fetches it once and
 # keeps it, so this is room for reinstalls and retries, not for polling.
+# Keyed per account by the endpoint (after auth), so a carrier NAT or an
+# unauthenticated client cannot use up anyone else's quota.
 signing_key_rate_limit = RateLimiter("signing-key", limit=20, window_seconds=60 * 60)
+# Per-IP flood guard only; generous because many users can share one address.
+signing_key_ip_rate_limit = RateLimiter("signing-key-ip", limit=600, window_seconds=60 * 60)
 
 
 def reset_all() -> None:
