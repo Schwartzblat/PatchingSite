@@ -41,7 +41,17 @@ class AuthRepositoryTest {
             ),
             tokens = tokens,
             subscriptions = subscriptions,
+            onSignedOut = { signedOut++ },
         )
+    }
+
+    private var signedOut = 0
+
+    @Test
+    fun `logout and expiry both run the sign-out hook`() {
+        repository.logout()
+        repository.expireSession()
+        assertEquals(2, signedOut)
     }
 
     @After

@@ -34,6 +34,8 @@ class AuthRepository(
      * plan to whoever signs in next.
      */
     private val subscriptions: SubscriptionCache = SubscriptionCache.None,
+    /** Per-account state held elsewhere (the cached signing key) goes here when a session ends. */
+    private val onSignedOut: () -> Unit = {},
 ) {
     val isSignedIn: Boolean get() = tokens.token != null
 
@@ -167,5 +169,6 @@ class AuthRepository(
     private fun endSession() {
         tokens.token = null
         subscriptions.clear()
+        onSignedOut()
     }
 }

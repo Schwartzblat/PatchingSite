@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -31,12 +32,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import site.androidmod.store.BuildConfig
 import site.androidmod.store.R
 import site.androidmod.store.StoreApp
+import site.androidmod.store.patch.formatSha1
 import site.androidmod.store.ui.SiteLinks
 import site.androidmod.store.ui.auth.AuthViewModel
 import site.androidmod.store.ui.emailSupport
@@ -64,6 +67,22 @@ fun SettingsScreen(
     // The Activity's context: a Custom Tab or a mail app started from the
     // application context is a background launch and may not appear.
     val context = LocalContext.current
+    // Fetched on the way in, off the main thread; any failure just leaves the row out.
+    val signingSha1 by produceState<String?>(null, container) {
+        value = if (!container.auth.isSignedIn) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                try {
+                    formatSha1(container.signingKeys.get().certSha1)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    null
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -125,6 +144,25 @@ fun SettingsScreen(
                 subtitle = "See or reset the phones your apps are registered on",
                 onClick = { openLink(context, SiteLinks.MANAGE_DEVICES) },
             )
+        }
+
+        signingSha1?.let { sha1 ->
+            LinkSection(title = "Signing key") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("Signing key SHA-1", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        sha1,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                    Text(
+                        "Needed for Google Drive backup setup.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
         }
 
         LinkSection(title = "Help") {
