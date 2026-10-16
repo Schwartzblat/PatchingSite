@@ -22,8 +22,7 @@ object DexHash {
                 val dexes = ArrayList<Triple<BigInteger, String, org.apache.commons.compress.archivers.zip.ZipArchiveEntry>>()
                 for (entry in zip.entries) {
                     if (!seen.add(entry.name)) throw PatchException.BadApk("duplicate entry ${entry.name}")
-                    val m = DEX_NAME.matchEntire(entry.name) ?: continue
-                    val n = m.groupValues[1].let { if (it.isEmpty()) BigInteger.ONE else BigInteger(it) }
+                    val n = dexIndex(entry.name) ?: continue
                     dexes.add(Triple(n, entry.name, entry))
                 }
                 if (dexes.isEmpty()) throw PatchException.BadApk("no classes.dex in ${apk.name}")
@@ -40,6 +39,12 @@ object DexHash {
         } catch (e: java.io.IOException) {
             throw PatchException.BadApk("cannot read ${apk.name}: ${e.message}")
         }
+    }
+
+    /** The number of a `classesN.dex` entry name (`classes.dex` = 1), or null for any other name. */
+    fun dexIndex(name: String): BigInteger? {
+        val m = DEX_NAME.matchEntire(name) ?: return null
+        return m.groupValues[1].let { if (it.isEmpty()) BigInteger.ONE else BigInteger(it) }
     }
 
     /** Lowercase hex SHA-256 of the whole file, streamed. */
