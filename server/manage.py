@@ -117,6 +117,13 @@ def cmd_check(_args) -> int:
         else:
             print(f"[{OK}] bug_reports missing; migrate creates it")
 
+        for table in ("patch_records", "patch_bundles", "signing_keys"):
+            if table in tables:
+                rows = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                print(f"[{OK}] {table} present ({rows} row(s))")
+            else:
+                print(f"[{OK}] {table} missing; migrate creates it")
+
         wal = conn.execute("PRAGMA journal_mode").fetchone()[0]
         if wal != "wal":
             print(f"[{WARN}] journal_mode={wal}; migrate switches it to WAL. Back up")

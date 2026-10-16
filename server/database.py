@@ -273,6 +273,53 @@ def init():
                      )
                      """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bug_reports_username ON bug_reports (lower(username))")
+
+        # On-device patching. `body` is the record JSON without revision, so
+        # "identical" means byte-identical body. seq is one counter across
+        # records and bundles, allocated inside the writer's transaction.
+        conn.execute("""
+                     CREATE TABLE IF NOT EXISTS patch_records
+                     (
+                         id INTEGER PRIMARY KEY,
+                         package TEXT NOT NULL,
+                         version_code INTEGER NOT NULL,
+                         version_name TEXT NOT NULL,
+                         apk_sha256 TEXT NOT NULL,
+                         dex_sha256 TEXT NOT NULL,
+                         patcher_version TEXT NOT NULL,
+                         source TEXT NOT NULL,
+                         body TEXT NOT NULL,
+                         seq INTEGER NOT NULL,
+                         updated_at TEXT NOT NULL,
+                         UNIQUE (package, dex_sha256, patcher_version)
+                     )
+                     """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_patch_records_apk ON patch_records (package, apk_sha256)")
+        conn.execute("""
+                     CREATE TABLE IF NOT EXISTS patch_bundles
+                     (
+                         package TEXT NOT NULL,
+                         patcher_version TEXT NOT NULL,
+                         min_store_version_code INTEGER NOT NULL,
+                         min_sdk INTEGER NOT NULL,
+                         sha256 TEXT NOT NULL,
+                         size INTEGER NOT NULL,
+                         seq INTEGER NOT NULL,
+                         uploaded_at TEXT NOT NULL,
+                         PRIMARY KEY (package, patcher_version)
+                     )
+                     """)
+        conn.execute("""
+                     CREATE TABLE IF NOT EXISTS signing_keys
+                     (
+                         user_id INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+                         nonce BLOB NOT NULL,
+                         ciphertext BLOB NOT NULL,
+                         cert_sha256 TEXT NOT NULL,
+                         cert_sha1 TEXT NOT NULL,
+                         created_at TEXT NOT NULL
+                     )
+                     """)
     finally:
         conn.close()
 
