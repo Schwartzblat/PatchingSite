@@ -127,6 +127,19 @@ class FastSignerTest {
     }
 
     @Test
+    fun failingSignRemovesSiblingTemp() {
+        val ks = keystore("secret", "k")
+        val signed = File(dir, "signed.apk")
+        val sibling = File(dir, ".signed.apk.fastsigner-tmp").also { it.writeText("left by a killed child") }
+        try {
+            FastSigner(binary, ks, "wrong".toCharArray()).sign(unsigned(), signed)
+            fail("expected SignFailed")
+        } catch (e: PatchException.SignFailed) {
+            assertFalse(sibling.exists())
+        }
+    }
+
+    @Test
     fun missingBinaryFails() {
         val ks = keystore("secret", "k")
         val signed = File(dir, "signed.apk")

@@ -39,15 +39,20 @@ class PatchBundle private constructor(
     companion object {
         private const val META = "bundle.json"
         private const val SIG = "bundle.sig"
+        internal const val MAX_ENTRY_BYTES = 32L shl 20
+        internal const val MAX_TOTAL_BYTES = 64L shl 20
         private val json = Json { ignoreUnknownKeys = true }
 
         fun open(zip: File, publicKey: PublicKey): PatchBundle {
             try {
                 val all = LinkedHashMap<String, ByteArray>()
+                var total = 0L
                 ZipFile.builder().setFile(zip).get().use { z ->
                     for (entry in z.entries) {
                         if (all.containsKey(entry.name)) throw PatchException.BadBundle("duplicate entry ${entry.name}")
-                        all[entry.name] = z.getInputStream(entry).use { it.readBytes() }
+                        val data = z.getInputStream(entry).use { readCapped(it, entry.name, MAX_ENTRY_BYTES, MAX_TOTAL_BYTES - total) }
+                        total += data.size
+                        all[entry.name] = data
                     }
                 }
                 val metaBytes = all[META] ?: throw PatchException.BadBundle("bundle has no $META")
@@ -87,6 +92,22 @@ class PatchBundle private constructor(
             } catch (e: RuntimeException) { // missing keys, bad JSON, wrong types
                 throw PatchException.BadBundle("unreadable bundle: ${e.message}")
             }
+        }
+
+        /** Reads [input] fully, counting bytes as they arrive (headers are not trusted); over either cap is a [PatchException.BadBundle]. */
+        private fun readCapped(input: java.io.InputStream, name: String, entryCap: Long, totalLeft: Long): ByteArray {
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(64 * 1024)
+            var n = 0L
+            while (true) {
+                val r = input.read(buf)
+                if (r < 0) break
+                n += r
+                if (n > entryCap) throw PatchException.BadBundle("bundle entry $name exceeds ${entryCap shr 20} MiB")
+                if (n > totalLeft) throw PatchException.BadBundle("bundle exceeds ${MAX_TOTAL_BYTES shr 20} MiB uncompressed")
+                out.write(buf, 0, r)
+            }
+            return out.toByteArray()
         }
 
         private infix fun <T> Set<T>.xor(other: Set<T>): Set<T> = (this - other) + (other - this)

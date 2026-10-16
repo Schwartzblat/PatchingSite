@@ -17,7 +17,9 @@ object OfficialApk {
     }
 
     private fun certs(r: ApkVerifier.Result): List<X509Certificate> =
-        r.signerCertificates + r.v3SchemeSigners.map { it.certificate } + r.v31SchemeSigners.map { it.certificate }
+        // A malformed signing block can yield null certificates despite the platform types.
+        (r.signerCertificates + r.v3SchemeSigners.map { it.certificate } + r.v31SchemeSigners.map { it.certificate })
+            .filterNotNull()
 
     private fun sha256(cert: X509Certificate): String =
         MessageDigest.getInstance("SHA-256").digest(cert.encoded).joinToString("") { "%02x".format(it) }

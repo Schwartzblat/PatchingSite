@@ -5,9 +5,10 @@ import java.io.File
 
 /** Synthetic app and module APKs for builder and signer tests. */
 object SyntheticApks {
-    fun manifest(pkg: String): ByteArray {
+    fun manifest(pkg: String, versionCode: Int? = null): ByteArray {
         val am = AndroidManifestBlock.empty()
         am.packageName = pkg
+        if (versionCode != null) am.versionCode = versionCode
         am.getOrCreateApplicationElement()
         am.refreshFull()
         return am.bytes
@@ -27,7 +28,7 @@ object SyntheticApks {
     fun app(file: File): File = zip(
         file,
         listOf(
-            "AndroidManifest.xml" to manifest("com.example.app.orig"),
+            "AndroidManifest.xml" to manifest("com.example.app.orig", versionCode = 1),
             "classes.dex" to dexApp1,
             "classes2.dex" to dexApp2,
             "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0".toByteArray(),

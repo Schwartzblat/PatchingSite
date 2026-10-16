@@ -20,6 +20,26 @@ class PatchBundleTest {
     private fun bundle(files: Map<String, ByteArray> = this.files, meta: Map<String, Any?> = this.meta,
                         extra: List<Pair<String, ByteArray>> = emptyList()) = bundleZip(tmp(), files, meta, key.private, extra)
 
+    @Test fun oversizedEntryRejected() {
+        val big = ByteArray((PatchBundle.MAX_ENTRY_BYTES + 1).toInt())
+        try {
+            PatchBundle.open(bundle(files = files + ("big.bin" to big)), key.public)
+            org.junit.Assert.fail("expected BadBundle")
+        } catch (e: PatchException.BadBundle) {
+            org.junit.Assert.assertTrue(e.message, e.message!!.contains("big.bin"))
+        }
+    }
+
+    @Test fun oversizedTotalRejected() {
+        val chunk = ByteArray((PatchBundle.MAX_ENTRY_BYTES - 1).toInt())
+        try {
+            PatchBundle.open(bundle(files = files + mapOf("a.bin" to chunk, "b.bin" to chunk, "c.bin" to chunk)), key.public)
+            org.junit.Assert.fail("expected BadBundle")
+        } catch (e: PatchException.BadBundle) {
+            org.junit.Assert.assertTrue(e.message, e.message!!.contains("64 MiB"))
+        }
+    }
+
     @Test fun validBundleOpens() {
         val b = PatchBundle.open(bundle(), key.public)
         assertEquals(BundleMeta(1, "com.x", "1.2", 30, 5L, listOf("module.apk", "paywall.apk"), b.meta.files), b.meta)

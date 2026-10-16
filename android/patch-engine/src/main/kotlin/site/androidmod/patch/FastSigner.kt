@@ -61,6 +61,8 @@ class FastSigner(
 
     private fun fail(signed: File, message: String): PatchException.SignFailed {
         signed.delete()
+        // fastsigner writes to a sibling temp file; a killed child cannot clean it up itself.
+        File(signed.absoluteFile.parentFile, ".${signed.name}.fastsigner-tmp").delete()
         return PatchException.SignFailed(message)
     }
 

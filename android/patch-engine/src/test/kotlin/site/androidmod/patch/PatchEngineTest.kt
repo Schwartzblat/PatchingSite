@@ -60,10 +60,17 @@ class PatchEngineTest {
         return PatchBundle.open(bundleZip(tmp.newFile(), files, meta, ec.private), ec.public)
     }
 
-    private fun record(pkg: String, dex: String, supported: Boolean = true) = VersionRecord.parse(
-        """{"package":"$pkg","version_name":"1","version_code":1,"apk_sha256":"00","dex_sha256":"$dex",""" +
-            """"patcher_version":"3.0.0","artifacts":{"ZED":"z\"q","ALPHA":"a"},"missing_keys":[],""" +
-            """"features_off":["f1","f2"],"supported":$supported,"source":"x"}""",
+    private fun record(
+        pkg: String,
+        dex: String,
+        supported: Boolean = true,
+        versionCode: Long = 1,
+        artifacts: String = """{"A":"a","ZED":"z\"q","ALPHA":"a"}""",
+        featuresOff: String = """["f1","f2"]""",
+    ) = VersionRecord.parse(
+        """{"package":"$pkg","version_name":"1","version_code":$versionCode,"apk_sha256":"00","dex_sha256":"$dex",""" +
+            """"patcher_version":"3.0.0","artifacts":$artifacts,"missing_keys":[],""" +
+            """"features_off":$featuresOff,"supported":$supported,"source":"x"}""",
     )
 
     private class Setup(val official: File, val bundle: PatchBundle, val record: VersionRecord)
@@ -74,18 +81,24 @@ class PatchEngineTest {
         bundlePkg: String = pkg,
         dexOverride: String? = null,
         supported: Boolean = true,
+        versionCode: Long = 1,
+        artifacts: String = """{"A":"a","ZED":"z\"q","ALPHA":"a"}""",
+        featuresOff: String = """["f1","f2"]""",
     ): Setup {
         val official = signedOfficial(signer)
         val certSha = sha(signer.cert.encoded)
         return Setup(
             official,
             bundle(bundlePkg, certSha),
-            record(pkg, dexOverride ?: DexHash.dexSha256(official), supported),
+            record(pkg, dexOverride ?: DexHash.dexSha256(official), supported, versionCode, artifacts, featuresOff),
         )
     }
 
-    private fun request(s: Setup, signer: ApkSigner = copySigner): Triple<PatchEngine, PatchRequest, File> {
-        val work = File(tmp.root, "work")
+    private fun request(
+        s: Setup,
+        signer: ApkSigner = copySigner,
+        work: File = File(tmp.root, "work"),
+    ): Triple<PatchEngine, PatchRequest, File> {
         val out = File(tmp.root, "out.apk")
         return Triple(PatchEngine(signer), PatchRequest(s.official, s.bundle, s.record, "tok\"en", 7, work, out), work)
     }
@@ -110,11 +123,12 @@ class PatchEngineTest {
         val (engine, req, work) = request(s)
         val result = engine.patch(req)
         assertEquals(req.output, result.output)
-        assertEquals(listOf("f1", "f2"), result.featuresOff)
+        // bundle-derived (f2: key B absent) first, then record-only (f1)
+        assertEquals(listOf("f2", "f1"), result.featuresOff)
         assertEquals(listOf("Feature One"), result.visibleFeaturesOff)
         assertFalse(File(work, "unsigned.apk").exists())
 
-        assertEquals("""{"ALPHA":"a","ZED":"z\"q"}""", String(read(req.output, "assets/patcher/artifactory.json")!!))
+        assertEquals("""{"A":"a","ALPHA":"a","ZED":"z\"q"}""", String(read(req.output, "assets/patcher/artifactory.json")!!))
         assertEquals("""{"token":"tok\"en"}""", String(read(req.output, "assets/paywall.json")!!))
         assertEquals(
             """{"patcher_version":"3.0.0","revision":7,"dex_sha256":"${s.record.dexSha256}"}""",
@@ -130,6 +144,39 @@ class PatchEngineTest {
 
     @Test fun unsupportedRecordRefused() = refused<PatchException.Unsupported>(setup(supported = false))
 
+    @Test fun requiredKeyMissingRefused() =
+        refused<PatchException.Unsupported>(setup(artifacts = """{"ZED":"z","B":"b"}"""))
+
+    @Test fun requiredKeyEmptyRefused() =
+        refused<PatchException.Unsupported>(setup(artifacts = """{"A":"","B":"b"}"""))
+
+    @Test fun versionCodeMismatchRefused() = refused<PatchException.RecordMismatch>(setup(versionCode = 2))
+
+    @Test fun featuresOffDerivedFromBundle() {
+        val s = setup(artifacts = """{"A":"a"}""", featuresOff = "[]")
+        val (engine, req, _) = request(s)
+        val result = engine.patch(req)
+        assertEquals(listOf("f2"), result.featuresOff)
+        assertEquals(emptyList<String>(), result.visibleFeaturesOff)
+    }
+
+    @Test fun emptyFeatureKeyAndRecordOnlyIdsUnion() {
+        val s = setup(artifacts = """{"A":"a","B":""}""", featuresOff = """["zz"]""")
+        val (engine, req, _) = request(s)
+        assertEquals(listOf("f2", "zz"), engine.patch(req).featuresOff)
+    }
+
+    @Test fun unwritableWorkDirIsStorage() {
+        val blocker = tmp.newFile("blocker")
+        val (engine, req, _) = request(setup(), work = File(blocker, "work"))
+        try {
+            engine.patch(req)
+            fail("expected Storage")
+        } catch (e: PatchException.Storage) {
+            assertFalse(req.output.exists())
+        }
+    }
+
     @Test fun packageMismatchRefused() = refused<PatchException.RecordMismatch>(setup(bundlePkg = "com.other"))
 
     @Test fun recordForOtherBuildRefused() =
@@ -144,7 +191,7 @@ class PatchEngineTest {
 
     @Test fun signFailureLeavesNoUnsigned() {
         val s = setup()
-        val (engine, req, work) = request(s) { _, _ -> throw PatchException.SignFailed("boom") }
+        val (engine, req, work) = request(s, signer = { _, _ -> throw PatchException.SignFailed("boom") })
         try {
             engine.patch(req)
             fail("expected SignFailed")
@@ -193,6 +240,13 @@ class PatchEngineTest {
             assertEquals(parsed.keys.sorted(), parsed.keys.toList())
             assertArrayEquals(read(apk, "classes.dex"), read(out, "classes.dex"))
             assertEquals(record.featuresOff, result.featuresOff)
+            ZipFile.builder().setFile(out).get().use { z ->
+                for (e in z.entries) {
+                    if (e.method != java.util.zip.ZipEntry.STORED) continue
+                    val align = if (e.name.startsWith("lib/") && e.name.endsWith(".so")) 16384 else 4
+                    assertEquals("${e.name} offset ${e.dataOffset}", 0L, e.dataOffset % align)
+                }
+            }
         } finally {
             dir.deleteRecursively()
         }

@@ -12,6 +12,8 @@ object ManifestPatcher {
     fun packageName(manifest: ByteArray): String =
         load(manifest).packageName ?: throw PatchException.BadApk("Manifest has no package name")
 
+    fun versionCode(manifest: ByteArray): Long? = load(manifest).versionCode?.toLong()
+
     fun merge(appManifest: ByteArray, additions: ByteArray): ByteArray {
         val app = load(appManifest)
         val add = load(additions)

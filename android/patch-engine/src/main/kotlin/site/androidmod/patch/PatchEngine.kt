@@ -28,7 +28,20 @@ data class PatchResult(val output: File, val featuresOff: List<String>, val visi
 class PatchEngine(private val signer: ApkSigner) {
     private val json = Json
 
-    fun patch(request: PatchRequest): PatchResult {
+    /**
+     * Peak disk use is about 3x the size of the official APK (the official APK itself, the unsigned
+     * intermediate, and the signer's temp file next to the output); callers should reserve at
+     * least 3.2x before calling.
+     */
+    fun patch(request: PatchRequest): PatchResult = try {
+        run(request)
+    } catch (e: PatchException) {
+        throw e
+    } catch (e: Exception) {
+        throw PatchException.BadApk("Patching failed: ${e.message}", e)
+    }
+
+    private fun run(request: PatchRequest): PatchResult {
         val (official, bundle, record) = Triple(request.official, request.bundle, request.record)
         if (!record.supported) {
             throw PatchException.Unsupported("${record.packageName} ${record.versionName} is not supported")
@@ -40,6 +53,19 @@ class PatchEngine(private val signer: ApkSigner) {
                 "Package mismatch: APK $appPackage, bundle ${bundle.meta.packageName}, record ${record.packageName}",
             )
         }
+        val manifestVersion = ManifestPatcher.versionCode(appManifest)
+        if (manifestVersion != record.versionCode) {
+            throw PatchException.RecordMismatch(
+                "Version code mismatch: APK $manifestVersion, record ${record.versionCode}",
+            )
+        }
+        val present = record.artifacts.filterValues { it.isNotEmpty() }.keys
+        val missingRequired = bundle.features.requiredKeys.filter { it !in present }
+        if (missingRequired.isNotEmpty()) {
+            throw PatchException.Unsupported("${record.packageName} ${record.versionName} lacks required keys: $missingRequired")
+        }
+        val derivedOff = bundle.features.features.filter { f -> f.keys.any { it !in present } }.map { it.id }
+        val featuresOff = derivedOff + record.featuresOff.filter { it !in derivedOff }
         OfficialApk.verify(official, bundle.features.officialCertSha256)
         if (DexHash.dexSha256(official) != record.dexSha256) {
             throw PatchException.RecordMismatch("The record is for a different build of $appPackage")
@@ -61,15 +87,22 @@ class PatchEngine(private val signer: ApkSigner) {
             ),
         )
 
-        request.workDir.mkdirs()
-        val unsigned = File(request.workDir, "unsigned.apk")
+        val workDir = request.workDir
+        if (!workDir.isDirectory && !workDir.mkdirs() && !workDir.isDirectory) {
+            throw PatchException.Storage("cannot create work directory $workDir")
+        }
+        val unsigned = File(workDir, "unsigned.apk")
         try {
             ApkBuilder.build(official, inputs, unsigned)
-            signer.sign(unsigned, request.output)
+            try {
+                signer.sign(unsigned, request.output)
+            } catch (e: IOException) {
+                throw PatchException.Storage("cannot write ${request.output}: ${e.message}", e)
+            }
         } finally {
             unsigned.delete()
         }
-        return PatchResult(request.output, record.featuresOff, bundle.features.visibleTitles(record.featuresOff))
+        return PatchResult(request.output, featuresOff, bundle.features.visibleTitles(featuresOff))
     }
 
     private fun artifactory(record: VersionRecord): ByteArray =
@@ -88,6 +121,6 @@ class PatchEngine(private val signer: ApkSigner) {
             z.getInputStream(e).use { it.readBytes() }
         }
     } catch (e: IOException) {
-        throw PatchException.BadApk("Cannot read the APK: ${e.message}")
+        throw PatchException.BadApk("Cannot read the APK: ${e.message}", e)
     }
 }

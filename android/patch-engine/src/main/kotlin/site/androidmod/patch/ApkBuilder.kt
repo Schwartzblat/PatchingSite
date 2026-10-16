@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
+import java.util.zip.ZipException
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
 import org.apache.commons.compress.archivers.zip.ZipFile
@@ -35,19 +36,30 @@ object ApkBuilder {
     private class Added(val data: ByteArray, val stored: Boolean)
 
     fun build(official: File, inputs: BuildInputs, out: File) {
-        val tmp = File.createTempFile(out.name, ".tmp", out.absoluteFile.parentFile)
+        val tmp = try {
+            File.createTempFile(out.name, ".tmp", out.absoluteFile.parentFile)
+        } catch (e: IOException) {
+            throw PatchException.Storage("cannot write ${out.name}: ${e.message}", e)
+        }
         try {
             write(official, inputs, tmp)
             Files.move(tmp.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } catch (e: ZipException) {
+            throw PatchException.BadApk("cannot build ${out.name}: ${e.message}", e)
         } catch (e: IOException) {
-            throw PatchException.BadApk("cannot build ${out.name}: ${e.message}")
+            throw PatchException.Storage("cannot write ${out.name}: ${e.message}", e)
         } finally {
             tmp.delete()
         }
     }
 
     private fun write(official: File, inputs: BuildInputs, tmp: File) {
-        ZipFile.builder().setFile(official).get().use { app ->
+        val zip = try {
+            ZipFile.builder().setFile(official).get()
+        } catch (e: IOException) {
+            throw PatchException.BadApk("Cannot read the APK: ${e.message}", e)
+        }
+        zip.use { app ->
             val appEntries = app.entries.asSequence().toList()
             val names = appEntries.map { it.name }
             val appAbis = names.filter { it.startsWith("lib/") }
