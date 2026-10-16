@@ -105,6 +105,9 @@ class User(BaseModel):
     created_at: datetime | None = None
 
 class UserInDB(User):
+    # The users.id row key, for tables that reference the account. Kept out of
+    # dumps so it never reaches a response body.
+    id: int | None = Field(default=None, exclude=True)
     # excluded from every dump so credentials cannot leak into a response body
     password_hash: str = Field(exclude=True, repr=False)
     password_salt: str = Field(exclude=True, repr=False)

@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import os
 import re
@@ -6,13 +7,16 @@ from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
 from stitch.bundle import BundleError, verify_bundle
 
 import config
-from utils import patch_store
+from utils import patch_store, signing_keys
+from utils.jwt_utils import UserInDB, get_current_user
+from utils.ratelimit import signing_key_rate_limit
 from utils.internal_auth import require_internal
 
 router = APIRouter()
@@ -114,3 +118,15 @@ async def post_bundle(request: Request):
         return await run_in_threadpool(_finalize_bundle, tmp, public_key, digest.hexdigest(), size)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+@router.get("/signing-key", dependencies=[Depends(signing_key_rate_limit)])
+async def get_signing_key(user: UserInDB = Depends(get_current_user)):
+    try:
+        key = await run_in_threadpool(signing_keys.get_or_create, user.id)
+    except signing_keys.NotConfigured:
+        raise HTTPException(status_code=503, detail="Not configured")
+    return JSONResponse(
+        {"pkcs12": base64.b64encode(key.pkcs12).decode(), "password": key.password,
+         "alias": signing_keys.ALIAS, "cert_sha256": key.cert_sha256, "cert_sha1": key.cert_sha1},
+        headers={"Cache-Control": "no-store"})

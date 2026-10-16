@@ -173,6 +173,9 @@ bug_report_mail_budget = RateLimiter("bug-report-mail-budget", limit=100, window
 # (Paywall.java) kills the app on ANY non-200, this 429 included, so a false
 # positive closes a paying user's app on launch. Their next launch retries.
 device_check_rate_limit = RateLimiter("is_device_allowed", limit=60, window_seconds=60)
+# Each call decrypts the user's signing key. The phone fetches it once and
+# keeps it, so this is room for reinstalls and retries, not for polling.
+signing_key_rate_limit = RateLimiter("signing-key", limit=20, window_seconds=60 * 60)
 
 
 def reset_all() -> None:
