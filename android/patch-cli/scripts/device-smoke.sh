@@ -2,6 +2,8 @@
 # Smoke test for an engine-built APK installed on a device.
 #   device-smoke.sh --serial SERIAL [--package com.whatsapp] [--wait 30]
 #   device-smoke.sh --from-log FILE     (no adb; the alive check is SKIPped)
+# In --serial mode the script force-stops the package first, so every run is a
+# cold start (the app is restarted; InitProvider only logs on a fresh process).
 set -euo pipefail
 
 usage() {
@@ -29,6 +31,7 @@ if [ -n "$from_log" ]; then
   log="$(cat "$from_log")"
   alive="SKIP"
 elif [ -n "$serial" ]; then
+  adb -s "$serial" shell am force-stop "$package"
   adb -s "$serial" logcat -c
   adb -s "$serial" shell monkey -p "$package" -c android.intent.category.LAUNCHER 1 >/dev/null
   sleep "$wait_s"
