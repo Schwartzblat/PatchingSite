@@ -180,6 +180,11 @@ device_check_rate_limit = RateLimiter("is_device_allowed", limit=60, window_seco
 signing_key_rate_limit = RateLimiter("signing-key", limit=20, window_seconds=60 * 60)
 # Per-IP flood guard only; generous because many users can share one address.
 signing_key_ip_rate_limit = RateLimiter("signing-key-ip", limit=600, window_seconds=60 * 60)
+# Store read endpoints (latest / artifacts / bundle). Keyed per account by the
+# endpoints after auth, so users behind one carrier NAT do not share a budget;
+# the per-IP guard only stops a flood.
+patch_rate_limit = RateLimiter("patch-read", limit=120, window_seconds=60)
+patch_ip_rate_limit = RateLimiter("patch-read-ip", limit=1200, window_seconds=60)
 
 
 def reset_all() -> None:

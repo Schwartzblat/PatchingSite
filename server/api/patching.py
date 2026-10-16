@@ -5,9 +5,9 @@ import re
 import tempfile
 from pathlib import Path
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Path as PathParam, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,7 +16,9 @@ from stitch.bundle import BundleError, verify_bundle
 import config
 from utils import patch_store, signing_keys
 from utils.jwt_utils import UserInDB, get_current_user
-from utils.ratelimit import signing_key_ip_rate_limit, signing_key_rate_limit
+from utils.ratelimit import (patch_ip_rate_limit, patch_rate_limit, signing_key_ip_rate_limit,
+                             signing_key_rate_limit)
+from utils.stripe_utils import RequiredSubscription
 from utils.internal_auth import require_internal
 
 router = APIRouter()
@@ -134,3 +136,75 @@ async def get_signing_key(user: UserInDB = Depends(get_current_user)):
         {"pkcs12": base64.b64encode(key.pkcs12).decode(), "password": key.password,
          "alias": signing_keys.ALIAS, "cert_sha256": key.cert_sha256, "cert_sha1": key.cert_sha1},
         headers={"Cache-Control": "no-store"})
+
+
+def patch_reader(subscription: RequiredSubscription, user: UserInDB = Depends(get_current_user)) -> UserInDB:
+    """Signed in, subscribed and within the per-account read budget."""
+    wait = patch_rate_limit.retry_after(f"user:{user.id}")
+    if wait:
+        raise HTTPException(status_code=429, detail="Too many requests, please try again later.",
+                            headers={"Retry-After": str(wait)})
+    return user
+
+
+def _known_package(package: str) -> str:
+    if package not in config.APPS_BY_PACKAGE:
+        raise HTTPException(status_code=404, detail="Unknown package")
+    return package
+
+
+def _store_version_code(raw: str | None) -> int:
+    try:
+        return max(int(raw), 0) if raw is not None else 0
+    except ValueError:
+        return 0
+
+
+read_deps = [Depends(patch_ip_rate_limit), Depends(patch_reader)]
+
+
+@router.get("/patch/{package}/latest", dependencies=read_deps)
+async def get_latest(package: str, x_store_version_code: str | None = Header(default=None)):
+    _known_package(package)
+    record = await run_in_threadpool(
+        patch_store.latest_record, package, _store_version_code(x_store_version_code),
+        config.OFFICIAL_SOURCES.get(package))
+    if record is None:
+        raise HTTPException(status_code=404, detail="No supported version yet")
+    return {
+        "package": package,
+        "version_code": record["version_code"],
+        "version_name": record["version_name"],
+        "apk_url": config.OFFICIAL_APK_URLS.get(package),
+        "apk_sha256": record["apk_sha256"],
+        "dex_sha256": record["dex_sha256"],
+        "patcher_version": record["patcher_version"],
+        "revision": record["revision"],
+        "features_off": record["features_off"],
+    }
+
+
+@router.get("/patch/{package}/artifacts", dependencies=read_deps)
+async def get_artifacts(package: str,
+                        patcher_version: str = Query(pattern=PATCHER_VERSION),
+                        apk_sha256: str | None = Query(default=None, pattern=SHA256),
+                        dex_sha256: str | None = Query(default=None, pattern=SHA256)):
+    _known_package(package)
+    if (apk_sha256 is None) == (dex_sha256 is None):
+        raise HTTPException(status_code=422, detail="Pass exactly one of apk_sha256 and dex_sha256")
+    record = await run_in_threadpool(
+        lambda: patch_store.find_record(package, patcher_version,
+                                        apk_sha256=apk_sha256, dex_sha256=dex_sha256))
+    if record is None:
+        raise HTTPException(status_code=404, detail="Unknown build")
+    return record
+
+
+@router.get("/patch/{package}/bundle/{patcher_version}", dependencies=read_deps)
+async def get_bundle(package: str, patcher_version: str = PathParam(pattern=PATCHER_VERSION)):
+    _known_package(package)
+    row = await run_in_threadpool(patch_store.get_bundle, package, patcher_version)
+    path = patch_store.bundle_path(package, patcher_version, row["sha256"]) if row else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="Unknown bundle")
+    return FileResponse(path, media_type="application/zip", headers={"ETag": f'"{row["sha256"]}"'})
