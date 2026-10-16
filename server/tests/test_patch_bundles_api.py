@@ -1,5 +1,6 @@
 import hashlib
 import stat
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -145,3 +146,14 @@ def test_upload_rejects_oversized_chunked_body(env):
     r = client.post(URL, content=chunks(), headers=HDR)
     assert r.status_code == 413
     assert not [p for p in bundles.rglob("*") if p.is_file()]
+
+
+def test_site_starts_and_upload_is_503_without_stitch_bundle(env, monkeypatch):
+    import importlib
+
+    client, key_pem, work, bundles = env
+    monkeypatch.setitem(sys.modules, "stitch.bundle", None)
+    importlib.reload(importlib.import_module("api.patching"))  # module import must not need stitch.bundle
+    r = client.post("/api/internal/bundles", content=b"x",
+                    headers={"X-Internal-Token": config.BUNDLE_UPLOAD_SECRET})
+    assert r.status_code == 503 and r.json()["detail"] == "Not configured"

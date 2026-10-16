@@ -62,7 +62,7 @@ def test_download_refused_with_410(client, monkeypatch, fake_stripe):
     response = client.post("/api/downloads", json={"package": "com.whatsapp", "version": "1.0"})
     assert response.status_code == 410
     assert response.json() == {
-        "detail": "This app is now patched on your phone. Open the androidmod store app to install it."}
+        "detail": "This app is now patched on your phone. Open the Patched Store app to install it."}
 
 
 def test_default_changes_nothing(client, build):

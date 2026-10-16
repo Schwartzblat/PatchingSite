@@ -464,8 +464,8 @@ def cmd_doctor(_args) -> int:
     # the service can't write to it (an upload would 500). Absent is fine: the
     # first upload creates it.
     bundles_dir = Path(config.BUNDLES_DIR)
-    if bundles_dir.exists() and not os.access(bundles_dir, os.W_OK):
-        print(f"[{BAD}] BUNDLES_DIR not writable: {bundles_dir}")
+    if bundles_dir.exists() and (not bundles_dir.is_dir() or not os.access(bundles_dir, os.W_OK)):
+        print(f"[{BAD}] BUNDLES_DIR not writable (or not a directory): {bundles_dir}")
         problems += 1
 
     try:
@@ -563,6 +563,13 @@ def cmd_doctor(_args) -> int:
         print(f"[{WARN}] BUNDLE_PUBLIC_KEY_PATH does not point at a file: bundle uploads answer 503")
         print(f"         ({config.BUNDLE_PUBLIC_KEY_PATH})")
         warnings += 1
+    try:
+        import stitch.bundle  # noqa: F401
+    except ImportError:
+        print(f"[{WARN}] stitch.bundle is not importable (Stitch >= 1.5.0 is needed): bundle uploads answer 503")
+        warnings += 1
+    warnings += _doctor_signing_keys()
+    warnings += _doctor_on_device()
 
     cutoff = config.LEGACY_APP_TOKEN_CUTOFF
     if cutoff is None:
@@ -578,6 +585,56 @@ def cmd_doctor(_args) -> int:
     else:
         print("all checks passed." + (f" {warnings} warning(s) above." if warnings else ""))
     return 1 if problems else 0
+
+
+def _doctor_signing_keys() -> int:
+    """Warn when the master key can't open a stored signing key (wrong or restored-from-elsewhere key)."""
+    db_path = Path(config.DB_PATH)
+    if not config.SIGNING_KEYS_MASTER_KEY or not db_path.exists():
+        return 0
+    try:
+        conn = _ro(db_path)
+        try:
+            row = conn.execute("SELECT user_id, nonce, ciphertext FROM signing_keys LIMIT 1").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0  # no table yet: nothing stored
+    if row is None:
+        return 0
+    from utils import signing_keys
+    try:
+        signing_keys.open_sealed(row["user_id"], row["nonce"], row["ciphertext"])
+    except Exception:
+        print(f"[{WARN}] SIGNING_KEYS_MASTER_KEY does not match stored signing keys: GET /api/signing-key")
+        print(f"         answers 500 until the original key is restored")
+        return 1
+    print(f"[{OK}] SIGNING_KEYS_MASTER_KEY opens the stored signing keys")
+    return 0
+
+
+def _doctor_on_device() -> int:
+    """Warn about ON_DEVICE_PACKAGES entries that are unknown or have nothing to offer yet."""
+    warnings = 0
+    db_path = Path(config.DB_PATH)
+    for package in sorted(config.ON_DEVICE_PACKAGES):
+        if package not in config.APPS_BY_PACKAGE:
+            print(f"[{WARN}] ON_DEVICE_PACKAGES lists {package!r}, which is not in the app catalogue")
+            warnings += 1
+            continue
+        try:
+            from utils import patch_store
+            advertisable = db_path.exists() and patch_store.latest_record(
+                package, 10**12, config.OFFICIAL_SOURCES.get(package)) is not None
+        except sqlite3.Error:
+            advertisable = False
+        if advertisable:
+            print(f"[{OK}] on-device: {package} has a supported build and bundle")
+        else:
+            print(f"[{WARN}] on-device: {package} has no supported record with a bundle: the store")
+            print(f"         app would find nothing to install (upload the bundle and records first)")
+            warnings += 1
+    return warnings
 
 
 def main() -> int:

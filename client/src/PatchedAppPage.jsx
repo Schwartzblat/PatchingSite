@@ -547,7 +547,7 @@ function AppVersions({app, lang, t}) {
                     {app.about && <p className="pap-about">{app.about}</p>}
                 </div>
                 <div className="pap-status-bar">
-                    <span className="pap-pill">{statusText}</span>
+                    {!onDevice && <span className="pap-pill">{statusText}</span>}
                     {listError && <span className="pap-pill pap-pill--error">{t.listErrorPill}</span>}
                 </div>
                 <p className="pap-install-hint">{t.installHint(installPath)}</p>

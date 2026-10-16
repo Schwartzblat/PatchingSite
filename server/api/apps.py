@@ -96,7 +96,7 @@ def create_download(request: DownloadRequest, token: RequiredToken, subscription
     if package_name in config.ON_DEVICE_PACKAGES:
         raise HTTPException(
             status_code=410,
-            detail="This app is now patched on your phone. Open the androidmod store app to install it.",
+            detail="This app is now patched on your phone. Open the Patched Store app to install it.",
         )
     apk_file = _resolve_patched_apk(package_name, request.version)
     logger.debug('Download requested: %s %s by %s', package_name, request.version, token.username)

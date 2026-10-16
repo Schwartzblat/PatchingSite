@@ -89,10 +89,32 @@ def test_latest_requires_matching_bundle(client, paid):
 def test_latest_respects_min_store_version(client, paid):
     add_bundle(min_store=50)
     patch_store.upsert_record(body())
-    assert latest(client, paid).status_code == 404
-    assert latest(client, paid, **{"X-Store-Version-Code": "49"}).status_code == 404
+    for too_old in ({}, {"X-Store-Version-Code": "49"}, {"X-Store-Version-Code": "junk"}):
+        r = latest(client, paid, **too_old)
+        assert r.status_code == 426
+        assert r.json() == {"detail": "Store update required", "min_store_version_code": 50}
     assert latest(client, paid, **{"X-Store-Version-Code": "50"}).status_code == 200
-    assert latest(client, paid, **{"X-Store-Version-Code": "junk"}).status_code == 404
+
+
+def test_latest_tells_a_store_that_only_meets_an_older_bundle_to_update(client, paid):
+    add_bundle(patcher_version="1.0", min_store=0, sha="b" * 64)
+    add_bundle(patcher_version="2.0", min_store=60, sha="c" * 64)
+    patch_store.upsert_record(body(version_code=1000, patcher_version="1.0"))
+    patch_store.upsert_record(body(version_code=1100, patcher_version="2.0", dex_sha256="e" * 64,
+                                   apk_sha256="f" * 64))
+    r = latest(client, paid, **{"X-Store-Version-Code": "10"})
+    assert r.status_code == 426 and r.json()["min_store_version_code"] == 60
+    r = latest(client, paid, **{"X-Store-Version-Code": "60"})
+    assert r.status_code == 200 and r.json()["version_code"] == 1100
+
+
+def test_latest_older_bundle_is_fine_when_it_has_the_newest_version(client, paid):
+    add_bundle(patcher_version="1.0", min_store=0, sha="b" * 64)
+    add_bundle(patcher_version="2.0", min_store=60, sha="c" * 64)
+    patch_store.upsert_record(body(version_code=1100, patcher_version="1.0"))
+    patch_store.upsert_record(body(version_code=1000, patcher_version="2.0", dex_sha256="e" * 64,
+                                   apk_sha256="f" * 64))
+    assert latest(client, paid, **{"X-Store-Version-Code": "10"}).json()["version_code"] == 1100
 
 
 def test_latest_ignores_non_official_source_for_whatsapp(client, paid):

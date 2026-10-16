@@ -11,8 +11,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.routing import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
-from stitch.bundle import BundleError, verify_bundle
-
 import config
 from utils import patch_store, signing_keys
 from utils.jwt_utils import RequiredToken, UserInDB, create_app_jwt, get_current_user
@@ -62,6 +60,7 @@ def _is_int(value) -> bool:
 
 def _finalize_bundle(tmp: Path, public_key: bytes, digest: str, size: int) -> dict:
     """Verify the uploaded temp file, move it into place and record it (blocking work)."""
+    from stitch.bundle import BundleError, verify_bundle
     try:
         meta = verify_bundle(tmp, public_key)
     except BundleError as exc:
@@ -95,6 +94,10 @@ def _finalize_bundle(tmp: Path, public_key: bytes, digest: str, size: int) -> di
 
 @router.post("/internal/bundles", dependencies=[Depends(require_internal("BUNDLE_UPLOAD_SECRET"))])
 async def post_bundle(request: Request):
+    try:
+        import stitch.bundle  # noqa: F401  (needs Stitch >= 1.5.0; imported lazily so the site starts without it)
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Not configured")
     try:
         public_key = Path(config.BUNDLE_PUBLIC_KEY_PATH).read_bytes()
     except OSError:
@@ -172,9 +175,14 @@ read_deps = [Depends(patch_ip_rate_limit), Depends(patch_reader)]
 @router.get("/patch/{package}/latest", dependencies=read_deps)
 async def get_latest(package: str, x_store_version_code: str | None = Header(default=None)):
     _known_package(package)
+    source = config.OFFICIAL_SOURCES.get(package)
     record = await run_in_threadpool(
-        patch_store.latest_record, package, _store_version_code(x_store_version_code),
-        config.OFFICIAL_SOURCES.get(package))
+        patch_store.latest_record, package, _store_version_code(x_store_version_code), source)
+    newest = await run_in_threadpool(patch_store.newest_supported, package, source)
+    if newest is not None and (record is None or newest[0] > record["version_code"]):
+        # A newer build exists, but only for a newer store app: tell it to update itself.
+        return JSONResponse({"detail": "Store update required", "min_store_version_code": newest[1]},
+                            status_code=426)
     if record is None:
         raise HTTPException(status_code=404, detail="No supported version yet")
     return {

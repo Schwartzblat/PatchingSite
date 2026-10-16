@@ -246,7 +246,9 @@ it is missing or wrong, **503** `Not configured` when the server has no secret.
   the request body, at most 16 MiB (413 above that; nginx allows 17m on this
   exact path only). The zip is verified against the key at
   `BUNDLE_PUBLIC_KEY_PATH` (503 when that file is missing, 400 when the bundle
-  fails verification or its metadata is wrong). It is stored content-addressed
+  fails verification or its metadata is wrong; 404 when the bundle's own
+  `package` is unknown and 422 when its `patcher_version` is malformed; 503 too
+  when the host's Stitch is older than 1.5.0). It is stored content-addressed
   as `BUNDLES_DIR/<pkg>/<ver>-<sha16>.zip`, older content for the same version
   is removed, and the answer is `{"package", "patcher_version", "revision"}`.
 
@@ -258,7 +260,10 @@ These need a signed-in account with an active subscription (401/402 otherwise).
   `X-Store-Version-Code` (integer; absent or invalid counts as 0) is the store
   app's own version, so it is only offered builds whose bundle it can run. Answers
   `package, version_code, version_name, apk_url, apk_sha256, dex_sha256,
-  patcher_version, revision, features_off`; 404 `No supported version yet`.
+  patcher_version, revision, features_off`; 404 `No supported version yet`. When
+  a newer supported build exists but only for a newer store app, the answer is
+  **426** `{"detail": "Store update required", "min_store_version_code": n}`:
+  the store app must update itself first.
 - `GET /patch/{pkg}/artifacts?patcher_version=...&apk_sha256=...` (or
   `dex_sha256=...`; exactly one of the two, else 422): the full record,
   including `artifacts`, for a build the phone already has. 404 `Unknown build`.
@@ -302,15 +307,33 @@ python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
 ```
 
 **Losing `SIGNING_KEYS_MASTER_KEY` makes every stored signing key unreadable**,
-and users' patched apps would then be signed with new keys. Back it up
+and `GET /signing-key` answers 500 until the right key is restored (no new key
+is ever generated over a stored one). Back it up
 separately from the database: a backup of both together protects nothing, and
 the database alone is useless without it. Don't rotate it.
 
 ### Launch day
 
 Deploying this changes nothing for current subscribers: `ON_DEVICE_PACKAGES`
-is empty. Once the crawler has published records and a bundle for WhatsApp,
-set `ON_DEVICE_PACKAGES=com.whatsapp` in `.env` and restart the service.
+is empty. To switch WhatsApp over, in order:
+
+1. Put the bundle public key at `BUNDLE_PUBLIC_KEY_PATH`.
+2. Set `CRAWLER_SECRET`, `BUNDLE_UPLOAD_SECRET` and `SIGNING_KEYS_MASTER_KEY` in
+   `.env` (and back the master key up separately from the database).
+3. Upgrade the host's Stitch to 1.5.0 or newer (`pip install -e` the checkout).
+4. Re-run the nginx setup step (`deploy/launch-setup.sh`) so the new bundle
+   upload location ships.
+5. Restart the service and run `manage.py doctor`.
+6. Upload a bundle (use `--data-binary`: `-d @file` corrupts binaries):
+
+   ```bash
+   curl --data-binary @bundle.zip -H 'Content-Type: application/zip' \
+        -H "X-Internal-Token: $BUNDLE_UPLOAD_SECRET" https://androidmod.site/api/internal/bundles
+   ```
+7. Let the crawler publish records, then verify `GET /api/patch/com.whatsapp/latest`
+   returns a version (with a subscribed account's token).
+8. Only then set `ON_DEVICE_PACKAGES=com.whatsapp` and restart. `doctor` warns if
+   the package has no advertisable record.
 
 ## Operations
 

@@ -126,3 +126,12 @@ def test_signing_key_insert_is_first_writer_wins(tmp_db):
     patch_store.insert_signing_key_if_absent(7, b"n2", b"c2", "s256-2", "s1-2")
     row = patch_store.get_signing_key(7)
     assert row["nonce"] == b"n1" and row["cert_sha256"] == "s256-1"
+
+
+def test_latest_breaks_ties_by_newest_record(tmp_db):
+    put_bundle()
+    patch_store.upsert_record(record(dex_sha256="1" * 64, apk_sha256="1" * 64))
+    patch_store.upsert_record(record(dex_sha256="2" * 64, apk_sha256="2" * 64))
+    assert patch_store.latest_record("com.whatsapp", 0, None)["dex_sha256"] == "2" * 64
+    patch_store.upsert_record(record(dex_sha256="1" * 64, apk_sha256="1" * 64, features_off=["x"]))
+    assert patch_store.latest_record("com.whatsapp", 0, None)["dex_sha256"] == "1" * 64

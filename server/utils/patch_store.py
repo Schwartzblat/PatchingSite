@@ -145,9 +145,27 @@ def latest_record(package: str, store_version_code: int, source: Optional[str]) 
             "WHERE r.package = ? AND b.min_store_version_code <= ? "
             "AND (? IS NULL OR r.source = ?) "
             "AND json_extract(r.body, '$.supported') = 1 "
-            "ORDER BY r.version_code DESC, b.seq DESC LIMIT 1",
+            "ORDER BY r.version_code DESC, b.seq DESC, r.seq DESC LIMIT 1",
             (package, store_version_code, source, source)).fetchall()
         return _with_revision(conn, rows[0]) if rows else None
+    finally:
+        conn.close()
+
+
+def newest_supported(package: str, source: Optional[str]) -> Optional[tuple[int, int]]:
+    """(version_code, min_store_version_code) of the newest supported build that has a bundle,
+    whatever store version asks. Lets `latest` tell a too-old store to update itself."""
+    conn = database._connect()
+    try:
+        row = conn.execute(
+            "SELECT r.version_code AS version_code, b.min_store_version_code AS min_store "
+            "FROM patch_records r "
+            "JOIN patch_bundles b ON b.package = r.package AND b.patcher_version = r.patcher_version "
+            "WHERE r.package = ? AND (? IS NULL OR r.source = ?) "
+            "AND json_extract(r.body, '$.supported') = 1 "
+            "ORDER BY r.version_code DESC, b.min_store_version_code ASC, b.seq DESC, r.seq DESC LIMIT 1",
+            (package, source, source)).fetchone()
+        return (row["version_code"], row["min_store"]) if row else None
     finally:
         conn.close()
 

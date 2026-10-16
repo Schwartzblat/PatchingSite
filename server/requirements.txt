@@ -12,12 +12,13 @@ PyJWT==2.14.0
 stripe==15.6.1
 python-dotenv==1.2.3
 argon2-cffi==25.1.0
-# encrypts the per-package signing keys at rest (SIGNING_KEYS_MASTER_KEY)
+# encrypts the per-user signing keys at rest (SIGNING_KEYS_MASTER_KEY)
 cryptography==50.0.2
 
 # stitch is NOT on PyPI. It is a local checkout installed in editable mode:
 #     git clone <internal stitch repo> /path/to/Stitch
 #     pip install -e /path/to/Stitch
-# 1.4.0 is the minimum: it replaced uber-apk-signer with the fastsigner binary
-# utils/apps_utils.py signs with.
+# 1.5.0 is the minimum: it adds stitch.bundle (on-device patching bundle uploads;
+# without it those uploads answer 503). 1.4.0 replaced uber-apk-signer with the
+# fastsigner binary utils/apps_utils.py signs with.
 # It pulls in androguard, pyaxml and PyYAML itself, so they are not listed here.
