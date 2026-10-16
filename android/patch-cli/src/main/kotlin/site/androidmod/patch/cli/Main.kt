@@ -1,7 +1,9 @@
 package site.androidmod.patch.cli
 
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
+import java.security.GeneralSecurityException
 import kotlin.system.exitProcess
 import site.androidmod.patch.ApkSigner
 import site.androidmod.patch.FastSigner
@@ -49,7 +51,9 @@ fun run(
         val flags = parse(args)
         fun envValue(flag: String): CharArray {
             val name = flags.getValue(flag)
-            return env[name]?.toCharArray() ?: throw UsageError("environment variable $name (--$flag) is not set")
+            val value = env[name]
+            if (value.isNullOrEmpty()) throw UsageError("environment variable $name (--$flag) is not set or empty")
+            return value.toCharArray()
         }
         val revision = flags["revision"]?.let {
             it.toIntOrNull() ?: throw UsageError("--revision must be an integer, got '$it'")
@@ -66,11 +70,11 @@ fun run(
         }
 
         val started = System.nanoTime()
+        val record = VersionRecord.parse(File(flags.getValue("record")).readText())
         val bundle = PatchBundle.open(
             File(flags.getValue("bundle")),
             publicKeyFromPem(File(flags.getValue("bundle-key")).readText()),
         )
-        val record = VersionRecord.parse(File(flags.getValue("record")).readText())
         val result = PatchEngine(signerFactory(config)).patch(
             PatchRequest(
                 official = File(flags.getValue("apk")),
@@ -95,9 +99,20 @@ fun run(
     } catch (e: PatchException) {
         System.err.println("patch-cli: ${e.message}")
         return 1
+    } catch (e: IOException) {
+        return inputError("cannot read input: ${e.message}")
+    } catch (e: GeneralSecurityException) {
+        return inputError("invalid bundle key: ${e.message}")
+    } catch (e: IllegalArgumentException) { // includes kotlinx SerializationException
+        return inputError("invalid input: ${e.message?.lineSequence()?.first()}")
     } finally {
         workDir.deleteRecursively()
     }
+}
+
+private fun inputError(message: String): Int {
+    System.err.println("patch-cli: $message")
+    return 1
 }
 
 private fun parse(args: Array<String>): Map<String, String> {

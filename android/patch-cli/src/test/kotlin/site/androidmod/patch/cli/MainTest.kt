@@ -42,6 +42,41 @@ class MainTest {
     )
 
     @Test
+    fun emptyPasswordEnvIsUsageError() {
+        val args = fullArgs(File("a"), File("b"), File("c"), File("k"), File("out"))
+        assertEquals(2, run(args, mapOf("KS_PASS" to "")))
+    }
+
+    private fun inputs(record: String, bundleBytes: ByteArray = byteArrayOf(1, 2, 3), key: String = "garbage"): Array<String> {
+        val apk = tmp.newFile().also { it.writeText("x") }
+        val bundle = tmp.newFile().also { it.writeBytes(bundleBytes) }
+        val rec = tmp.newFile().also { it.writeText(record) }
+        val k = tmp.newFile().also { it.writeText(key) }
+        return fullArgs(apk, bundle, rec, k, File(tmp.root, "out.apk"))
+    }
+
+    private val validRecord = """{"package":"p","version_name":"1","version_code":1,"apk_sha256":"00","dex_sha256":"00",""" +
+        """"patcher_version":"3","artifacts":{},"missing_keys":[],"features_off":[],"supported":true}"""
+
+    @Test
+    fun malformedRecordExitsOne() {
+        assertEquals(1, run(inputs("{not json"), mapOf("KS_PASS" to "pw")))
+    }
+
+    @Test
+    fun badBundleKeyExitsOne() {
+        assertEquals(1, run(inputs(validRecord), mapOf("KS_PASS" to "pw")))
+    }
+
+    @Test
+    fun badBundleExitsOne() {
+        val key = File(System.getProperty("patch.bundleKey")).takeIf { it.isFile }
+        assumeTrue(key != null)
+        val args = inputs(validRecord, key = key!!.readText())
+        assertEquals(1, run(args, mapOf("KS_PASS" to "pw")))
+    }
+
+    @Test
     fun passwordComesFromEnv() {
         val apk = fixture("com.whatsapp-2.26.40.72.apk")
         val bundle = fixture(".patcher-work/bundle-com.whatsapp-3.0.0.zip")
@@ -51,14 +86,17 @@ class MainTest {
         val out = File(tmp.root, "out.apk")
         var seenPassword: String? = null
         var seenAlias: String? = null
-        val code = run(fullArgs(apk!!, bundle!!, record!!, key!!, out) + arrayOf("--keystore-alias", "k"), mapOf("KS_PASS" to "hunter2")) { cfg ->
+        var seenKeyPass: String? = null
+        val code = run(fullArgs(apk!!, bundle!!, record!!, key!!, out) + arrayOf("--keystore-alias", "k", "--key-pass-env", "KEY_PASS"), mapOf("KS_PASS" to "hunter2", "KEY_PASS" to "keysecret")) { cfg ->
             seenPassword = String(cfg.password)
             seenAlias = cfg.alias
+            seenKeyPass = cfg.keyPassword?.let { String(it) }
             site.androidmod.patch.ApkSigner { unsigned, signed -> unsigned.copyTo(signed, overwrite = true) }
         }
         assertEquals(0, code)
         assertEquals("hunter2", seenPassword)
         assertEquals("k", seenAlias)
+        assertEquals("keysecret", seenKeyPass)
         assertTrue(out.isFile)
     }
 }
