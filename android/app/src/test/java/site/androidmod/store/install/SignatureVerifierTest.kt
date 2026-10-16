@@ -63,4 +63,23 @@ class SignatureVerifierTest {
         assertNotNull(outcome)
         assertTrue((outcome as InstallOutcome.Failure).message.contains("verify", ignoreCase = true))
     }
+
+    @Test
+    fun `user key build is trusted`() {
+        assertNull(SignatureVerifier.evaluate(ours, setOf("feed01"), extraTrusted = setOf("FEED01")))
+    }
+
+    @Test
+    fun `unknown signer is still refused`() {
+        val outcome = SignatureVerifier.evaluate(ours, setOf("deadbeef"), extraTrusted = setOf("feed01"))
+        assertEquals(InstallFailure.UNTRUSTED_SIGNER, (outcome as InstallOutcome.Failure).reason)
+    }
+
+    @Test
+    fun `mixed signers are refused`() {
+        val mixed = SignatureVerifier.evaluate(ours, setOf("a1b2c3", "feed01"), extraTrusted = setOf("feed01"))
+        val withUnknown = SignatureVerifier.evaluate(ours, setOf("feed01", "deadbeef"), extraTrusted = setOf("feed01"))
+        assertEquals(InstallFailure.UNTRUSTED_SIGNER, (mixed as InstallOutcome.Failure).reason)
+        assertEquals(InstallFailure.UNTRUSTED_SIGNER, (withUnknown as InstallOutcome.Failure).reason)
+    }
 }

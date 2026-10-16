@@ -15,7 +15,10 @@ import java.util.concurrent.TimeUnit
  * Each APK is piped to `pm install-write ... -` over the su process's stdin, so
  * nothing is ever extracted to disk - the same property the PackageInstaller path has.
  */
-class RootInstaller(private val context: Context) : Installer {
+class RootInstaller(
+    private val context: Context,
+    private val trustedSigners: () -> Set<String> = { emptySet() },
+) : Installer {
 
     override val isAvailable: Boolean by lazy {
         runCatching { runSu("id").contains("uid=0") }.getOrDefault(false)
@@ -33,7 +36,7 @@ class RootInstaller(private val context: Context) : Installer {
         // Nothing is piped to `pm` unless it is signed by our key. Especially
         // important here: the root path installs silently, with no system dialog the
         // user could use to reject a swapped build.
-        SignatureVerifier.verify(context, file, contents)?.let { return@withContext it }
+        SignatureVerifier.verify(context, file, contents, trustedSigners())?.let { return@withContext it }
 
         // Guarded for the same reason SessionInstaller guards createSession: this is
         // the first su call, and streamToSu can now THROW on timeout rather than

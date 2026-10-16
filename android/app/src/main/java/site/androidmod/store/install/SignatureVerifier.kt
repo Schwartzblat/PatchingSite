@@ -31,7 +31,12 @@ object SignatureVerifier {
      * cannot slip a differently-signed split past PackageInstaller once the base is
      * known to be ours.
      */
-    fun verify(context: Context, file: File, contents: BuildContents): InstallOutcome.Failure? {
+    fun verify(
+        context: Context,
+        file: File,
+        contents: BuildContents,
+        extraTrusted: Set<String> = emptySet(),
+    ): InstallOutcome.Failure? {
         val base = contents.parts.firstOrNull()
             ?: return InstallOutcome.Failure(
                 "This build contains no installable package.", InstallFailure.UNKNOWN
@@ -58,7 +63,11 @@ object SignatureVerifier {
         val temp = if (base.zipEntry == null) null else stageTemp(context, file, base)
         val archive = temp ?: file
         return try {
-            evaluate(readSigners(context, context.packageName), readArchiveSigners(context, archive))
+            evaluate(
+                readSigners(context, context.packageName),
+                readArchiveSigners(context, archive),
+                extraTrusted,
+            )
         } catch (error: Throwable) {
             // Fail closed: any failure to READ a signature is treated as untrusted,
             // never silently passed. A build we cannot verify is not installed.
@@ -74,8 +83,17 @@ object SignatureVerifier {
     /**
      * The pure decision, split out so it can be unit-tested without a device.
      * Each element is the SHA-256 (hex) of a signer's DER-encoded certificate.
+     *
+     * [extraTrusted] is the user's own per-account signing key, which signs the
+     * builds made on the phone. An archive passes when its signers are exactly ours,
+     * or when all of them are in [extraTrusted]; a mix of the two (or any unknown
+     * signer) is refused, as before.
      */
-    fun evaluate(ourSigners: Set<String>, archiveSigners: Set<String>?): InstallOutcome.Failure? = when {
+    fun evaluate(
+        ourSigners: Set<String>,
+        archiveSigners: Set<String>?,
+        extraTrusted: Set<String> = emptySet(),
+    ): InstallOutcome.Failure? = when {
         ourSigners.isEmpty() -> InstallOutcome.Failure(
             "This app could not read its own signing certificate, so it cannot verify the " +
                 "download. The build was not installed.",
@@ -85,11 +103,17 @@ object SignatureVerifier {
             "This build is not a signed Android package, so it was not installed.",
             InstallFailure.UNTRUSTED_SIGNER,
         )
-        archiveSigners != ourSigners -> InstallOutcome.Failure(
+        archiveSigners != ourSigners && !archiveSigners.isTrustedUserBuild(extraTrusted) ->
+            InstallOutcome.Failure(
             InstallErrors.describe(InstallFailure.UNTRUSTED_SIGNER, null),
             InstallFailure.UNTRUSTED_SIGNER,
         )
         else -> null
+    }
+
+    private fun Set<String>.isTrustedUserBuild(extraTrusted: Set<String>): Boolean {
+        val trusted = extraTrusted.mapTo(HashSet()) { it.lowercase() }
+        return all { it.lowercase() in trusted }
     }
 
     private fun stageTemp(context: Context, file: File, base: ApkPart): File {

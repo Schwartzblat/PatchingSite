@@ -84,8 +84,9 @@ class Container(private val context: Context) {
     val bundles by lazy { BundleCache(File(context.filesDir, "patch/bundles"), patchApi, BundleKey.publicKey) }
     val downloads by lazy { DownloadRepository(api) }
     val billing by lazy { SubscriptionRepository(api, subscriptions) }
-    val sessionInstaller by lazy { SessionInstaller(context) }
-    val rootInstaller by lazy { RootInstaller(context) }
+    private val trustedKeys: () -> Set<String> = { setOfNotNull(signingKeys.cached()?.certSha256) }
+    val sessionInstaller by lazy { SessionInstaller(context, trustedKeys) }
+    val rootInstaller by lazy { RootInstaller(context, trustedKeys) }
     val installedApps by lazy { InstalledApps(context) }
     val storeUpdates by lazy { StoreUpdateRepository(api) }
     val selfInstaller: SelfInstaller by lazy { PackageSelfInstaller(context, this) }

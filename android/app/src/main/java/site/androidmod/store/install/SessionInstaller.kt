@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageManager
 import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -14,7 +15,10 @@ import java.io.File
  * The install path that works on any device. One system confirmation dialog per
  * install; splits are written into a single session so Android commits them atomically.
  */
-class SessionInstaller(private val context: Context) : Installer {
+class SessionInstaller(
+    private val context: Context,
+    private val trustedSigners: () -> Set<String> = { emptySet() },
+) : Installer {
 
     override val isAvailable: Boolean get() = true
 
@@ -33,20 +37,25 @@ class SessionInstaller(private val context: Context) : Installer {
         // Nothing gets staged unless it is signed by our key. Runs here, before a
         // session exists, so an untrusted build costs nothing and never reaches
         // PackageInstaller.
-        SignatureVerifier.verify(context, file, contents)?.let { return@withContext it }
+        SignatureVerifier.verify(context, file, contents, trustedSigners())?.let { return@withContext it }
 
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
         contents.packageName?.let { params.setAppPackageName(it) }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isSelf(file, contents)) {
-            // The store updating itself, the one install that skips the dialog: the
-            // user already said yes by tapping Update, and a second "Do you want to
-            // update this app?" adds nothing. Android honours this only for an
-            // installer holding UPDATE_PACKAGES_WITHOUT_USER_ACTION that is updating
-            // itself or is the installer of record, and falls back to the dialog
-            // otherwise. The store IS the installer of record for the patched apps it
-            // installed, so this check is what keeps their updates on the dialog -
-            // widening it would make those silent too.
+        val packageName = installTarget(file, contents)
+        if (silentInstallAllowed(
+                Build.VERSION.SDK_INT,
+                packageName == context.packageName,
+                packageName?.let { installerOfRecord(it) },
+                context.packageName,
+            )
+        ) {
+            // No dialog for the store updating itself, or an app this store installed
+            // (the installer of record). The user already said yes by tapping Update.
+            // Android honours this only for an installer holding
+            // UPDATE_PACKAGES_WITHOUT_USER_ACTION in those cases, and falls back to
+            // the dialog (STATUS_PENDING_USER_ACTION, handled by InstallReceiver)
+            // otherwise.
             params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
 
@@ -96,10 +105,14 @@ class SessionInstaller(private val context: Context) : Installer {
      * A single APK carries no package name in [BuildContents] - BundleReader only
      * reads one out of a bundle - so ask PackageManager for the archive's.
      */
-    private fun isSelf(file: File, contents: BuildContents): Boolean {
-        val packageName = contents.packageName
-            ?: context.packageManager.getPackageArchiveInfo(file.path, 0)?.packageName
-        return packageName == context.packageName
+    private fun installTarget(file: File, contents: BuildContents): String? =
+        contents.packageName ?: context.packageManager.getPackageArchiveInfo(file.path, 0)?.packageName
+
+    /** Who installed [packageName], or null when it is not installed (or unknown). */
+    private fun installerOfRecord(packageName: String): String? = try {
+        context.packageManager.getInstallSourceInfo(packageName).installingPackageName
+    } catch (error: PackageManager.NameNotFoundException) {
+        null
     }
 
     private companion object {
@@ -123,3 +136,14 @@ class SessionInstaller(private val context: Context) : Installer {
         )
     }
 }
+
+/**
+ * Whether the install may skip the confirm dialog: API 31+ and either the store
+ * updating itself or an app whose installer of record is the store.
+ */
+internal fun silentInstallAllowed(
+    sdkInt: Int,
+    isSelf: Boolean,
+    installerOfRecord: String?,
+    storePackage: String,
+): Boolean = sdkInt >= 31 && (isSelf || installerOfRecord == storePackage)
