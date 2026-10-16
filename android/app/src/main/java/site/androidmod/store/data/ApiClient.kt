@@ -5,12 +5,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,6 +39,8 @@ class ApiClient(
     private val reserveSpace: (directory: File, bytes: Long) -> Long = ::usableSpaceShortfall,
     /** The wait before resume attempt `n` (1-based). Tests pass zero. */
     private val resumeDelayMillis: (attempt: Int) -> Long = ::defaultResumeDelayMillis,
+    /** Sent as X-Store-Version-Code to our server so it can refuse a store too old for a feature. */
+    private val storeVersionCode: () -> Long = { 0L },
 ) {
     val json = Json { ignoreUnknownKeys = true }
 
@@ -85,22 +91,31 @@ class ApiClient(
      * starts from an empty file rather than resuming whatever an earlier call left
      * at [target]: a re-enqueued job is re-signed, so those bytes may belong to a
      * different build, and nothing at this level could tell.
+     *
+     * When [digest] is given it is fed every byte kept in [target], so on success it
+     * holds the file's hash; it is reset whenever the transfer starts over from zero.
+     *
+     * The account's bearer token and the store version go only to our own server
+     * (same scheme, host and port as the base URL); a link to any other host - the
+     * official WhatsApp CDN, say - gets a bare request.
      */
     suspend fun download(
         url: String,
         target: File,
         refreshUrl: (suspend () -> String?)? = null,
+        digest: MessageDigest? = null,
         onProgress: (bytesRead: Long, total: Long) -> Unit,
     ) = withContext(Dispatchers.IO) {
         var current = absolute(url)
         target.parentFile?.mkdirs()
         target.delete()
+        digest?.reset()
         val transfer = Transfer()
         try {
             var failures = 0
             while (true) {
                 val retryable = try {
-                    fetchOnce(current, target, transfer, onProgress)
+                    fetchOnce(current, target, transfer, digest, onProgress)
                     return@withContext
                 } catch (error: NotEnoughSpaceException) {
                     throw error
@@ -157,11 +172,18 @@ class ApiClient(
      * when the file is complete; throws IOException for anything worth another
      * attempt, after putting [target] in the state that attempt should start from.
      */
-    private fun fetchOnce(url: String, target: File, transfer: Transfer, onProgress: (Long, Long) -> Unit) {
+    private fun fetchOnce(
+        url: String,
+        target: File,
+        transfer: Transfer,
+        digest: MessageDigest?,
+        onProgress: (Long, Long) -> Unit,
+    ) {
         val offset = if (target.isFile) target.length() else 0L
         if (transfer.total >= 0 && offset == transfer.total) return
 
-        val builder = signed(Request.Builder().url(url)).get()
+        val builder = Request.Builder().url(url).get()
+        if (isOurs(url)) signed(builder)
         if (offset > 0) {
             builder.header("Range", "bytes=$offset-")
             transfer.validator?.let { builder.header("If-Range", it) }
@@ -205,7 +227,10 @@ class ApiClient(
             // A restart drops the stale bytes BEFORE asking for room, or they count
             // against it: a 60 MB partial file would make an 85 MB build that fits
             // once it is gone ask the user to free space it does not need.
-            if (!append) target.delete()
+            if (!append) {
+                target.delete()
+                digest?.reset()
+            }
             val written = if (append) offset else 0L
             val remaining = response.body.contentLength()
             if (remaining > 0) {
@@ -234,6 +259,7 @@ class ApiClient(
                         } catch (error: IOException) {
                             throw localWriteFailure(error, missing = if (transfer.total >= 0) transfer.total - read else -1L)
                         }
+                        digest?.update(buffer, 0, count)
                         read += count
                         onProgress(read, transfer.total)
                     }
@@ -248,10 +274,89 @@ class ApiClient(
         }
     }
 
+    /**
+     * Size of [url] from a HEAD request, or null when the server sends no
+     * Content-Length. The same header rule as [download] applies.
+     */
+    suspend fun size(url: String): Long? = withContext(Dispatchers.IO) {
+        val resolved = absolute(url)
+        val builder = Request.Builder().url(resolved).head()
+        if (isOurs(resolved)) signed(builder)
+        val response = try {
+            client.newCall(builder.build()).execute()
+        } catch (error: IOException) {
+            throw ApiException(0, ApiErrors.messageFrom(null, 0))
+        }
+        response.use {
+            if (!it.isSuccessful) throw ApiException(it.code, ApiErrors.messageFrom(null, it.code))
+            it.header("Content-Length")?.toLongOrNull()?.takeIf { length -> length >= 0 }
+        }
+    }
+
+    /**
+     * GETs [path] from our server into [target], replacing it atomically (a temp
+     * file next to it, then a rename) so a cut transfer never leaves a half file
+     * where a good one was. [ifNoneMatch] is sent verbatim as If-None-Match. A 304
+     * returns null and leaves [target] alone; a 200 returns the ETag without quotes,
+     * or the SHA-256 of the bytes when the server sent none. A server that ignores
+     * If-None-Match simply answers 200 with the whole file, which is handled the same.
+     */
+    suspend fun fetchFile(path: String, target: File, ifNoneMatch: String?): String? =
+        withContext(Dispatchers.IO) {
+            val builder = request(path).get()
+            ifNoneMatch?.let { builder.header("If-None-Match", it) }
+            target.absoluteFile.parentFile?.mkdirs()
+            val temp = File(target.absoluteFile.parentFile, target.name + ".part")
+            try {
+                val response = try {
+                    client.newCall(builder.build()).execute()
+                } catch (error: IOException) {
+                    throw ApiException(0, ApiErrors.messageFrom(null, 0))
+                }
+                response.use {
+                    if (it.code == HTTP_NOT_MODIFIED) return@withContext null
+                    if (!it.isSuccessful) {
+                        val body = runCatching { it.body.string() }.getOrNull()
+                        throw ApiException(it.code, ApiErrors.messageFrom(body, it.code), body)
+                    }
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    try {
+                        it.body.byteStream().use { source ->
+                            FileOutputStream(temp).use { sink ->
+                                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                                while (true) {
+                                    val count = source.read(buffer)
+                                    if (count == -1) break
+                                    sink.write(buffer, 0, count)
+                                    digest.update(buffer, 0, count)
+                                }
+                            }
+                        }
+                    } catch (error: IOException) {
+                        throw ApiException(0, ApiErrors.messageFrom(null, 0))
+                    }
+                    Files.move(temp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                    it.header("ETag")?.removePrefix("W/")?.trim('"')?.takeIf { tag -> tag.isNotEmpty() }
+                        ?: digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+                }
+            } finally {
+                temp.delete()
+            }
+        }
+
+    /** Whether [url] is on the same scheme, host and port as the base URL. */
+    private fun isOurs(url: String): Boolean {
+        val candidate = url.toHttpUrlOrNull() ?: return false
+        val base = baseUrl().toHttpUrlOrNull() ?: return false
+        return candidate.scheme == base.scheme && candidate.host == base.host && candidate.port == base.port
+    }
+
     private fun request(path: String) = signed(Request.Builder().url(baseUrl() + path))
 
+    /** Credentials and store version: only ever for requests to our own server. */
     private fun signed(builder: Request.Builder): Request.Builder {
         token()?.let { builder.header("Authorization", "Bearer $it") }
+        builder.header("X-Store-Version-Code", storeVersionCode().toString())
         return builder
     }
 
@@ -263,7 +368,7 @@ class ApiClient(
         }
         response.use {
             val body = runCatching { it.body.string() }.getOrNull()
-            if (!it.isSuccessful) throw ApiException(it.code, ApiErrors.messageFrom(body, it.code))
+            if (!it.isSuccessful) throw ApiException(it.code, ApiErrors.messageFrom(body, it.code), body)
             body.orEmpty()
         }
     }
@@ -272,6 +377,7 @@ class ApiClient(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
         private const val HTTP_NOT_FOUND = 404
+        private const val HTTP_NOT_MODIFIED = 304
         private const val HTTP_PARTIAL_CONTENT = 206
         private const val HTTP_RANGE_NOT_SATISFIABLE = 416
 

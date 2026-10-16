@@ -303,4 +303,64 @@ class ApiClientDownloadTest {
         assertNull(parseContentRange("bytes */8"))
         assertNull(parseContentRange("items 1-2/3"))
     }
+
+    private fun sha256Hex(file: File) = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+
+    private fun hex(digest: java.security.MessageDigest) = digest.digest().joinToString("") { "%02x".format(it) }
+
+    @Test
+    fun `download from another host sends no account headers`() = runTest {
+        val foreign = MockWebServer()
+        foreign.start()
+        try {
+            foreign.enqueue(MockResponse(code = 200, body = "payload"))
+
+            client().download(foreign.url("/w.apk").toString(), target) { _, _ -> }
+
+            val request = foreign.takeRequest()
+            assertNull(request.headers["Authorization"])
+            assertNull(request.headers["X-Store-Version-Code"])
+            assertEquals(0, server.requestCount)
+            assertEquals("payload", target.readText())
+        } finally {
+            foreign.close()
+        }
+    }
+
+    @Test
+    fun `download from our own host sends the account headers`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = "payload"))
+
+        client().download(server.url("/w.apk").toString(), target) { _, _ -> }
+
+        val request = server.takeRequest()
+        assertEquals("Bearer tok", request.headers["Authorization"])
+        assertEquals("0", request.headers["X-Store-Version-Code"])
+    }
+
+    @Test
+    fun `digest matches the file after a resumed transfer`() = runTest {
+        server.enqueue(cutOff("abcd", total = 8))
+        server.enqueue(partial("efgh", start = 4, total = 8))
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+
+        client().download("/file", target, digest = digest) { _, _ -> }
+
+        assertEquals("abcdefgh", target.readText())
+        assertEquals(sha256Hex(target), hex(digest))
+    }
+
+    @Test
+    fun `digest matches the file after a restart from zero`() = runTest {
+        server.enqueue(cutOff("abcd", total = 8))
+        // The server ignores the Range and sends everything again.
+        server.enqueue(MockResponse(code = 200, body = "ABCDEFGH"))
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+
+        client().download("/file", target, digest = digest) { _, _ -> }
+
+        assertEquals("ABCDEFGH", target.readText())
+        assertEquals(sha256Hex(target), hex(digest))
+    }
 }

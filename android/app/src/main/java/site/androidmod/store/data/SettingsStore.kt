@@ -151,6 +151,16 @@ class SettingsStore(context: Context) {
             prefs.edit().putLong(KEY_WHATSAPP_MOVE_SEEN_INSTALLED_AT, value).apply()
         }
 
+    /**
+     * Packages the server's catalogue marks `on_device`, as of the last catalogue
+     * that loaded. Kept so the store knows offline which apps it patches itself.
+     */
+    var onDevicePackages: Set<String>
+        get() = prefs.getStringSet(KEY_ON_DEVICE_PACKAGES, null)?.toSet().orEmpty()
+        set(value) {
+            prefs.edit().putStringSet(KEY_ON_DEVICE_PACKAGES, value.toSet()).apply()
+        }
+
     // Debug-only, mirroring baseUrl: release keeps no override to reset.
     fun resetBaseUrl() {
         if (BuildConfig.DEBUG) prefs.edit().remove(KEY_BASE_URL).apply()
@@ -158,6 +168,7 @@ class SettingsStore(context: Context) {
 
     private companion object {
         const val KEY_BASE_URL = "base_url"
+        const val KEY_ON_DEVICE_PACKAGES = "on_device_packages"
         const val KEY_SILENT_INSTALL = "silent_install"
         const val KEY_AWAITING_CHECKOUT = "awaiting_checkout"
         const val KEY_PENDING_SELF_UPDATE = "pending_self_update"

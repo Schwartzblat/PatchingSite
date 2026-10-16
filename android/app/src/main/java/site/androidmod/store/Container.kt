@@ -19,6 +19,7 @@ import site.androidmod.store.install.RootInstaller
 import site.androidmod.store.install.SessionInstaller
 import site.androidmod.store.install.useRootInstaller
 import site.androidmod.store.move.MoveRepository
+import site.androidmod.store.patch.PatchApi
 import site.androidmod.store.ui.settings.bugReportContext
 import site.androidmod.store.update.InstalledBuild
 import site.androidmod.store.update.PackageSelfInstaller
@@ -44,10 +45,17 @@ class Container(private val context: Context) {
         baseUrl = { settings.baseUrl },
         token = { tokens.token },
         reserveSpace = ::reserveSpace,
+        storeVersionCode = { storeVersionCode },
     )
 
+    // Cannot change while the process runs.
+    private val storeVersionCode: Long by lazy { installedBuild().versionCode }
+
     val auth by lazy { AuthRepository(api, tokens, subscriptions) }
-    val catalog by lazy { CatalogRepository(api) }
+    val catalog by lazy { CatalogRepository(api) { apps ->
+        settings.onDevicePackages = apps.filter { it.onDevice }.map { it.packageName }.toSet()
+    } }
+    val patchApi by lazy { PatchApi(api) }
     val downloads by lazy { DownloadRepository(api) }
     val billing by lazy { SubscriptionRepository(api, subscriptions) }
     val sessionInstaller by lazy { SessionInstaller(context) }

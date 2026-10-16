@@ -6,6 +6,7 @@ import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -110,5 +111,78 @@ class ApiClientTest {
         runCatching { client().download(server.url("/file").toString(), target) { _, _ -> } }
 
         assertTrue("a failed download must not leave a file", !target.exists())
+    }
+
+    @Test
+    fun `requests to our server carry the store version code`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = "{}"))
+        ApiClient(OkHttpClient(), baseUrl = { server.url("/").toString().trimEnd('/') }, token = { null }, storeVersionCode = { 123L })
+            .get("/api/x")
+        assertEquals("123", server.takeRequest().headers["X-Store-Version-Code"])
+    }
+
+    @Test
+    fun `size reads content length`() = runTest {
+        server.enqueue(MockResponse.Builder().code(200).setHeader("Content-Length", 4321).build())
+        assertEquals(4321L, client().size("/big"))
+        val request = server.takeRequest()
+        assertEquals("HEAD", request.method)
+    }
+
+    @Test
+    fun `size is null without content length`() = runTest {
+        server.enqueue(MockResponse.Builder().code(200).body("x").chunkedBody("x", 1).build())
+        assertNull(client().size("/big"))
+    }
+
+    @Test
+    fun `fetchFile 304 keeps the cached file`() = runTest {
+        val target = File.createTempFile("fetch", ".bin").also { it.deleteOnExit() }
+        target.writeText("cached")
+        server.enqueue(MockResponse(code = 304))
+
+        assertNull(client().fetchFile("/b", target, "\"abc\""))
+
+        assertEquals("cached", target.readText())
+        assertEquals("\"abc\"", server.takeRequest().headers["If-None-Match"])
+    }
+
+    @Test
+    fun `fetchFile 200 replaces it and returns the etag`() = runTest {
+        val target = File.createTempFile("fetch", ".bin").also { it.deleteOnExit() }
+        target.writeText("cached")
+        server.enqueue(MockResponse.Builder().code(200).body("fresh").setHeader("ETag", "\"deadbeef\"").build())
+
+        assertEquals("deadbeef", client().fetchFile("/b", target, "\"abc\""))
+
+        assertEquals("fresh", target.readText())
+        assertFalse(File(target.path + ".part").exists())
+    }
+
+    @Test
+    fun `fetchFile without an etag returns the sha256 of the bytes`() = runTest {
+        val target = File.createTempFile("fetch", ".bin").also { it.deleteOnExit() }
+        server.enqueue(MockResponse(code = 200, body = "abc"))
+
+        assertEquals(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            client().fetchFile("/b", target, null),
+        )
+    }
+
+    @Test
+    fun `fetchFile error leaves the cached file`() = runTest {
+        val target = File.createTempFile("fetch", ".bin").also { it.deleteOnExit() }
+        target.writeText("cached")
+        server.enqueue(MockResponse(code = 404, body = """{"detail":"Unknown bundle"}"""))
+
+        try {
+            client().fetchFile("/b", target, null)
+            org.junit.Assert.fail("expected ApiException")
+        } catch (error: ApiException) {
+            assertEquals(404, error.status)
+            assertEquals("Unknown bundle", error.message)
+        }
+        assertEquals("cached", target.readText())
     }
 }

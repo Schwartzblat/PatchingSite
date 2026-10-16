@@ -88,4 +88,21 @@ class CatalogRepositoryTest {
 
         assertEquals("Unknown package", error?.message)
     }
+
+    @Test
+    fun `catalog reports on-device packages`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = """
+            [{"key":"whatsapp","name":"WhatsApp","package":"com.whatsapp","on_device":true},
+             {"key":"mako","name":"Mako","package":"com.mako"}]
+        """.trimIndent()))
+        var seen: List<CatalogApp>? = null
+        val reporting = CatalogRepository(
+            ApiClient(OkHttpClient(), baseUrl = { server.url("/").toString().trimEnd('/') }, token = { null }),
+        ) { seen = it }
+
+        val apps = reporting.apps()
+
+        assertEquals(apps, seen)
+        assertEquals(listOf("com.whatsapp"), seen!!.filter { it.onDevice }.map { it.packageName })
+    }
 }

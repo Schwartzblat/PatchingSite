@@ -50,6 +50,8 @@ data class CatalogApp(
     val name: String,
     @SerialName("package") val packageName: String,
     val features: List<String> = emptyList(),
+    /** True when the store patches this app on the phone instead of downloading a built one. */
+    @SerialName("on_device") val onDevice: Boolean = false,
 )
 
 /** One entry of GET /api/list/{package}. `type` is advisory - the installer reads the file. */

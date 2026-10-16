@@ -11,7 +11,12 @@ import kotlinx.serialization.json.jsonObject
 /**
  * A failed API call. [status] is 0 when the request never reached the server.
  */
-class ApiException(val status: Int, override val message: String) : Exception(message)
+class ApiException(
+    val status: Int,
+    override val message: String,
+    /** The raw error body when the server sent one; PatchApi reads fields from it (426). */
+    val body: String? = null,
+) : Exception(message)
 
 val ApiException.isAuth: Boolean get() = status == 401
 val ApiException.needsSubscription: Boolean get() = status == 402
