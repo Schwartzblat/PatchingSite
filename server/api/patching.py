@@ -13,7 +13,7 @@ PATCHER_VERSION = r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$"
 
 
 class PatchRecord(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     package: str
     version_name: str

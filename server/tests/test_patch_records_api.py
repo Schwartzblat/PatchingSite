@@ -83,3 +83,19 @@ def test_reposting_identical_record_keeps_revision(client):
     assert first == second
     changed = client.post(URL, json=body(supported=False), headers=HDR).json()["revision"]
     assert changed > first
+
+
+@pytest.mark.parametrize("field,value", [
+    ("supported", "true"), ("supported", 1), ("version_code", "1"), ("version_code", 1.0),
+])
+def test_post_record_is_strict_about_types(client, field, value):
+    assert client.post(URL, json=body(**{field: value}), headers=HDR).status_code == 422
+
+
+def test_auth_is_checked_before_validation(client):
+    assert client.post(URL, json={"bogus": 1}).status_code == 401
+
+
+def test_post_record_empty_secret_is_not_configured(client, monkeypatch):
+    monkeypatch.setattr(config, "CRAWLER_SECRET", "")
+    assert client.post(URL, json=body(), headers=HDR).status_code == 503
