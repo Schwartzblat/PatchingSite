@@ -3,6 +3,7 @@ package site.androidmod.store.patch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -77,6 +78,34 @@ class PatchRegistryTest {
         assertEquals(false, result)
         // The cancelled wait left nothing behind that a late answer could trip over.
         PatchRegistry.answer("a.b", true)
+    }
+
+    @Test
+    fun `an unanswered wait gives up with false after its limit`() = runTest {
+        val answer = async { PatchRegistry.awaitAnswer("a.b", timeoutMillis = 1_000) }
+        runCurrent()
+
+        advanceTimeBy(999)
+        runCurrent()
+        assertFalse(answer.isCompleted)
+
+        advanceTimeBy(2)
+        runCurrent()
+        assertTrue(answer.isCompleted)
+        assertFalse(answer.await())
+        // Nothing left waiting: a late answer is ignored.
+        PatchRegistry.answer("a.b", true)
+    }
+
+    @Test
+    fun `an answer inside the limit wins`() = runTest {
+        val answer = async { PatchRegistry.awaitAnswer("a.b", timeoutMillis = 1_000) }
+        runCurrent()
+        advanceTimeBy(500)
+
+        PatchRegistry.answer("a.b", true)
+
+        assertTrue(answer.await())
     }
 
     @Test

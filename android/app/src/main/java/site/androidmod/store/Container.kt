@@ -69,7 +69,14 @@ class Container(private val context: Context) {
     private val storeVersionCode: Long by lazy { installedBuild().versionCode }
 
     val auth by lazy { AuthRepository(api, tokens, subscriptions, onSignedOut = { signingKeys.clear() }) }
+
+    /** Display names from the last catalogue that loaded, for notifications; never needs the network. */
+    @Volatile
+    var appNames: Map<String, String> = emptyMap()
+        private set
+
     val catalog by lazy { CatalogRepository(api) { apps ->
+        appNames = apps.filter { it.name.isNotBlank() }.associate { it.packageName to it.name }
         settings.onDevicePackages = apps.filter { it.onDevice }.map { it.packageName }.toSet()
     } }
     val patchApi by lazy { PatchApi(api) }

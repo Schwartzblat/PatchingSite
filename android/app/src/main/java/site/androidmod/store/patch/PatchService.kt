@@ -69,7 +69,7 @@ class PatchService : Service() {
             ?: return START_NOT_STICKY
         val givenName = intent.getStringExtra(EXTRA_NAME)
 
-        startForegroundCompat(ongoing(pkg, "Checking version…", 0, true))
+        startForegroundCompat(ongoing(displayName(pkg, givenName), "Checking version…", 0, true))
 
         synchronized(lock) {
             latestStartId = startId
@@ -87,7 +87,7 @@ class PatchService : Service() {
     }
 
     private suspend fun run(pkg: String, mode: PatchMode, givenName: String?) {
-        var name = givenName ?: pkg
+        val name = displayName(pkg, givenName)
         // The terminal notification; stays null when the user cancelled or on teardown.
         var finished: NotificationText? = null
         try {
@@ -99,7 +99,6 @@ class PatchService : Service() {
                     confirm = { titles -> confirm(pkg, name, titles) },
                 )
             }
-            if (givenName == null) name = catalogName(pkg) ?: pkg
             finished = when (outcome) {
                 is PatchOutcome.Ready -> onReady(pkg, name, mode, outcome)
                 is PatchOutcome.Failed -> onFailed(pkg, name, outcome)
@@ -131,6 +130,10 @@ class PatchService : Service() {
             stopId?.let { stopSelf(it) }
         }
     }
+
+    /** From the intent, else the last catalogue that loaded; never the network. */
+    private fun displayName(pkg: String, given: String?): String =
+        given ?: container.appNames[pkg] ?: if (pkg == WHATSAPP) "WhatsApp" else pkg
 
     private fun finalFile(pkg: String, versionName: String, mode: PatchMode): File {
         val key = DownloadKey(pkg, versionName)
@@ -222,13 +225,17 @@ class PatchService : Service() {
         return NotificationText("$name could not be patched", failed.message)
     }
 
-    /** The catalogue's display name for [pkg], or null (offline, unknown). */
-    private suspend fun catalogName(pkg: String): String? = try {
-        container.catalog.apps().firstOrNull { it.packageName == pkg }?.name?.takeIf { it.isNotBlank() }
-    } catch (error: CancellationException) {
-        throw error
-    } catch (error: Exception) {
-        null
+    // Android 15+ caps dataSync foreground time; the service must stop within seconds of this call
+    // or the system crashes the app. Cancelling the jobs clears their state like any teardown.
+    override fun onTimeout(startId: Int, fgsType: Int) = stopJobs()
+
+    override fun onTimeout(startId: Int) = stopJobs()
+
+    private fun stopJobs() {
+        Log.w(TAG, "Foreground time limit reached; stopping patch jobs")
+        scope.coroutineContext[Job]?.children?.forEach { it.cancel() }
+        synchronized(lock) { running.keys.toList() }.forEach { PatchRegistry.clear(it) }
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -317,7 +324,7 @@ class PatchService : Service() {
         private const val EXTRA_MODE = "mode"
         private const val EXTRA_NAME = "name"
 
-        /** [name] is the catalogue's display name for the notifications; null looks it up, then falls back to the package. */
+        /** [name] is the catalogue's display name for the notifications; null uses the last catalogue's name, then WhatsApp/the package. */
         fun start(context: Context, pkg: String, mode: PatchMode, name: String? = null) {
             val intent = Intent(context, PatchService::class.java).apply {
                 putExtra(EXTRA_PACKAGE, pkg)
