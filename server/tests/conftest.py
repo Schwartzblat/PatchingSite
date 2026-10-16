@@ -20,6 +20,12 @@ os.environ["SERVER_DATA_DIR"] = str(_TMP / "data")
 os.environ["PATCHED_APPS_PATH"] = str(_TMP / "patched")
 os.environ["LOG_PATH"] = str(_TMP / "app.log")
 os.environ["ENVIRONMENT"] = "test"
+# 32 bytes of 0x01, base64: a fixed test value, never a real key.
+os.environ["SIGNING_KEYS_MASTER_KEY"] = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+os.environ["CRAWLER_SECRET"] = "test-crawler"
+os.environ["BUNDLE_UPLOAD_SECRET"] = "test-bundles"
+os.environ["BUNDLES_DIR"] = str(_TMP / "data" / "bundles")
+os.environ.pop("ON_DEVICE_PACKAGES", None)
 # A developer's .env may hold real SMTP credentials. Set (even empty) here, they
 # win over the file, so mail is unconfigured unless a test configures it itself.
 os.environ["SMTP_USERNAME"] = ""

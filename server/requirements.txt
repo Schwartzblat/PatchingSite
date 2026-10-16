@@ -12,6 +12,8 @@ PyJWT==2.14.0
 stripe==15.6.1
 python-dotenv==1.2.3
 argon2-cffi==25.1.0
+# encrypts the per-package signing keys at rest (SIGNING_KEYS_MASTER_KEY)
+cryptography==50.0.2
 
 # stitch is NOT on PyPI. It is a local checkout installed in editable mode:
 #     git clone <internal stitch repo> /path/to/Stitch

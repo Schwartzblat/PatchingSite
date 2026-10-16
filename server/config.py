@@ -1,3 +1,5 @@
+import base64
+import binascii
 import dataclasses
 import hashlib
 import os
@@ -303,6 +305,37 @@ DOWNLOAD_JOB_TTL_SECONDS = _int_env("DOWNLOAD_JOB_TTL_SECONDS", 60 * 60)
 DOWNLOAD_URL_TTL_SECONDS = _int_env("DOWNLOAD_URL_TTL_SECONDS", 10 * 60)
 DOWNLOAD_CACHE_MAX_BYTES = _int_env("DOWNLOAD_CACHE_MAX_BYTES", 20 * 1024**3)
 SIGNING_TIMEOUT_SECONDS = _int_env("SIGNING_TIMEOUT_SECONDS", 20 * 60)
+
+
+def _master_key(raw: str | None) -> bytes | None:
+    """SIGNING_KEYS_MASTER_KEY as raw bytes: base64 of exactly 32 bytes, or None if unset."""
+    if raw is None or not raw.strip():
+        return None
+    try:
+        key = base64.b64decode(raw.strip(), validate=True)
+    except (binascii.Error, ValueError):
+        raise ConfigError("SIGNING_KEYS_MASTER_KEY must be base64 of exactly 32 bytes.")
+    if len(key) != 32:
+        raise ConfigError("SIGNING_KEYS_MASTER_KEY must be base64 of exactly 32 bytes.")
+    return key
+
+
+def _package_set(raw: str | None) -> frozenset:
+    return frozenset(name.strip() for name in (raw or "").split(",") if name.strip())
+
+
+# On-device patching. None of these is required at import: an endpoint that needs
+# an unset one answers 503 "Not configured". The secrets are never logged.
+CRAWLER_SECRET = os.getenv("CRAWLER_SECRET") or None
+BUNDLE_UPLOAD_SECRET = os.getenv("BUNDLE_UPLOAD_SECRET") or None
+SIGNING_KEYS_MASTER_KEY = _master_key(os.getenv("SIGNING_KEYS_MASTER_KEY"))
+BUNDLE_PUBLIC_KEY_PATH = Path(os.getenv("BUNDLE_PUBLIC_KEY_PATH") or DATA_DIR / "bundle-signing.pub.pem")
+BUNDLES_DIR = Path(os.getenv("BUNDLES_DIR") or DATA_DIR / "bundles")
+# Packages switched to on-device patching. Empty by default: turning one on is a
+# launch-day operations step, so deploying changes nothing for current subscribers.
+ON_DEVICE_PACKAGES = _package_set(os.getenv("ON_DEVICE_PACKAGES"))
+OFFICIAL_SOURCES = {"com.whatsapp": "whatsapp.com"}
+OFFICIAL_APK_URLS = {"com.whatsapp": "https://www.whatsapp.com/android/current/WhatsApp.apk"}
 
 
 if not IS_PRODUCTION and FRONTEND_URL.startswith("https://"):
