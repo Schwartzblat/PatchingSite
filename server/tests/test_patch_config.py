@@ -47,3 +47,13 @@ def test_paths_default_under_data_dir(monkeypatch, reload_config):
     cfg = reload_config()
     assert cfg.BUNDLES_DIR == cfg.DATA_DIR / "bundles"
     assert cfg.BUNDLE_PUBLIC_KEY_PATH == cfg.DATA_DIR / "bundle-signing.pub.pem"
+
+
+def test_db_path_defaults_into_data_dir_and_can_be_set_apart(monkeypatch, reload_config, tmp_path):
+    monkeypatch.setenv("SERVER_DATA_DIR", str(tmp_path / "v2"))
+    monkeypatch.delenv("DB_PATH", raising=False)
+    assert reload_config().DB_PATH == tmp_path / "v2" / "users.db"
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "live" / "users.db"))
+    config = reload_config()
+    assert config.DB_PATH == tmp_path / "live" / "users.db"
+    assert config.DOWNLOAD_CACHE_DIR == tmp_path / "v2" / "download_cache"

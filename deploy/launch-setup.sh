@@ -159,6 +159,8 @@ declare -A NGINX_FILES=(
     [deploy/nginx/androidmod.site.conf]=/etc/nginx/sites-available/androidmod.site
     [deploy/nginx/androidmod-headers.conf]=/etc/nginx/snippets/androidmod-headers.conf
     [deploy/nginx/androidmod-proxy.conf]=/etc/nginx/snippets/androidmod-proxy.conf
+    [deploy/nginx/androidmod-v2.conf]=/etc/nginx/snippets/androidmod-v2.conf
+    [deploy/nginx/androidmod-v2-proxy.conf]=/etc/nginx/snippets/androidmod-v2-proxy.conf
     [deploy/nginx/androidmod-http.conf]=/etc/nginx/conf.d/androidmod-http.conf
 )
 stale=()

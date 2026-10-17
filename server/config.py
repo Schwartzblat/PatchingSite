@@ -158,7 +158,10 @@ PATCHED_APPS_PATH = Path(os.getenv("PATCHED_APPS_PATH", "/opt/patched"))
 # directory, and list_versions only ever looks inside those.
 STORE_APK_PATH = Path(os.getenv("STORE_APK_PATH", PATCHED_APPS_PATH / "store.apk"))
 DATA_DIR = Path(os.getenv("SERVER_DATA_DIR", "/opt/server_data"))
-DB_PATH = DATA_DIR / "users.db"
+# Settable on its own so a second server beside the live one (v2,
+# deploy/patchingsite-v2.service) shares the accounts database while keeping its
+# own cache, logs and bundles under its own SERVER_DATA_DIR.
+DB_PATH = Path(os.getenv("DB_PATH") or DATA_DIR / "users.db")
 DOWNLOAD_CACHE_DIR = DATA_DIR / "download_cache"
 LOG_PATH = Path(os.getenv("LOG_PATH", DATA_DIR / "app.log"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO" if IS_PRODUCTION else "DEBUG")

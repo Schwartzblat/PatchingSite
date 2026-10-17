@@ -126,7 +126,11 @@ android {
             // read, and nothing else can reproduce it, so keep it per release.
             isMinifyEnabled = true
             isShrinkResources = true
-            buildConfigField("String", "DEFAULT_BASE_URL", "\"https://androidmod.site\"")
+            // -Pandroidmod.releaseBaseUrl=https://androidmod.site/v2 builds the store for
+            // the v2 server running beside the live one (deploy/patchingsite-v2.service).
+            val releaseBaseUrl = providers.gradleProperty("androidmod.releaseBaseUrl")
+                .getOrElse("https://androidmod.site")
+            buildConfigField("String", "DEFAULT_BASE_URL", "\"$releaseBaseUrl\"")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         // Release as shipped (minified, shared key, same versionCode rule) but pointed

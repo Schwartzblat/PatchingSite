@@ -435,6 +435,7 @@ def cmd_doctor(_args) -> int:
 
     for label, path, must_write in (
         ("data dir", config.DATA_DIR, True),
+        ("database dir", Path(config.DB_PATH).parent, True),
         ("download cache", config.DOWNLOAD_CACHE_DIR, True),
         ("patched apps", config.PATCHED_APPS_PATH, False),
         ("log file dir", Path(config.LOG_PATH).parent, True),

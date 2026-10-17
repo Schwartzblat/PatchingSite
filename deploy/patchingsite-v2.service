@@ -1,0 +1,73 @@
+# /etc/systemd/system/patchingsite-v2.service
+#
+# The v2 server, beside the live one (patchingsite.service), run from the
+# PatchingMonorepo v2 checkout. A template like patchingsite.service: @USER@ is
+# the user, @REPO@ that checkout's PatchingSite directory.
+#
+#   sed -e "s|@USER@|$USER|g" -e "s|@REPO@|$PWD|g" deploy/patchingsite-v2.service |
+#       sudo tee /etc/systemd/system/patchingsite-v2.service >/dev/null
+#   sudo systemctl daemon-reload && sudo systemctl enable --now patchingsite-v2
+#
+# It differs from patchingsite.service only where the two must not collide:
+#   - port 8001. nginx sends /v2/api/ here with the /v2 removed
+#     (nginx/androidmod-v2.conf), so the API paths are the same as the live one's;
+#   - its .env (@REPO@/.env) sets SERVER_DATA_DIR=/opt/server_data_v2 for its own
+#     download cache, logs and bundles, DB_PATH=/opt/server_data/users.db to share
+#     the live accounts, and STORE_APK_PATH=/opt/patched-v2/store.apk so each
+#     server offers only its own store build as the update. Hence the extra
+#     ReadWritePaths and ReadOnlyPaths entries.
+
+[Unit]
+Description=PatchingSite API (v2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@USER@
+Group=@USER@
+WorkingDirectory=@REPO@/server
+
+# config.py loads ../.env itself, so this is belt-and-braces. ENVIRONMENT now
+# defaults to production, but naming it here makes the intent visible in
+# `systemctl cat`.
+Environment=ENVIRONMENT=production
+Environment=PYTHONUNBUFFERED=1
+
+# ONE worker, deliberately. The download job registry and the rate limiter are
+# both in-process; a second worker would give each its own copy, so job ids
+# would 404 half the time and rate limits would be N times looser. Scaling out
+# means moving both to Redis first.
+ExecStartPre=@REPO@/server/.venv/bin/python manage.py doctor
+ExecStart=@REPO@/server/.venv/bin/uvicorn \
+    main:app --host 127.0.0.1 --port 8001 --workers 1 --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1
+
+Restart=always
+RestartSec=5
+
+# Shutdown drains in-flight signings. SIGNING_TIMEOUT_SECONDS defaults to 1200,
+# so give systemd more than that before it resorts to SIGKILL.
+TimeoutStopSec=1320
+KillSignal=SIGTERM
+
+# Sandboxing. PrivateTmp matters here: signing copies 100MB+ APKs through
+# /tmp, and this keeps them off the shared one.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/server_data_v2 /opt/server_data
+ReadOnlyPaths=/opt/patched /opt/patched-v2
+
+# Everything the service creates - the database, app.log, cached signed APKs -
+# is private to its user. The default 0022 left users.db and the logs readable
+# by every account on the host. (Set here: launch-setup.sh's drop-in covers only
+# patchingsite.service.)
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

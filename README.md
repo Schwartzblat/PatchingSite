@@ -335,6 +335,40 @@ is empty. To switch WhatsApp over, in order:
 8. Only then set `ON_DEVICE_PACKAGES=com.whatsapp` and restart. `doctor` warns if
    the package has no advertisable record.
 
+### v2 beside the live server
+
+The `v2` branches run as a second server on the live host, under
+`https://androidmod.site/v2/api/`, while the live server keeps `/api/` and the
+website:
+
+- **Checkout:** `~/workspace/PatchingMonorepo` on branch `v2`, with submodules.
+  The server runs from its `PatchingSite/server` with its own `.venv`, Stitch
+  installed editable from `utils/Stitch`.
+- **Service and nginx:** `deploy/patchingsite-v2.service` on port 8001.
+  `deploy/nginx/androidmod-v2.conf` and `androidmod-v2-proxy.conf` go in
+  `/etc/nginx/snippets/`, included from the site file. They drop the `/v2` before
+  proxying.
+- **`.env`** (that checkout's `PatchingSite/.env`): the live `.env`, so the JWT
+  secrets match. A session works on both servers, and patched apps' paywall
+  checks, which go to the live server, accept v2's app tokens. On top of it:
+  - `SERVER_DATA_DIR=/opt/server_data_v2` for v2's own cache, logs and bundles;
+  - `DB_PATH=/opt/server_data/users.db` to share the accounts (v2 only adds its
+    three tables);
+  - `STORE_APK_PATH=/opt/patched-v2/store.apk`;
+  - the on-device settings above, with `ON_DEVICE_PACKAGES=com.whatsapp`.
+- **Store app:** `./gradlew :app:assembleRelease
+  -Pandroidmod.releaseBaseUrl=https://androidmod.site/v2`, copied to
+  `/opt/patched-v2/store.apk` and downloaded from `/v2/api/store/download`. It
+  replaces the live store app on a phone (same package and key) and updates only
+  from v2.
+- **Bundles and records:** `bundle.py --upload` with
+  `PATCH_SERVER_URL=https://androidmod.site/v2`. v2's crawler (`tools/crawler` in
+  that checkout) runs the artifacts pipeline from a user timer against the same
+  URL. The live crawler keeps building WhatsApp for `/api/`.
+
+`deploy/deploy.sh` deploys only the live server. To update v2, pull the checkout
+and restart `patchingsite-v2`.
+
 ## Operations
 
 ```bash
