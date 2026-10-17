@@ -10,6 +10,7 @@ import site.androidmod.store.data.BuildVersion
 import site.androidmod.store.move.GuideStep
 import site.androidmod.store.move.MoveDirection
 import site.androidmod.store.move.MovePhase
+import site.androidmod.store.move.OFFICIAL_SIG
 import site.androidmod.store.move.PREVIOUS_SIG
 import site.androidmod.store.move.facts
 import site.androidmod.store.move.guide
@@ -19,6 +20,7 @@ import site.androidmod.store.patch.PatchStage
 import site.androidmod.store.patch.PatchState
 import site.androidmod.store.patch.StoreUpdateRequired
 import site.androidmod.store.ui.patch.patchControlText
+import site.androidmod.store.ui.patch.patchFailureOffersRetry
 import site.androidmod.store.ui.patch.patchProgress
 import java.io.File
 
@@ -73,11 +75,22 @@ class OnDeviceGuideTest {
 
         val hidden = hideMoveWhileKeyUnknown(unknown, onDevice = true, keyKnown = false, previous = false)
         assertEquals(MovePhase.NothingToDo, hidden.phase)
-        assertFalse(hidden.officialAtRisk)
-        assertFalse(hidden.oursAtRisk)
+        // Only the offer is hidden: the chat-loss guards on Install and Uninstall stay.
+        assertEquals(unknown.officialAtRisk, hidden.officialAtRisk)
+        assertEquals(unknown.oursAtRisk, hidden.oursAtRisk)
+        assertTrue(hidden.officialAtRisk)
 
         val previous = guide(previousInstalled, previous = true)
         assertEquals(previous, hideMoveWhileKeyUnknown(previous, onDevice = true, keyKnown = false, previous = true))
+    }
+
+    @Test
+    fun `the regular WhatsApp stays guarded while the key is unknown`() {
+        val regular = guide(facts(signature = OFFICIAL_SIG), previous = false)
+        assertTrue(regular.officialAtRisk)
+        val hidden = hideMoveWhileKeyUnknown(regular, onDevice = true, keyKnown = false, previous = false)
+        assertEquals(MovePhase.NothingToDo, hidden.phase)
+        assertTrue(hidden.officialAtRisk)
     }
 
     @Test
@@ -146,6 +159,14 @@ class OnDeviceGuideTest {
         )
         // A running job outranks a build already on disk.
         assertEquals("Patching…", patchControlText(PatchState.Running(PatchStage.Patching), ready = true))
+    }
+
+    @Test
+    fun `a failure that cannot change offers no retry`() {
+        assertFalse(patchFailureOffersRetry(PatchFailure.ANDROID_TOO_OLD))
+        assertFalse(patchFailureOffersRetry(PatchFailure.NEEDS_SUBSCRIPTION))
+        assertTrue(patchFailureOffersRetry(PatchFailure.NETWORK))
+        assertTrue(patchFailureOffersRetry(PatchFailure.FAILED))
     }
 
     @Test

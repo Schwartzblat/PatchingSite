@@ -173,7 +173,7 @@ fun MoveChatsScreen(
                     title = "Checking your WhatsApp…",
                     text = "We couldn't check which WhatsApp you have yet. Check your connection and try again.",
                     action = "Try again",
-                    onAction = viewModel::refresh,
+                    onAction = { viewModel.refresh(retryKey = true) },
                 )
             } else {
                 Panel(

@@ -2,6 +2,7 @@ package site.androidmod.store.update
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import site.androidmod.store.Container
 import site.androidmod.store.StoreApp
@@ -20,9 +21,13 @@ object StoreSelfUpdate {
      */
     const val FILENAME = "store-update.apk"
 
+    // One update at a time in the process: they share one file, and the guide and the
+    // patch service can both ask at once.
+    private val running = Mutex()
+
     /**
-     * Checks for a newer store and installs it. Null when nothing is available or the install
-     * would need "install unknown apps" and it is not granted; otherwise the installer's verdict.
+     * Checks for a newer store and installs it. Null when nothing is available, another update
+     * is already under way, or the install would need "install unknown apps" and it is not granted; otherwise the installer's verdict.
      * @throws site.androidmod.store.data.ApiException, NotEnoughSpaceException, IOException
      */
     suspend fun run(container: Container): InstallOutcome? = run(
@@ -38,9 +43,15 @@ object StoreSelfUpdate {
         installer: SelfInstaller,
         directory: File,
     ): InstallOutcome? {
-        UpdateCheck.of(repository.info(), installed) as? UpdateCheck.Available ?: return null
-        if (!installer.canInstall()) return null
-        return downloadAndInstall(repository, installer, directory)
+        // Another update is under way: leave its file alone.
+        if (!running.tryLock()) return null
+        try {
+            UpdateCheck.of(repository.info(), installed) as? UpdateCheck.Available ?: return null
+            if (!installer.canInstall()) return null
+            return downloadAndInstall(repository, installer, directory)
+        } finally {
+            running.unlock()
+        }
     }
 
     /**

@@ -1,5 +1,6 @@
 package site.androidmod.store.update
 
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -109,5 +110,35 @@ class StoreSelfUpdateTest {
         assertNull(StoreSelfUpdate.run(repository, installed, FakeInstaller(allowed = false), directory))
 
         assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a second update while one runs does nothing`() = runTest {
+        publish(389001)
+        server.enqueue(MockResponse(code = 200, body = "apk-bytes"))
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val slow = object : SelfInstaller {
+            override suspend fun canInstall() = true
+            override suspend fun install(file: File): InstallOutcome {
+                started.complete(Unit)
+                gate.await()
+                return InstallOutcome.Success
+            }
+        }
+        val first = async(kotlinx.coroutines.Dispatchers.Default) {
+            StoreSelfUpdate.run(repository, installed, slow, directory)
+        }
+        started.await()
+        val requests = server.requestCount
+
+        assertNull(StoreSelfUpdate.run(repository, installed, FakeInstaller(), directory))
+        assertEquals(requests, server.requestCount)
+
+        gate.complete(Unit)
+        assertEquals(InstallOutcome.Success, first.await())
+        // Free again afterwards.
+        publish(389000)
+        assertNull(StoreSelfUpdate.run(repository, installed, FakeInstaller(), directory))
     }
 }

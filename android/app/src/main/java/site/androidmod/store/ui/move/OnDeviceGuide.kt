@@ -26,7 +26,8 @@ fun guideNewestVersion(onDevice: Boolean, versions: List<BuildVersion>, latestVe
  * With the user's signing key unknown (not cached, and the fetch failed or timed out) the
  * store cannot tell the user's own build from the regular WhatsApp: both look like
  * "someone else's". Offering a move then could prompt a needless one after a store
- * reinstall, so the guide offers none: [MovePhase.NothingToDo] and no at-risk warnings.
+ * reinstall, so the guide offers none: [MovePhase.NothingToDo]. Only the offer goes: the
+ * at-risk flags are the chat-loss guards on Install and Uninstall and stay as they are.
  * A previous build is told by the store's own certificate, which needs no key, and a move
  * already under way keeps going. Attention and RemovedBeforeSaved are about the phone's
  * state, not about which build it is, so they stay.
@@ -34,7 +35,7 @@ fun guideNewestVersion(onDevice: Boolean, versions: List<BuildVersion>, latestVe
 fun hideMoveWhileKeyUnknown(guide: MoveGuide, onDevice: Boolean, keyKnown: Boolean, previous: Boolean): MoveGuide {
     if (!onDevice || keyKnown || previous || guide.inProgress) return guide
     if (guide.phase !is MovePhase.AtStep && guide.phase !is MovePhase.NotPossibleYet) return guide
-    return guide.copy(phase = MovePhase.NothingToDo, officialAtRisk = false, oursAtRisk = false)
+    return guide.copy(phase = MovePhase.NothingToDo)
 }
 
 /**

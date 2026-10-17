@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import site.androidmod.store.Container
 import site.androidmod.store.StoreApp
 import site.androidmod.store.data.ApiException
@@ -149,6 +148,8 @@ class MoveViewModel(
 
     private var refreshJob: Job? = null
     private var selfUpdateTried = false
+    private var keyJob: Job? = null
+    private var lastKeyFailureAt = 0L
 
     init {
         refresh()
@@ -165,14 +166,14 @@ class MoveViewModel(
      * it - megabytes, once - so that removing WhatsApp from Settings afterwards no
      * longer loses the chats.
      */
-    fun refresh() {
+    fun refresh(retryKey: Boolean = false) {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             val oldBackupChosen = _state.value.acks.oldBackup
             val read = withContext(Dispatchers.IO) {
-                // Before the phone is read: which build is the user's own depends on the key.
+                // Which build is the user's own depends on the key; unknown hides only the move's offer.
                 val onDevice = WHATSAPP_PACKAGE in container.settings.onDevicePackages
-                val keyKnown = !onDevice || signingKeyKnown()
+                val keyKnown = !onDevice || container.signingKeys.cached() != null
                 try {
                     container.move.track(oldBackupChosen)
                 } catch (error: Throwable) {
@@ -206,27 +207,35 @@ class MoveViewModel(
                 spareCopies = read.spareCopies,
                 startedAt = container.move.startedAt, readAt = System.currentTimeMillis(),
             )
+            if (read.onDevice && !read.keyKnown) fetchSigningKey(retryKey)
             val current = _state.value
             if (if (current.onDevice) current.latestVersion == null else current.versions.isEmpty()) loadVersions()
         }
     }
 
     /**
-     * Whether the user's signing key is on the phone, fetching it when it is not. Bounded,
-     * since the guide waits for it; a failure only means "unknown", which the guide
-     * handles (hideMoveWhileKeyUnknown), and the next read tries again.
+     * On-device with no key cached: fetches it in a job of its own, so a slow or failing
+     * request never holds back a phone read (R9 hides the offer meanwhile), and reads again
+     * once it arrives. One fetch at a time, and not again within [KEY_RETRY_MILLIS] of a
+     * failure unless the user asked ([force]): the server limits key requests.
      */
-    private suspend fun signingKeyKnown(): Boolean {
-        if (container.signingKeys.cached() != null) return true
-        return try {
-            withTimeoutOrNull(KEY_FETCH_TIMEOUT_MILLIS) { container.signingKeys.get() } != null
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            // The message may come from the server's reply; the key itself is never in it.
-            Log.w(TAG, "Fetching the signing key failed", error)
-            if (error is ApiException && error.isAuth) container.auth.expireSession()
-            false
+    private fun fetchSigningKey(force: Boolean) {
+        if (keyJob?.isActive == true) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastKeyFailureAt < KEY_RETRY_MILLIS) return
+        keyJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                container.signingKeys.get()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // The key itself is never in an exception; the message may be the server's.
+                Log.w(TAG, "Fetching the signing key failed", error)
+                lastKeyFailureAt = System.currentTimeMillis()
+                if (error is ApiException && error.isAuth) container.auth.expireSession()
+                return@launch
+            }
+            refresh()
         }
     }
 
@@ -262,12 +271,15 @@ class MoveViewModel(
             if (problem.storeUpdateRequired && !selfUpdateTried) {
                 // Once per visit: it downloads a whole store, and every resume lands here again.
                 selfUpdateTried = true
-                try {
-                    StoreSelfUpdate.run(container)
-                } catch (updateError: CancellationException) {
-                    throw updateError
-                } catch (updateError: Exception) {
-                    Log.w(TAG, "Store self-update failed", updateError)
+                // Its own job: a refresh (every resume) must not cancel a download half way.
+                viewModelScope.launch {
+                    try {
+                        StoreSelfUpdate.run(container)
+                    } catch (updateError: CancellationException) {
+                        throw updateError
+                    } catch (updateError: Exception) {
+                        Log.w(TAG, "Store self-update failed", updateError)
+                    }
                 }
             }
         }
@@ -509,6 +521,6 @@ class MoveViewModel(
 
     private companion object {
         const val TAG = "PatchedStore"
-        const val KEY_FETCH_TIMEOUT_MILLIS = 15_000L
+        const val KEY_RETRY_MILLIS = 60_000L
     }
 }

@@ -44,6 +44,10 @@ fun patchProgress(state: PatchState?): Float? {
     return if (stage.total > 0) (stage.bytesRead.toFloat() / stage.total).coerceIn(0f, 1f) else null
 }
 
+/** Whether "Try again" can change anything: not on a phone that is too old (Needs-subscription has See plans). */
+fun patchFailureOffersRetry(reason: PatchFailure): Boolean =
+    reason != PatchFailure.ANDROID_TOO_OLD && reason != PatchFailure.NEEDS_SUBSCRIPTION
+
 private fun percent(read: Long, total: Long): Int = (read * 100 / total).toInt().coerceIn(0, 100)
 
 /**
@@ -71,7 +75,7 @@ fun PatchControl(
             ErrorBanner(text)
             if (state.reason == PatchFailure.NEEDS_SUBSCRIPTION) {
                 MainButton("See plans", onClick = onSubscribe)
-            } else {
+            } else if (patchFailureOffersRetry(state.reason)) {
                 MainButton("Try again", onClick = onStart)
             }
         }
