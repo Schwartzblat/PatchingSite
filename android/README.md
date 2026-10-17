@@ -478,12 +478,13 @@ also refuses an APK whose package is not `site.androidmod.store`. Every patched 
 carries the same key, so a WhatsApp build copied over `store.apk` by mistake would
 otherwise pass the signature check.
 
-On Android 12+ `SessionInstaller` asks for `USER_ACTION_NOT_REQUIRED` for this one
-package, and the manifest declares `UPDATE_PACKAGES_WITHOUT_USER_ACTION`, so there
-is no "Do you want to update this app?" dialog. Patched apps keep theirs. The store
-is their installer of record, so the package check is what keeps their updates on
-the dialog. Play Protect's "App scan recommended" prompt can still appear, because it
-is the device's verifier, not the installer's dialog.
+On Android 12+ `SessionInstaller` asks for `USER_ACTION_NOT_REQUIRED` when the package
+being installed is the store itself or an app the store installed (its installer of
+record), and the manifest declares `UPDATE_PACKAGES_WITHOUT_USER_ACTION`, so there is
+no "Do you want to update this app?" dialog (`silentInstallAllowed`). Anything else
+keeps its dialog, and so does an app a user installed by hand. Play Protect's "App
+scan recommended" prompt can still appear, because it is the device's verifier, not
+the installer's dialog.
 
 Replacing its own APK kills the app, and Android does not relaunch it. The banner
 says so while installing. `UpdatedReceiver` listens for `MY_PACKAGE_REPLACED` in
@@ -494,6 +495,146 @@ in `filesDir/downloads`, which the updated app's first launch prunes.
 
 The first build with the updater has to be installed by hand once. Builds from before
 it (`versionCode 1`) never check.
+
+## On-device patching
+
+For an app the server marks `on_device` in `GET /api/apps` (WhatsApp, once the server
+flag is set), the store builds the patched APK on the phone from the publisher's own
+official APK and never downloads a build from the server. For every other app nothing
+below applies and the download, `/api/list`, guide and Library work as described above.
+The server side (records, bundles, the key and paywall-token endpoints) is described in
+the repo README, "On-device patching endpoints". It needs Android 13 (API 33, for
+ArtHooks); the store's minSdk stays 30, so an older phone gets "Patching on this phone
+needs Android 13 or newer." instead of a build.
+
+**The pieces** (package `patch/`, in the order a build uses them):
+
+1. `PatchApi` is the client for `/api/patch/{pkg}/latest`, `/artifacts`, `/bundle/{version}`,
+   `/api/app-token` and `/api/signing-key`. A 426 from `latest` becomes
+   `StoreUpdateRequired`; 401, 402 and 404 stay `ApiException`.
+2. `BundleCache` keeps `filesDir/patch/bundles/<pkg>/<patcherVersion>.zip` and its SHA-256
+   beside it, asks the server with `If-None-Match`, and re-verifies the zip against the
+   pinned key on every open. A bundle that fails verification, or is for another package
+   or version, is deleted.
+3. `PatchJob` is one build, with no Android types in it so the JVM tests drive it: signed in,
+   API 33+, `latest`, the verified bundle (its `minSdk` and `minStoreVersionCode` can refuse
+   the build), the official APK from `apk_url`, its signer checked against the bundle's
+   official certificates, the record looked up by the downloaded file's own `apk_sha256`
+   (then `dex_sha256`, since the publisher may have moved on since `latest`), the features-off
+   question, the paywall token, the signing key, `PatchEngine` (`:patch-engine`) signing
+   through fastsigner, and a last check that the output has the right package, version and
+   the user's key. The result is moved into place atomically. Room for 3.2 times the
+   official APK is reserved before downloading. Failures are a `PatchFailure` with the
+   user-facing words in `PatchFailure.message`; a coroutine cancellation is rethrown, never
+   reported as a failure. The job never touches an installed app; it ends by handing over a file.
+4. `PatchService` runs jobs in a `dataSync` foreground service, one per package, because the
+   download is about 90 MB and patching takes minutes. It posts progress and result
+   notifications (`PatchNotifications`), and on Android 15's foreground time limit it
+   cancels the jobs. `PatchRegistry` is the process-wide state the screens read
+   (`PatchState`), like `DownloadRegistry`; it also carries the user's answer to the
+   features-off question. Neither survives the process: a killed store starts again.
+5. `UpdateOffer` / `UpdateWorker` / `UpdateAppActivity` are the update side, below.
+6. `PatchInfo` reads `assets/patcher/patch-info.json`, which the engine writes into the
+   build, from the installed APK: the revision and the features that were off.
+
+**Where files go.** `filesDir/patch/work/<pkg>` is the job's scratch space. The job empties
+it when it starts and ends, and `StoreApp` wipes `patch/work` at launch. It is never under
+`filesDir/downloads`, which `DownloadCleanup` prunes. A guide build (`PatchMode.GUIDE`) is
+handed over at `DownloadPaths.targetFile(downloads, DownloadKey(pkg, versionName), "apk")`
+and marked `DownloadState.Done`, so the guide's install step takes it exactly as it takes a
+server build. An update (`PatchMode.UPDATE`) goes to `filesDir/patch/ready` and is installed
+by the service straight away through `Container.installer()` (for WhatsApp after
+`MoveRepository.beforeInstall`, the same gate that puts a parked backup back), then deleted.
+
+**In the screens.** `GuideDownloadControl` replaces the move guide's download with
+`PatchControl` when the server flag is on, and "Not possible yet" compares against the
+server's `latest`. The guide's steps are unchanged. `PatchControl` (`ui/patch`) is shared with
+the Library, whose card shows "Update" (or "Move to the new update system") from the offer.
+When visible features are off in this version, the job stops and the app asks "Some features
+are off in this version" with Continue and Cancel; the notification says to open the app.
+Back, Cancel, or no answer for 30 minutes counts as Cancel. A record
+with `supported: false` (the crawler's verdict) is not asked about: the job ends with "Not
+supported yet".
+
+**Signing key.** One per account, from `GET /api/signing-key`, kept by `SigningKeyStore` in
+`filesDir/signing` (a PKCS#12 file and a small JSON beside it) and cleared on every way a
+session ends (`AuthRepository.endSession`). `backup_rules.xml` and
+`data_extraction_rules.xml` exclude every domain, so it is never backed up or transferred; keep
+it that way. A fetch that began before a sign-out is discarded rather than stored. Nobody
+logs or prints the key, its password or the paywall token; their `toString` hides them.
+The password reaches fastsigner on stdin only (the engine's `FastSigner`), and the Settings
+screen shows only the certificate's SHA-1. `SignatureVerifier` accepts an APK signed by
+the store's own key, or by the cached user key and nothing else.
+
+**fastsigner.** The signer is a static executable shipped as `libfastsigner.so` under
+`app/src/main/jniLibs/{arm64-v8a,x86_64}/`. `packaging.jniLibs.useLegacyPackaging = true`
+in `app/build.gradle.kts` makes Android extract it to `nativeLibraryDir`, where it can be
+executed; inside the APK it could not be. To refresh the binaries after changing
+`tools/fastsigner`, build it there in release mode for `aarch64-unknown-linux-gnu` and for the
+host (`target/release/fastsigner`, x86_64), and run `scripts/update-fastsigner.sh [fastsigner-checkout]`.
+It refuses anything that is not the right architecture or not statically linked.
+
+**The bundle key pin.** `patch/BundleKey.kt` holds the public half of the key that signs
+patch bundles; the private half lives outside every repo. A store trusts a bundle only if
+that one key verifies it. To rotate the key, replace the PEM in `BundleKey.kt` and ship a new
+store release; the server verifies uploads against its own `BUNDLE_PUBLIC_KEY_PATH`, which
+moves to the new public key when the bundles do. There
+is no second slot: a store with the old pin rejects bundles signed with the new key, and a new
+store rejects the old ones. So release the store first, let phones update, then switch the server's
+key file and re-upload every bundle signed with the new key.
+
+**Updates.** `UpdateWorker` runs every six hours (WorkManager, network required, scheduled
+from `StoreApp.onCreate`). For each package in `SettingsStore.onDevicePackages` (the
+catalogue's `on_device` apps, remembered for offline use) that is installed, it asks the
+server for `latest` and `updateOffer` decides:
+
+- `NewVersion`: the server's `latest` has a higher version code than the installed app, signed
+  with the user's key. "Tap to update. Your chats stay."
+- `PatchUpdate`: same version, a higher record revision than the installed build's
+  `patch-info.json`; the notification lists the features that come back.
+- `NeedsMove`: still on the old shared-key build. The tap opens the move guide once to
+  move to the user's own key; an update cannot install over it.
+- `None`: not on-device, not ours (the regular app), or current.
+
+An offer is announced once (`SettingsStore.notifiedOffers`, keyed by package, version code,
+revision and kind), and is not remembered when notifications are off. A 402 ends the run.
+Tapping the notification opens `MainActivity` with an extra that `NavigationRequests`
+holds until the app can act (after sign-in, if need be); `LibraryViewModel.handleUpdate`
+then asks again, so a stale notification says "is up to date" instead of building, and
+starts the update. A relaunch from Recents is ignored. A 426 makes the store update itself
+first (`StoreSelfUpdate`), as does a bundle needing a newer store.
+
+A patched app's own update button opens `UpdateAppActivity`: action
+`site.androidmod.store.action.UPDATE_APP`, string extra `package`. It is exported and has
+`CATEGORY_DEFAULT`, so it validates the extra (a well-formed package name, an `on_device`
+package, installed) and forwards to `MainActivity`; anything else finishes silently.
+
+**Silent installs.** `USER_ACTION_NOT_REQUIRED` now covers every app the store itself
+installed, not only the store. Updating WhatsApp over the patched build therefore needs no
+system dialog on Android 12+; the first install of the guide, and anything installed by
+hand, still shows one.
+
+**Which WhatsApp is "ours".** With the server flag off, ours is a build signed with the
+store's certificate, as before. With it on, ours is a build signed with the user's own key,
+and the store's certificate marks a previous build (`buildKind`, `BuildKind.PREVIOUS`).
+A previous build gets the one-time move above, or the user can choose to go back to the
+regular WhatsApp. While the key is unknown (not cached and the fetch failed) the guide
+offers no move, so a reinstalled store cannot send someone on a needless one; the chat-loss
+guards on Install and Uninstall stay on.
+
+**What changes when the server sets `on_device`.** The guide's DOWNLOAD builds on the phone
+instead of fetching a server build, and the Library asks `/api/patch/{pkg}/latest` instead of
+`/api/list/{pkg}`.
+Updates are notified and installed over the app by the store. The key is fetched, and
+"ours" changes meaning as above.
+
+**Staging build.** `./gradlew :app:assembleStaging -Pandroidmod.stagingBaseUrl=http://HOST:8000`
+builds the release as shipped (minified, shared key, stamped version code, so it installs over
+a release store) but pointed at a dev server (default `http://127.0.0.1:8000`); `src/staging`
+allows cleartext like debug does. It needs the same signing environment as a release build.
+Use it, not a debug build, to prove on a device that R8 left the engine's reflection intact:
+`app/proguard-rules.pro` only silences warnings for commons-compress's optional codecs, and
+the rest is checked by running the minified build.
 
 ## Help, bug reports and links
 
