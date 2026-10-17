@@ -178,6 +178,13 @@ class SettingsStore(context: Context) {
             prefs.edit().putStringSet(KEY_ON_DEVICE_PACKAGES, value.toSet()).apply()
         }
 
+    /** Update offers already announced (see UpdateWorker), so each one is notified once. */
+    var notifiedOffers: Set<String>
+        get() = prefs.getStringSet(KEY_NOTIFIED_OFFERS, null)?.toSet().orEmpty()
+        set(value) {
+            prefs.edit().putStringSet(KEY_NOTIFIED_OFFERS, value.toSet()).apply()
+        }
+
     // Debug-only, mirroring baseUrl: release keeps no override to reset.
     fun resetBaseUrl() {
         if (BuildConfig.DEBUG) prefs.edit().remove(KEY_BASE_URL).apply()
@@ -186,6 +193,7 @@ class SettingsStore(context: Context) {
     private companion object {
         const val KEY_BASE_URL = "base_url"
         const val KEY_ON_DEVICE_PACKAGES = "on_device_packages"
+        const val KEY_NOTIFIED_OFFERS = "notified_offers"
         const val KEY_SILENT_INSTALL = "silent_install"
         const val KEY_AWAITING_CHECKOUT = "awaiting_checkout"
         const val KEY_PENDING_SELF_UPDATE = "pending_self_update"

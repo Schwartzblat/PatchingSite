@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import site.androidmod.patch.Features
 import site.androidmod.patch.PatchBundle
 import site.androidmod.patch.PatchException
 import java.io.File
@@ -45,6 +46,18 @@ class BundleCache(
                 shaFile.delete()
                 throw error
             }
+        }
+    }
+
+    /** The cached bundle's feature list, or null when there is none or it does not verify. Never downloads. */
+    fun cachedFeatures(pkg: String, patcherVersion: String): Features? {
+        if (!SAFE_NAME.matches(pkg) || !SAFE_NAME.matches(patcherVersion)) return null
+        val zip = File(dir, "$pkg/$patcherVersion.zip")
+        if (!zip.isFile) return null
+        return try {
+            PatchBundle.open(zip, publicKey).features
+        } catch (error: Exception) {
+            null
         }
     }
 

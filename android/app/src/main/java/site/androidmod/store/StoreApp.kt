@@ -5,6 +5,7 @@ import android.util.Log
 import site.androidmod.store.download.DownloadCleanup
 import site.androidmod.store.download.DownloadPaths
 import site.androidmod.store.move.WhatsAppInstallWatcher
+import site.androidmod.store.patch.UpdateWorker
 import java.io.File
 
 class StoreApp : Application() {
@@ -21,6 +22,7 @@ class StoreApp : Application() {
         WhatsAppInstallWatcher.register(this, container.move)
         pruneOrphanedDownloads()
         wipePatchWork()
+        UpdateWorker.schedule(this)
     }
 
     /**

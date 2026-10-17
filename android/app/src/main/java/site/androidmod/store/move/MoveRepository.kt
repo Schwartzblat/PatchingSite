@@ -68,7 +68,7 @@ class MoveRepository(
         private set
 
     /** The store's own certificate digest, hashed exactly as the engine hashes WhatsApp's. */
-    private val ownSignature: String? by lazy {
+    val ownSignature: String? by lazy {
         try {
             context.packageManager
                 .getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
