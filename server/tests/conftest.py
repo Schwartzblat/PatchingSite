@@ -17,6 +17,9 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-do-not-use-in-productio
 os.environ.setdefault("STRIPE_API_KEY", "sk_test_dummy")
 os.environ.setdefault("STRIPE_PRODUCT_ID", "prod_dummy")
 os.environ["SERVER_DATA_DIR"] = str(_TMP / "data")
+# Set, not just defaulted: config also loads ../.env, and a v2 checkout's .env
+# points DB_PATH at the live accounts database.
+os.environ["DB_PATH"] = str(_TMP / "data" / "users.db")
 os.environ["PATCHED_APPS_PATH"] = str(_TMP / "patched")
 os.environ["LOG_PATH"] = str(_TMP / "app.log")
 os.environ["ENVIRONMENT"] = "test"

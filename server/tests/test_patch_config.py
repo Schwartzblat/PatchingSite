@@ -51,7 +51,7 @@ def test_paths_default_under_data_dir(monkeypatch, reload_config):
 
 def test_db_path_defaults_into_data_dir_and_can_be_set_apart(monkeypatch, reload_config, tmp_path):
     monkeypatch.setenv("SERVER_DATA_DIR", str(tmp_path / "v2"))
-    monkeypatch.delenv("DB_PATH", raising=False)
+    monkeypatch.setenv("DB_PATH", "")  # empty, not unset, so a .env value cannot fill it in
     assert reload_config().DB_PATH == tmp_path / "v2" / "users.db"
     monkeypatch.setenv("DB_PATH", str(tmp_path / "live" / "users.db"))
     config = reload_config()
