@@ -43,6 +43,7 @@ import site.androidmod.store.ui.library.LibraryScreen
 import site.androidmod.store.ui.library.LibraryViewModel
 import site.androidmod.store.ui.move.MoveChatsScreen
 import site.androidmod.store.ui.move.MoveViewModel
+import site.androidmod.store.ui.patch.PatchQuestionHost
 import site.androidmod.store.ui.settings.BugReportScreen
 import site.androidmod.store.ui.settings.BugReportViewModel
 import site.androidmod.store.ui.settings.ChangePasswordScreen
@@ -198,6 +199,10 @@ fun AppNavigation() {
             }
         }
     }
+
+    // The features-off question of a patch job, answerable on any screen (and right after
+    // sign-in), which is where the "Open the app to continue" notification lands.
+    PatchQuestionHost()
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route

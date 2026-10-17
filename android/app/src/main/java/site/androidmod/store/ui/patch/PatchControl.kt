@@ -7,6 +7,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import site.androidmod.store.patch.PatchRegistry
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import site.androidmod.store.patch.PatchFailure
@@ -54,9 +57,9 @@ fun patchFailureOffersRetry(reason: PatchFailure): Boolean = reason != PatchFail
 private fun percent(read: Long, total: Long): Int = (read * 100 / total).toInt().coerceIn(0, 100)
 
 /**
- * Builds [packageName] on the phone: a button, then the job's progress, the
- * features-off question, and its errors. Shared by the move guide and the Library.
- * [onStart] begins (and retries) the job; [onAnswer] is the user's go-ahead.
+ * Builds [packageName] on the phone: a button, then the job's progress
+ * and its errors. Shared by the move guide and the Library. [onStart] begins (and retries)
+ * the job. The features-off question is not asked here but by [PatchQuestionHost].
  */
 @Composable
 fun PatchControl(
@@ -65,14 +68,13 @@ fun PatchControl(
     ready: Boolean,
     onStart: () -> Unit,
     onSubscribe: () -> Unit,
-    onAnswer: (proceed: Boolean) -> Unit = { site.androidmod.store.patch.PatchRegistry.answer(packageName, it) },
 ) {
     val text = patchControlText(state, ready)
     when (state) {
         is PatchState.Running -> Progress(text, patchProgress(state))
         is PatchState.AwaitingConfirmation -> {
+            // The question itself is asked app-wide (see PatchQuestionHost), never here.
             Progress(text, null)
-            FeaturesOffDialog(state.featureTitles, onAnswer)
         }
         is PatchState.Failed -> {
             ErrorBanner(text)
@@ -87,6 +89,27 @@ fun PatchControl(
         PatchState.Installed -> StatusLine(text, PapSuccess)
         is PatchState.Ready, null -> if (ready) StatusLine(text, PapSuccess) else MainButton(text, onClick = onStart)
     }
+}
+
+/**
+ * The package whose job waits for the features-off answer, with the feature titles; null
+ * if none does. With several waiting, the first by package name, so the dialog is stable.
+ */
+fun pendingQuestion(states: Map<String, PatchState>): Pair<String, List<String>>? =
+    states.entries
+        .filter { it.value is PatchState.AwaitingConfirmation }
+        .minByOrNull { it.key }
+        ?.let { it.key to (it.value as PatchState.AwaitingConfirmation).featureTitles }
+
+/**
+ * Asks the features-off question for whichever job waits, over whatever screen is on top.
+ * Lives once in the signed-in host so the question can be answered from anywhere.
+ */
+@Composable
+fun PatchQuestionHost() {
+    val states by PatchRegistry.states.collectAsStateWithLifecycle()
+    val (pkg, titles) = pendingQuestion(states) ?: return
+    FeaturesOffDialog(titles) { proceed -> PatchRegistry.answer(pkg, proceed) }
 }
 
 /** Some visible features of this version are off; patching goes on only if the user says so. */
