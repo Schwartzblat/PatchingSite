@@ -25,7 +25,7 @@ class SessionInstaller(
     /** False until the user grants "install unknown apps" for this app. */
     fun canInstall(): Boolean = context.packageManager.canRequestPackageInstalls()
 
-    override suspend fun install(file: File): InstallOutcome = withContext(Dispatchers.IO) {
+    override suspend fun install(file: File, confirmation: InstallConfirmation): InstallOutcome = withContext(Dispatchers.IO) {
         val contents = try {
             BundleReader.read(file)
         } catch (error: BundleException) {
@@ -68,7 +68,7 @@ class SessionInstaller(
         } catch (error: Throwable) {
             return@withContext InstallErrors.failure(error.message)
         }
-        val result = InstallReceiver.awaiting(sessionId)
+        val result = InstallReceiver.awaiting(sessionId, confirmation)
 
         try {
             installer.openSession(sessionId).use { session ->
@@ -96,7 +96,7 @@ class SessionInstaller(
             )
         }
 
-        InstallReceiver.await(sessionId, result, INSTALL_TIMEOUT_MILLIS) {
+        InstallReceiver.await(sessionId, result, confirmation.timeoutMillis) {
             runCatching { installer.abandonSession(sessionId) }
         }
     }
@@ -113,17 +113,6 @@ class SessionInstaller(
         context.packageManager.getInstallSourceInfo(packageName).installingPackageName
     } catch (error: PackageManager.NameNotFoundException) {
         null
-    }
-
-    private companion object {
-        /**
-         * From commit to verdict. Generous, because it spans the user reading the
-         * confirm dialog and Play Protect's "App scan recommended" prompt, and a
-         * verdict can trail the dialog by ~20 seconds. Short enough that a dialog
-         * Android never showed turns into "try again" within a few minutes, rather
-         * than an Install button stuck on "Installing..." until the process dies.
-         */
-        const val INSTALL_TIMEOUT_MILLIS = 3 * 60 * 1000L
     }
 
     private fun statusIntent(sessionId: Int): PendingIntent {

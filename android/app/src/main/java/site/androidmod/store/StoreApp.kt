@@ -46,13 +46,17 @@ class StoreApp : Application() {
     }
 
     /**
-     * Empties `filesDir/patch/work`: the process just started, so no patch job can be running
-     * and whatever an earlier process left there is an orphan of up to ~3x an APK. Off the main thread.
+     * Empties `filesDir/patch/work` and `filesDir/patch/ready`: the process just started, so no
+     * patch job can be running, and whatever an earlier process left there is an orphan - up to
+     * ~3x an APK of work files, or an update build whose install died with that process. Off the
+     * main thread.
      */
     private fun wipePatchWork() {
         Thread({
-            runCatching { File(filesDir, "patch/work").deleteRecursively() }
-                .onFailure { Log.w(TAG, "Could not wipe the patch work directory", it) }
+            for (directory in listOf("patch/work", "patch/ready")) {
+                runCatching { File(filesDir, directory).deleteRecursively() }
+                    .onFailure { Log.w(TAG, "Could not wipe $directory", it) }
+            }
         }, "patch-work-wipe").apply { isDaemon = true }.start()
     }
 

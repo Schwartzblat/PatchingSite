@@ -1,5 +1,6 @@
 package site.androidmod.store.install
 
+import android.content.Intent
 import java.io.File
 
 enum class InstallFailure { SIGNATURE_CONFLICT, UNTRUSTED_SIGNER, STORAGE, DOWNGRADE, ABORTED, TIMED_OUT, UNKNOWN }
@@ -19,11 +20,42 @@ sealed interface InstallOutcome {
     ) : InstallOutcome
 }
 
+/**
+ * How an install answers Android asking for the user's go-ahead (the system's "Do you want
+ * to install/update this app?" dialog), and how long it waits for the verdict.
+ *
+ * [DIALOG] is every install's default: InstallReceiver starts the dialog, and the wait
+ * gives up after [DIALOG_TIMEOUT_MILLIS]. An install nobody is watching - PatchService's
+ * updates - also passes [notify], which InstallReceiver hands the system's confirm intent so
+ * a notification can carry it: the direct start is a background activity start then, which
+ * Android blocks, and a tap on the notification is not. Its wait is as long as the user may
+ * take to come back to that notification.
+ */
+class InstallConfirmation(
+    val timeoutMillis: Long,
+    /** Called on the main thread with Android's confirm intent, each time it asks; never for a session nobody waits on. */
+    val notify: ((confirm: Intent) -> Unit)? = null,
+) {
+    companion object {
+        /**
+         * From commit to verdict. Generous, because it spans the user reading the
+         * confirm dialog and Play Protect's "App scan recommended" prompt, and a
+         * verdict can trail the dialog by ~20 seconds. Short enough that a dialog
+         * Android never showed turns into "try again" within a few minutes, rather
+         * than an Install button stuck on "Installing..." until the process dies.
+         */
+        const val DIALOG_TIMEOUT_MILLIS = 3 * 60 * 1000L
+
+        val DIALOG = InstallConfirmation(DIALOG_TIMEOUT_MILLIS)
+    }
+}
+
 interface Installer {
     /** False when this strategy cannot run here - e.g. root is not available. */
     val isAvailable: Boolean
 
-    suspend fun install(file: File): InstallOutcome
+    /** [confirmation] is used only by an installer that can need the user's go-ahead; see [InstallConfirmation]. */
+    suspend fun install(file: File, confirmation: InstallConfirmation = InstallConfirmation.DIALOG): InstallOutcome
 }
 
 /**

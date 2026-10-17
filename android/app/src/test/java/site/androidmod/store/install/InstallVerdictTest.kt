@@ -5,6 +5,8 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -88,6 +90,43 @@ class InstallVerdictTest {
     @Test
     fun `a timed-out install reads as unfinished, not as an unknown failure`() {
         assertEquals("didn't finish", InstallErrors.summarize(InstallFailure.TIMED_OUT))
+    }
+
+    // --- how Android's request for the user's go-ahead is answered ---
+
+    @Test
+    fun `by default an install only starts the dialog and waits three minutes`() {
+        // The Library, the guide and the store's own update: unchanged.
+        assertEquals(3 * 60 * 1000L, InstallConfirmation.DIALOG.timeoutMillis)
+        assertNull(InstallConfirmation.DIALOG.notify)
+
+        InstallReceiver.awaiting(SESSION)
+
+        assertSame(InstallConfirmation.DIALOG, InstallReceiver.confirmationFor(SESSION))
+        InstallReceiver.forget(SESSION)
+    }
+
+    @Test
+    fun `the receiver answers a session the way its installer asked`() {
+        val notifier: (android.content.Intent) -> Unit = { }
+        val confirmation = InstallConfirmation(30 * 60 * 1000L, notifier)
+
+        InstallReceiver.awaiting(SESSION, confirmation)
+
+        assertSame(confirmation, InstallReceiver.confirmationFor(SESSION))
+        assertSame(notifier, InstallReceiver.confirmationFor(SESSION)?.notify)
+        assertTrue(InstallReceiver.deliver(SESSION, InstallOutcome.Success))
+        assertNull("a finished session asks nobody", InstallReceiver.confirmationFor(SESSION))
+    }
+
+    @Test
+    fun `a session nobody waits on gets neither a dialog nor a notification`() = runTest {
+        assertNull(InstallReceiver.confirmationFor(SESSION + 1))
+
+        val result = InstallReceiver.awaiting(SESSION, InstallConfirmation(timeout) { })
+        InstallReceiver.await(SESSION, result, timeout) { }
+
+        assertNull("abandoned at the timeout", InstallReceiver.confirmationFor(SESSION))
     }
 
     private companion object {

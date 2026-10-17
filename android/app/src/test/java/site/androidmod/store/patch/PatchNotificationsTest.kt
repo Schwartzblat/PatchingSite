@@ -38,6 +38,14 @@ class PatchNotificationsTest {
     }
 
     @Test
+    fun `install prompt names the app and version`() {
+        assertEquals(
+            NotificationText("Tap to install WhatsApp 2.26.41.71", "Android needs your OK to install the update."),
+            PatchNotifications.installText("WhatsApp", "2.26.41.71"),
+        )
+    }
+
+    @Test
     fun `confirm text`() {
         assertEquals(
             NotificationText("Some features are off in this version", "Open the app to continue or cancel."),

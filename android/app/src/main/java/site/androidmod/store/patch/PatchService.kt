@@ -34,7 +34,6 @@ import site.androidmod.store.download.DownloadService
 import site.androidmod.store.download.DownloadState
 import site.androidmod.store.download.NotificationText
 import site.androidmod.store.download.ProgressThrottle
-import site.androidmod.store.install.InstallOutcome
 import site.androidmod.store.move.InstallGate
 import site.androidmod.store.update.StoreSelfUpdate
 import java.io.File
@@ -177,9 +176,10 @@ class PatchService : Service() {
             PatchMode.UPDATE -> {
                 PatchRegistry.update(pkg, PatchState.Installing)
                 val failure = try {
-                    installUpdate(pkg, outcome)
+                    installUpdate(pkg, name, outcome)
                 } finally {
-                    // Installed or failed, the file has done its job.
+                    // Only now: installUpdate returns once the outcome is known - installed, a
+                    // definitive failure, or no confirmation within UpdateInstall's 30 minutes.
                     withContext(Dispatchers.IO) { outcome.file.delete() }
                 }
                 if (failure == null) {
@@ -192,8 +192,11 @@ class PatchService : Service() {
         }
     }
 
-    /** The failure message, or null when the update installed. */
-    private suspend fun installUpdate(pkg: String, outcome: PatchOutcome.Ready): String? {
+    /**
+     * The failure message, or null when the update installed. When Android asks for the
+     * user's OK, a "Tap to install" notification carries its dialog (see [UpdateInstall]).
+     */
+    private suspend fun installUpdate(pkg: String, name: String, outcome: PatchOutcome.Ready): String? {
         if (pkg == WHATSAPP) {
             // Puts a parked WhatsApp backup back before the update replaces the app.
             val gate = withContext(Dispatchers.IO) {
@@ -201,7 +204,14 @@ class PatchService : Service() {
             }
             if (gate is InstallGate.Refused) return gate.message
         }
-        return (container.installer().install(outcome.file) as? InstallOutcome.Failure)?.message
+        // On the service's IO scope: installer() may ask `su` (debug builds only).
+        val installer = container.installer()
+        return UpdateInstall.run(
+            install = { confirmation -> installer.install(outcome.file, confirmation) },
+            prompt = { confirm -> notifyInstall(pkg, name, outcome.versionName, confirm) },
+            // The session is over, so its dialog is moot; run's finally posts the result in this slot.
+            clearPrompt = { getSystemService(NotificationManager::class.java).cancel(resultId(pkg)) },
+        )
     }
 
     private suspend fun onFailed(pkg: String, name: String, failed: PatchOutcome.Failed): NotificationText {
@@ -275,10 +285,40 @@ class PatchService : Service() {
 
     private fun notifyConfirm(pkg: String, name: String) = post(pkg, PatchNotifications.confirmText(name))
 
+    /**
+     * Android wants the user's OK for the update ([confirm] is its dialog), and starting the
+     * dialog from the background is blocked: a tap here opens it. It stays until the session
+     * ends (UpdateInstall's clearPrompt), so a dialog backed out of can be opened again.
+     * Called on the main thread by InstallReceiver.
+     */
+    private fun notifyInstall(pkg: String, name: String, versionName: String, confirm: Intent) {
+        // UPDATE_CURRENT: confirm intents differ only in their extras (the session), which
+        // PendingIntent matching ignores, so an older one would otherwise be reused as it was.
+        val open = PendingIntent.getActivity(
+            this,
+            resultId(pkg),
+            confirm,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        post(
+            pkg,
+            PatchNotifications.installText(name, versionName),
+            open,
+            autoCancel = false,
+            priority = NotificationCompat.PRIORITY_HIGH,
+        )
+    }
+
     /** One result notification per package; a new one replaces the last. */
     private fun notifyFinished(pkg: String, text: NotificationText) = post(pkg, text)
 
-    private fun post(pkg: String, text: NotificationText) {
+    private fun post(
+        pkg: String,
+        text: NotificationText,
+        contentIntent: PendingIntent = openApp(),
+        autoCancel: Boolean = true,
+        priority: Int = NotificationCompat.PRIORITY_DEFAULT,
+    ) {
         val manager = getSystemService(NotificationManager::class.java)
         if (!manager.areNotificationsEnabled()) return
         val id = resultId(pkg)
@@ -291,8 +331,9 @@ class PatchService : Service() {
                 .setContentTitle(text.title)
                 .setContentText(text.body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text.body))
-                .setContentIntent(openApp())
-                .setAutoCancel(true)
+                .setPriority(priority)
+                .setContentIntent(contentIntent)
+                .setAutoCancel(autoCancel)
                 .build(),
         )
     }

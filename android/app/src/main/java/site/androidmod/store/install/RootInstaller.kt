@@ -24,7 +24,8 @@ class RootInstaller(
         runCatching { runSu("id").contains("uid=0") }.getOrDefault(false)
     }
 
-    override suspend fun install(file: File): InstallOutcome = withContext(Dispatchers.IO) {
+    // No system dialog on this path, so nothing to confirm.
+    override suspend fun install(file: File, confirmation: InstallConfirmation): InstallOutcome = withContext(Dispatchers.IO) {
         val contents = try {
             BundleReader.read(file)
         } catch (error: BundleException) {

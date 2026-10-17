@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
@@ -25,7 +26,7 @@ class InstallReceiver : BroadcastReceiver() {
             // Nobody waiting means the installer timed out and abandoned this
             // session (see [await]); a dialog now would confirm an install that can
             // no longer happen, long after the user was told to try again.
-            if (!isPending(sessionId)) return
+            val confirmation = confirmationFor(sessionId) ?: return
             // The system wants to show its confirmation dialog. Launching it from a
             // receiver needs NEW_TASK.
             // getParcelableExtra(String, Class) is API 33+; minSdk here is 30, so the
@@ -50,6 +51,11 @@ class InstallReceiver : BroadcastReceiver() {
                 return
             }
             confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Before the start, which Android blocks while the app is in the background:
+            // an install nobody is watching is confirmed from its notification instead.
+            confirmation.notify?.let { notify ->
+                runCatching { notify(confirm) }.onFailure { Log.w(TAG, "Could not post the install prompt", it) }
+            }
             context.startActivity(confirm)
             return
         }
@@ -66,11 +72,18 @@ class InstallReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION = "site.androidmod.store.INSTALL_RESULT"
+        private const val TAG = "PatchedStore"
 
-        private val pending = ConcurrentHashMap<Int, CompletableDeferred<InstallOutcome>>()
+        /** One committed session's waiting installer, and how it wants the user asked. */
+        private class Waiter(val result: CompletableDeferred<InstallOutcome>, val confirmation: InstallConfirmation)
 
-        fun awaiting(sessionId: Int): CompletableDeferred<InstallOutcome> =
-            CompletableDeferred<InstallOutcome>().also { pending[sessionId] = it }
+        private val pending = ConcurrentHashMap<Int, Waiter>()
+
+        fun awaiting(
+            sessionId: Int,
+            confirmation: InstallConfirmation = InstallConfirmation.DIALOG,
+        ): CompletableDeferred<InstallOutcome> =
+            CompletableDeferred<InstallOutcome>().also { pending[sessionId] = Waiter(it, confirmation) }
 
         fun forget(sessionId: Int) {
             pending.remove(sessionId)
@@ -79,6 +92,15 @@ class InstallReceiver : BroadcastReceiver() {
         /** Whether an installer is still waiting on [sessionId]. */
         fun isPending(sessionId: Int): Boolean = pending.containsKey(sessionId)
 
+        /** How [sessionId]'s installer wants a confirmation request answered; null when nobody waits on it. */
+        fun confirmationFor(sessionId: Int): InstallConfirmation? = pending[sessionId]?.confirmation
+
+        /** Claims [sessionId] for giving up; false when the receiver delivered (or is delivering) first. */
+        private fun giveUp(sessionId: Int, result: CompletableDeferred<InstallOutcome>): Boolean {
+            val waiter = pending[sessionId]?.takeIf { it.result === result } ?: return false
+            return pending.remove(sessionId, waiter)
+        }
+
         /**
          * Hands [outcome] to whoever awaits [sessionId]. False when nobody does any
          * more - a verdict that arrived after [await] gave up - and it is dropped:
@@ -86,7 +108,7 @@ class InstallReceiver : BroadcastReceiver() {
          * rewrite that. remove() makes delivery and giving up mutually exclusive.
          */
         fun deliver(sessionId: Int, outcome: InstallOutcome): Boolean =
-            pending.remove(sessionId)?.complete(outcome) ?: false
+            pending.remove(sessionId)?.result?.complete(outcome) ?: false
 
         /**
          * Waits for the verdict on a committed session, for at most [timeoutMillis].
@@ -96,10 +118,11 @@ class InstallReceiver : BroadcastReceiver() {
          * receiver, which starts the system dialog - but if the user has left the
          * app while the build was staging, Android blocks that background activity
          * start, no dialog appears, and no verdict ever comes: the button said
-         * "Installing..." until the process died.
+         * "Installing..." until the process died. (An install that passed
+         * [InstallConfirmation.notify] has a notification for that, and a longer wait.)
          *
          * On timeout the session is [abandon]ed and the result says what to do.
-         * Giving up is claimed atomically - `remove(key, value)` - so exactly one
+         * Giving up is claimed atomically - [giveUp]'s `remove(key, value)` - so exactly one
          * of two things happens: the receiver delivers first and that verdict is
          * returned, or this gives up first and any later verdict finds nobody
          * waiting and is dropped. A late result cannot flip a failure the user has
@@ -119,11 +142,11 @@ class InstallReceiver : BroadcastReceiver() {
                 // left the app mid-install - but the session is already committed.
                 // Give it up the same way a timeout does, or a confirmation request
                 // arriving later opens a dialog for an install nobody is watching.
-                if (pending.remove(sessionId, result)) abandon()
+                if (giveUp(sessionId, result)) abandon()
                 throw error
             }
             verdict?.let { return it }
-            if (!pending.remove(sessionId, result)) {
+            if (!giveUp(sessionId, result)) {
                 // The receiver claimed the verdict in the instant before the
                 // timeout fired and is completing it now.
                 return result.await()

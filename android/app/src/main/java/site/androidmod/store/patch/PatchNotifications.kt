@@ -14,6 +14,10 @@ internal object PatchNotifications {
         PatchStage.Signing -> "Signing…"
     }
 
+    /** Shown when Android wants the user's OK for an update; its content intent is the system's confirm dialog. */
+    fun installText(name: String, versionName: String): NotificationText =
+        NotificationText("Tap to install $name $versionName", "Android needs your OK to install the update.")
+
     /** Shown when a build waits for the user's go-ahead; its content intent opens the app. */
     @Suppress("UNUSED_PARAMETER")
     fun confirmText(name: String): NotificationText =
