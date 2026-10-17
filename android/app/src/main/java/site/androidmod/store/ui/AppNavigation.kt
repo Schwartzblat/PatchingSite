@@ -182,6 +182,23 @@ fun AppNavigation() {
         navController.navigate(Routes.MOVE_CHATS) { launchSingleTop = true }
     }
 
+    // A notification tap or the patched app's update button. Reaching here means signed
+    // in (the signed-out host returned above), so one that arrived earlier has waited.
+    val request by NavigationRequests.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(request) {
+        when (val pending = request ?: return@LaunchedEffect) {
+            is NavRequest.Update -> {
+                NavigationRequests.consume()
+                openTab(Routes.LIBRARY)
+                libraryViewModel.handleUpdate(pending.pkg)
+            }
+            NavRequest.Move -> {
+                NavigationRequests.consume()
+                openMoveGuide()
+            }
+        }
+    }
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     // App detail is pushed on top of the catalogue rather than being a tab of its
@@ -280,7 +297,11 @@ fun AppNavigation() {
                     },
                 )
             }
-            composable(Routes.LIBRARY) { LibraryScreen(libraryViewModel, moveViewModel, onOpenMoveGuide = openMoveGuide) }
+            composable(Routes.LIBRARY) { LibraryScreen(
+                    libraryViewModel, moveViewModel,
+                    onOpenMoveGuide = openMoveGuide,
+                    onSubscribe = { openTab(Routes.SUBSCRIPTION) },
+                ) }
             composable(Routes.MOVE_CHATS) {
                 MoveChatsScreen(
                     viewModel = moveViewModel,

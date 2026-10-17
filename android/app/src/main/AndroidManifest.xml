@@ -56,6 +56,19 @@
             </intent-filter>
         </activity>
 
+        <!-- What a patched app opens instead of its own updater. Exported on purpose: it
+             validates the package extra, shows nothing and forwards to MainActivity. -->
+        <activity
+            android:name=".patch.UpdateAppActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.PatchedStore.NoDisplay">
+            <intent-filter>
+                <action android:name="site.androidmod.store.action.UPDATE_APP" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".download.DownloadService"
             android:exported="false"

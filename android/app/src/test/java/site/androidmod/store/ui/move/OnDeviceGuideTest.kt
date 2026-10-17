@@ -164,7 +164,7 @@ class OnDeviceGuideTest {
     @Test
     fun `a failure that cannot change offers no retry`() {
         assertFalse(patchFailureOffersRetry(PatchFailure.ANDROID_TOO_OLD))
-        assertFalse(patchFailureOffersRetry(PatchFailure.NEEDS_SUBSCRIPTION))
+        assertTrue(patchFailureOffersRetry(PatchFailure.NEEDS_SUBSCRIPTION))
         assertTrue(patchFailureOffersRetry(PatchFailure.NETWORK))
         assertTrue(patchFailureOffersRetry(PatchFailure.FAILED))
     }

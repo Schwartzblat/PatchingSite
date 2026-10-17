@@ -38,6 +38,10 @@ import site.androidmod.store.ui.EmptyState
 import site.androidmod.store.ui.ErrorBanner
 import site.androidmod.store.ui.LoadingState
 import site.androidmod.store.move.WHATSAPP_PACKAGE
+import site.androidmod.store.patch.PatchRegistry
+import site.androidmod.store.patch.PatchState
+import site.androidmod.store.ui.patch.PatchControl
+import androidx.compose.runtime.LaunchedEffect
 import site.androidmod.store.ui.move.KeepChatsBeforeInstallDialog
 import site.androidmod.store.ui.move.KeepChatsBeforeRemoveDialog
 import site.androidmod.store.ui.move.MoveViewModel
@@ -45,7 +49,12 @@ import site.androidmod.store.ui.theme.PapSuccess
 import site.androidmod.store.ui.theme.PapWarning
 
 @Composable
-fun LibraryScreen(viewModel: LibraryViewModel, moveViewModel: MoveViewModel, onOpenMoveGuide: () -> Unit) {
+fun LibraryScreen(
+    viewModel: LibraryViewModel,
+    moveViewModel: MoveViewModel,
+    onOpenMoveGuide: () -> Unit,
+    onSubscribe: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val moveGuide by moveViewModel.guide.collectAsStateWithLifecycle()
     // Which warning is up: a WhatsApp with chats on it - official, or ours - is about
@@ -53,6 +62,7 @@ fun LibraryScreen(viewModel: LibraryViewModel, moveViewModel: MoveViewModel, onO
     // none is.
     var removeWarning by remember { mutableStateOf<RemoveWarning?>(null) }
     val downloads by DownloadRegistry.downloads.collectAsStateWithLifecycle()
+    val patchStates by PatchRegistry.states.collectAsStateWithLifecycle()
     // Hoisted: every system-intent call from this screen needs the Activity
     // context, not the application one.
     val context = LocalContext.current
@@ -72,6 +82,11 @@ fun LibraryScreen(viewModel: LibraryViewModel, moveViewModel: MoveViewModel, onO
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+
+    // An on-device update installs from the service, which reports only through the
+    // registry: when one lands, what is installed has changed.
+    val installedCount = patchStates.values.count { it == PatchState.Installed }
+    LaunchedEffect(installedCount) { if (installedCount > 0) viewModel.refresh() }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         // Two surfaces because they have two owners and two lifetimes: a failed
@@ -123,6 +138,10 @@ fun LibraryScreen(viewModel: LibraryViewModel, moveViewModel: MoveViewModel, onO
                         entry = entry,
                         ready = ready,
                         installing = state.installing,
+                        patchState = patchStates[entry.packageName],
+                        onUpdate = { viewModel.startUpdate(entry.packageName, entry.name) },
+                        onMove = onOpenMoveGuide,
+                        onSubscribe = onSubscribe,
                         onInstall = { ready?.let(viewModel::install) },
                         onUninstall = {
                             val whatsApp = entry.packageName == WHATSAPP_PACKAGE
@@ -160,6 +179,20 @@ fun LibraryScreen(viewModel: LibraryViewModel, moveViewModel: MoveViewModel, onO
     }
 }
 
+private fun patchBusy(state: PatchState?) = state is PatchState.Running ||
+    state is PatchState.AwaitingConfirmation || state == PatchState.Installing
+
+/**
+ * Whether the card shows the patch job's progress instead of the Update button: while it
+ * runs, and for a failure or "Installed" only while the update is still on offer (the
+ * registry keeps both for the process, so a later offer gets its button back).
+ */
+internal fun showsPatchControl(state: PatchState?, action: LibraryAction): Boolean = when (state) {
+    is PatchState.Running, is PatchState.AwaitingConfirmation, PatchState.Installing -> true
+    is PatchState.Failed, PatchState.Installed -> action == LibraryAction.UPDATE
+    is PatchState.Ready, null -> false
+}
+
 /** Which of the two "your chats will go" warnings to show; see KeepChatsDialog. */
 private enum class RemoveWarning { BEFORE_INSTALL, PLAIN }
 
@@ -168,9 +201,15 @@ private fun LibraryCard(
     entry: LibraryEntry,
     ready: DownloadKey?,
     installing: DownloadKey?,
+    patchState: PatchState?,
+    onUpdate: () -> Unit,
+    onMove: () -> Unit,
+    onSubscribe: () -> Unit,
     onInstall: () -> Unit,
     onUninstall: () -> Unit,
 ) {
+    val action = libraryAction(entry)
+    val showPatchControl = showsPatchControl(patchState, action)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -190,6 +229,8 @@ private fun LibraryCard(
                             "Not installed" to MaterialTheme.colorScheme.onSurfaceVariant
                         entry.updateAvailable ->
                             "Installed ${entry.installed.versionName} · ${entry.latest} available" to PapWarning
+                        action == LibraryAction.MOVE ->
+                            "Installed ${entry.installed.versionName} · one-time move needed" to PapWarning
                         else ->
                             "Installed ${entry.installed.versionName} · up to date" to PapSuccess
                     }
@@ -202,6 +243,18 @@ private fun LibraryCard(
                 }
             }
 
+            if (showPatchControl) {
+                Column(modifier = Modifier.padding(top = 14.dp)) {
+                    PatchControl(
+                        packageName = entry.packageName,
+                        state = patchState,
+                        ready = false,
+                        onStart = onUpdate,
+                        onSubscribe = onSubscribe,
+                    )
+                }
+            }
+
             if (ready != null || entry.installed != null) {
                 Row(modifier = Modifier.padding(top = 14.dp)) {
                     if (ready != null) {
@@ -209,10 +262,15 @@ private fun LibraryCard(
                             Text(if (installing == ready) "Installing…" else "Install ${ready.version}")
                         }
                     }
+                    val label = libraryActionLabel(action)
+                    if (label != null && !showPatchControl) {
+                        Button(onClick = if (action == LibraryAction.MOVE) onMove else onUpdate) { Text(label) }
+                    }
                     if (entry.installed != null) {
                         OutlinedButton(
                             onClick = onUninstall,
-                            modifier = Modifier.padding(start = if (ready != null) 8.dp else 0.dp),
+                            enabled = !patchBusy(patchState),
+                            modifier = Modifier.padding(start = if (ready != null || (label != null && !showPatchControl)) 8.dp else 0.dp),
                         ) { Text("Uninstall") }
                     }
                 }

@@ -22,4 +22,11 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
+
+    <!-- UpdateAppActivity draws nothing; it forwards and finishes in onCreate. -->
+    <style name="Theme.PatchedStore.NoDisplay" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoDisplay">true</item>
+    </style>
 </resources>

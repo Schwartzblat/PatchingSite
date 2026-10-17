@@ -82,7 +82,9 @@ fun AppDetailScreen(
     // The build an Install tap was held back for, while "Keep your chats?" is asked.
     var heldInstall by remember { mutableStateOf<DownloadKey?>(null) }
 
-    LaunchedEffect(packageName) { viewModel.loadVersions(packageName) }
+    // An on-device app has no server builds to list; its updates come through the Library.
+    val onDevice = app?.onDevice == true
+    LaunchedEffect(packageName, onDevice) { if (!onDevice) viewModel.loadVersions(packageName) }
 
     // What is installed can change while this app is in the background, so it is
     // re-read on every return to the screen - the same reason LibraryScreen
@@ -124,7 +126,7 @@ fun AppDetailScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                InstalledStatus(installed = installed, latest = state.versions.firstOrNull()?.version)
+                InstalledStatus(installed = installed, latest = if (onDevice) null else state.versions.firstOrNull()?.version)
             }
         }
 
@@ -146,6 +148,7 @@ fun AppDetailScreen(
         }
 
         when {
+            onDevice -> OnDevicePanel()
             state.loading && state.versions.isEmpty() -> LoadingState()
             state.versions.isEmpty() && state.error == null -> EmptyState(
                 icon = R.drawable.ic_download,
@@ -203,6 +206,21 @@ fun AppDetailScreen(
  * reads the same on both screens. "up to date" is only claimed once there is a
  * build list to compare against.
  */
+@Composable
+private fun OnDevicePanel() {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Text(
+            "Built on your phone from the official app. Updates come through the Library.",
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(16.dp),
+        )
+    }
+}
+
 @Composable
 private fun InstalledStatus(installed: InstalledApp?, latest: String?) {
     val order = if (installed != null && latest != null) {

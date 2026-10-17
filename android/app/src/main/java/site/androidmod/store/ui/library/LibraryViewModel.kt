@@ -26,6 +26,19 @@ import site.androidmod.store.install.VersionOrder
 import site.androidmod.store.install.Versions
 import site.androidmod.store.move.InstallGate
 import site.androidmod.store.move.WHATSAPP_PACKAGE
+import site.androidmod.store.data.needsSubscription
+import site.androidmod.store.patch.PatchMode
+import site.androidmod.store.patch.PatchService
+import site.androidmod.store.patch.StoreUpdateRequired
+import site.androidmod.store.patch.UpdateOffer
+import site.androidmod.store.patch.isValidUpdateRequest
+import site.androidmod.store.patch.readPatchInfo
+import site.androidmod.store.patch.updateOffer
+import site.androidmod.store.ui.NavRequest
+import site.androidmod.store.ui.NavigationRequests
+import site.androidmod.store.update.StoreSelfUpdate
+import kotlinx.coroutines.CancellationException
+import java.io.File
 
 data class LibraryEntry(
     val packageName: String,
@@ -33,9 +46,37 @@ data class LibraryEntry(
     val installed: InstalledApp?,
     val latest: String?,
     val order: VersionOrder,
+    /** Built on the phone: [latest] comes from the patch API and [offer] decides the button. */
+    val onDevice: Boolean = false,
+    val offer: UpdateOffer = UpdateOffer.None,
 ) {
-    val updateAvailable: Boolean get() = installed != null && order == VersionOrder.NEWER
+    val updateAvailable: Boolean
+        get() = if (onDevice) {
+            offer is UpdateOffer.NewVersion || offer is UpdateOffer.PatchUpdate
+        } else installed != null && order == VersionOrder.NEWER
 }
+
+/** The one action an entry's card offers besides Install/Uninstall. */
+enum class LibraryAction { NONE, UPDATE, MOVE }
+
+internal fun libraryAction(entry: LibraryEntry): LibraryAction {
+    if (!entry.onDevice) return LibraryAction.NONE
+    return when (entry.offer) {
+        UpdateOffer.None -> LibraryAction.NONE
+        is UpdateOffer.NewVersion, is UpdateOffer.PatchUpdate -> LibraryAction.UPDATE
+        UpdateOffer.NeedsMove -> LibraryAction.MOVE
+    }
+}
+
+internal fun libraryActionLabel(action: LibraryAction): String? = when (action) {
+    LibraryAction.NONE -> null
+    LibraryAction.UPDATE -> "Update"
+    LibraryAction.MOVE -> "Move to the new update system"
+}
+
+internal fun upToDateMessage(name: String) = "$name is up to date"
+
+private const val SUBSCRIPTION_NEEDED = "You need a subscription to update."
 
 data class LibraryState(
     val entries: List<LibraryEntry> = emptyList(),
@@ -147,8 +188,21 @@ class LibraryViewModel(
         refreshJob = viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, loadError = null)
             try {
-                val entries = container.catalog.apps().map { app ->
+                val apps = container.catalog.apps()
+                // Fetched at most once per refresh, and only when an on-device app is installed.
+                var userCert: String? = null
+                var userCertKnown = false
+                val entries = apps.map { app ->
                     val installed = container.installedApps.find(app.packageName)
+                    if (app.onDevice) {
+                        // A refresh is also a chance to learn of an update (spec 7); the in-app
+                        // state only, notifications are the worker's.
+                        if (installed != null && !userCertKnown) {
+                            userCert = userCertSha256()
+                            userCertKnown = true
+                        }
+                        return@map onDeviceEntry(app.packageName, app.name, installed, userCert)
+                    }
                     // Scoped to ApiException, not runCatching: a broad catch here
                     // swallows the CancellationException of a SUPERSEDED refresh, so
                     // the losing job runs on to completion and writes its (now
@@ -186,6 +240,102 @@ class LibraryViewModel(
                 if (error.isAuth) container.auth.expireSession()
                 _state.value = _state.value.copy(loading = false, loadError = error.message)
             }
+        }
+    }
+
+    /** The user's signing certificate: cached, else fetched; null when it cannot be had (their key is then unknown). */
+    private suspend fun userCertSha256(): String? =
+        container.signingKeys.cached()?.certSha256 ?: try {
+            withContext(Dispatchers.IO) { container.signingKeys.get().certSha256 }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            null
+        }
+
+    private suspend fun onDeviceEntry(
+        pkg: String,
+        name: String,
+        installed: InstalledApp?,
+        userCert: String?,
+    ): LibraryEntry {
+        val latest = try {
+            container.patchApi.latest(pkg)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: ApiException) {
+            if (error.isAuth) container.auth.expireSession()
+            null
+        } catch (error: StoreUpdateRequired) {
+            null
+        }
+        val offer = if (latest == null || installed == null) UpdateOffer.None else {
+            val patchInfo = withContext(Dispatchers.IO) { installed.sourceDir?.let { readPatchInfo(File(it)) } }
+            updateOffer(installed, patchInfo, latest, userCert, container.move.ownSignature)
+        }
+        return LibraryEntry(
+            packageName = pkg,
+            name = name,
+            installed = installed,
+            latest = latest?.versionName,
+            order = if (installed != null && latest != null) {
+                Versions.compare(latest.versionName, installed.versionName)
+            } else VersionOrder.UNKNOWN,
+            onDevice = true,
+            offer = offer,
+        )
+    }
+
+    /** Begins the on-device update of [pkg]; progress comes from PatchRegistry. */
+    fun startUpdate(pkg: String, name: String?) {
+        PatchService.start(StoreApp.instance, pkg, PatchMode.UPDATE, name)
+    }
+
+    /**
+     * An update asked for from outside the Library (a notification, or the patched app's own
+     * update button): looks at what is newest right now, then starts the update, opens the
+     * move guide, or says there is nothing to do. Said as a toast, like install results.
+     */
+    fun handleUpdate(pkg: String) {
+        val onDevice = container.settings.onDevicePackages
+        if (!isValidUpdateRequest(pkg, onDevice) { container.installedApps.find(it) != null }) return
+        viewModelScope.launch {
+            val name = _state.value.entries.firstOrNull { it.packageName == pkg }?.name
+                ?: container.appNames[pkg]
+                ?: if (pkg == WHATSAPP_PACKAGE) "WhatsApp" else pkg
+            val latest = try {
+                container.patchApi.latest(pkg)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: StoreUpdateRequired) {
+                // Its own job: leaving this screen must not cancel a store download half way.
+                viewModelScope.launch {
+                    try {
+                        StoreSelfUpdate.run(container)
+                    } catch (updateError: CancellationException) {
+                        throw updateError
+                    } catch (updateError: Exception) {
+                        android.util.Log.w("PatchedStore", "Store self-update failed", updateError)
+                    }
+                }
+                return@launch
+            } catch (error: ApiException) {
+                if (error.isAuth) container.auth.expireSession()
+                _installResults.trySend(if (error.needsSubscription) SUBSCRIPTION_NEEDED else error.message ?: "Could not check for updates")
+                return@launch
+            } catch (error: Exception) {
+                _installResults.trySend("Could not check for updates")
+                return@launch
+            }
+            val installed = container.installedApps.find(pkg) ?: return@launch
+            val patchInfo = withContext(Dispatchers.IO) { installed.sourceDir?.let { readPatchInfo(File(it)) } }
+            val offer = updateOffer(installed, patchInfo, latest, userCertSha256(), container.move.ownSignature)
+            when (offer) {
+                UpdateOffer.None -> _installResults.trySend(upToDateMessage(name))
+                is UpdateOffer.NewVersion, is UpdateOffer.PatchUpdate -> startUpdate(pkg, name)
+                UpdateOffer.NeedsMove -> NavigationRequests.request(NavRequest.Move)
+            }
+            refresh()
         }
     }
 

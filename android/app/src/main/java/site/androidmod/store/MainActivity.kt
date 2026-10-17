@@ -1,6 +1,7 @@
 package site.androidmod.store
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -13,7 +14,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import site.androidmod.store.patch.UpdateWorker
 import site.androidmod.store.ui.AppNavigation
+import site.androidmod.store.ui.NavRequest
+import site.androidmod.store.ui.NavigationRequests
 import site.androidmod.store.ui.theme.StoreTheme
 
 class MainActivity : ComponentActivity() {
@@ -32,6 +36,8 @@ class MainActivity : ComponentActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        // Not on a recreation: the intent is the same one, already handled.
+        if (savedInstanceState == null) handleRequest(intent)
         setContent {
             StoreTheme {
                 Surface(
@@ -41,6 +47,22 @@ class MainActivity : ComponentActivity() {
                     AppNavigation()
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleRequest(intent)
+    }
+
+    /** A notification tap or the patched app's update button: where in the store to go. */
+    private fun handleRequest(intent: Intent?) {
+        val pkg = intent?.getStringExtra(UpdateWorker.EXTRA_OPEN_UPDATE)
+        when {
+            pkg != null -> NavigationRequests.request(NavRequest.Update(pkg))
+            intent?.getBooleanExtra(UpdateWorker.EXTRA_OPEN_MOVE, false) == true ->
+                NavigationRequests.request(NavRequest.Move)
         }
     }
 

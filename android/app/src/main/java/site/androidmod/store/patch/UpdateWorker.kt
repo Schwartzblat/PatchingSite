@@ -87,7 +87,7 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         )
         val move = offer == UpdateOffer.NeedsMove
         val intent = Intent(context, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         if (move) intent.putExtra(EXTRA_OPEN_MOVE, true) else intent.putExtra(EXTRA_OPEN_UPDATE, pkg)
         val id = notificationId(pkg, move)
         val open = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
