@@ -34,10 +34,15 @@
          says why. allowBackup="false" stays for the platform versions that read it,
          but from Android 12 it no longer stops a device transfer, which is what
          dataExtractionRules is for. targetApi because that attribute is 31+ and
-         minSdk is 30; Android 11 reads fullBackupContent instead. -->
+         minSdk is 30; Android 11 reads fullBackupContent instead.
+         largeHeap: an on-device WhatsApp build used up to about 221 MB of Java heap on a
+         Pixel 9a, whose default limit per app is 256 MB, so a phone with a lower default
+         would fail it with an OutOfMemoryError. largeHeap raises the limit to the phone's
+         dalvik.vm.heapsize (512 MB on that Pixel). -->
     <application
         android:name=".StoreApp"
         android:allowBackup="false"
+        android:largeHeap="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

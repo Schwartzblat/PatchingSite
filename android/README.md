@@ -539,7 +539,9 @@ up front (`MovePhase.AndroidTooOld`) while going back stays available.
    reported as a failure. The job never touches an installed app; it ends by handing over a file.
 4. `PatchService` runs jobs in a `dataSync` foreground service, one per package, because the
    official WhatsApp download is about 155 MB and can outlive the screen; patching and
-   signing take about 2 seconds on the emulator. It posts progress and result
+   signing take about 2 seconds on the emulator and 3 on a Pixel 9a. A build uses up to
+   about 221 MB of Java heap, more than many phones give an app by default, so the
+   manifest sets `largeHeap`. It posts progress and result
    notifications (`PatchNotifications`), and on Android 15's foreground time limit it
    cancels the jobs. `PatchRegistry` is the process-wide state the screens read
    (`PatchState`), like `DownloadRegistry`; it also carries the user's answer to the
