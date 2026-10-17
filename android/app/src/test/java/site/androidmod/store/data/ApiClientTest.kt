@@ -122,6 +122,57 @@ class ApiClientTest {
     }
 
     @Test
+    fun `a redirect to another host carries no account headers`() = runTest {
+        // OkHttp drops Authorization on a cross-host redirect but copies every other header,
+        // so the store version would reach whoever our server sends the request to.
+        val foreign = MockWebServer()
+        foreign.start()
+        try {
+            token = "abc123"
+            server.enqueue(MockResponse.Builder().code(302).setHeader("Location", foreign.url("/w.apk").toString()).build())
+            foreign.enqueue(MockResponse(code = 200, body = "payload"))
+            val target = File.createTempFile("redirect", ".apk").also { it.deleteOnExit() }
+
+            ApiClient(
+                OkHttpClient(),
+                baseUrl = { server.url("/").toString().trimEnd('/') },
+                token = { token },
+                storeVersionCode = { 123L },
+            ).download(server.url("/api/download/x").toString(), target) { _, _ -> }
+
+            val ours = server.takeRequest()
+            assertEquals("Bearer abc123", ours.headers["Authorization"])
+            assertEquals("123", ours.headers["X-Store-Version-Code"])
+            val theirs = foreign.takeRequest()
+            assertNull(theirs.headers["Authorization"])
+            assertNull(theirs.headers["X-Store-Version-Code"])
+            assertEquals("payload", target.readText())
+        } finally {
+            foreign.close()
+        }
+    }
+
+    @Test
+    fun `a redirect within our server keeps the account headers`() = runTest {
+        token = "abc123"
+        server.enqueue(MockResponse.Builder().code(302).setHeader("Location", server.url("/api/elsewhere").toString()).build())
+        server.enqueue(MockResponse(code = 200, body = "{}"))
+
+        ApiClient(
+            OkHttpClient(),
+            baseUrl = { server.url("/").toString().trimEnd('/') },
+            token = { token },
+            storeVersionCode = { 123L },
+        ).get("/api/x")
+
+        server.takeRequest()
+        val followed = server.takeRequest()
+        assertEquals("/api/elsewhere", followed.url.encodedPath)
+        assertEquals("Bearer abc123", followed.headers["Authorization"])
+        assertEquals("123", followed.headers["X-Store-Version-Code"])
+    }
+
+    @Test
     fun `size reads content length`() = runTest {
         server.enqueue(MockResponse.Builder().code(200).setHeader("Content-Length", 4321).build())
         assertEquals(4321L, client().size("/big"))

@@ -41,9 +41,17 @@ fun updateOffer(
     }
 }
 
-/** Identifies one offer, so it is announced once. */
-fun offerKey(pkg: String, latest: LatestPatch, offer: UpdateOffer): String =
-    "$pkg:${latest.versionCode}:${latest.revision}:${offer::class.simpleName}"
+/**
+ * Identifies one offer, so it is announced once. A new version and the move are news once
+ * per WhatsApp version, whatever the record's revision does meanwhile; a patch update is
+ * the revision itself. Literal names, not class names, which R8 renames.
+ */
+fun offerKey(pkg: String, latest: LatestPatch, offer: UpdateOffer): String = when (offer) {
+    is UpdateOffer.PatchUpdate -> "$pkg:${latest.versionCode}:${latest.revision}:PatchUpdate"
+    is UpdateOffer.NewVersion -> "$pkg:${latest.versionCode}:NewVersion"
+    UpdateOffer.NeedsMove -> "$pkg:${latest.versionCode}:NeedsMove"
+    UpdateOffer.None -> "$pkg:${latest.versionCode}:None"
+}
 
 /** The notification words for [offer]; null for None. [backTitles] are the visible titles of the features coming back. */
 internal fun updateNotificationText(name: String, offer: UpdateOffer, backTitles: List<String>): NotificationText? =

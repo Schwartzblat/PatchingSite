@@ -78,6 +78,24 @@ class PatchApiTest {
     }
 
     @Test
+    fun `426 with a malformed min code still asks for a store update`() = runTest {
+        for (body in listOf(
+            """{"detail":"Store update required","min_store_version_code":{"code":77}}""",
+            """{"detail":"Store update required","min_store_version_code":[77]}""",
+            """{"detail":"Store update required","min_store_version_code":"soon"}""",
+            """[1, 2]""",
+        )) {
+            server.enqueue(MockResponse(code = 426, body = body))
+            try {
+                patch.latest("com.whatsapp")
+                fail("expected StoreUpdateRequired for $body")
+            } catch (error: StoreUpdateRequired) {
+                assertEquals(body, 0L, error.minStoreVersionCode)
+            }
+        }
+    }
+
+    @Test
     fun `402 stays an ApiException that needs a subscription`() = runTest {
         server.enqueue(MockResponse(code = 402, body = """{"detail":"Subscription required"}"""))
         try {

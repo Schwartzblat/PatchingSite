@@ -91,4 +91,24 @@ class UpdateOfferTest {
         )
         assertEquals("com.whatsapp:100:2:PatchUpdate", offerKey("com.whatsapp", latest(), o))
     }
+
+    @Test
+    fun `new version and move keys ignore the revision`() {
+        // A revision bump for the same WhatsApp is not news to someone already told about it.
+        val newVersion = UpdateOffer.NewVersion("2.25.1")
+        assertEquals("com.whatsapp:100:NewVersion", offerKey("com.whatsapp", latest(revision = 1), newVersion))
+        assertEquals(
+            offerKey("com.whatsapp", latest(revision = 1), newVersion),
+            offerKey("com.whatsapp", latest(revision = 2), newVersion),
+        )
+        assertEquals("com.whatsapp:100:NeedsMove", offerKey("com.whatsapp", latest(revision = 1), UpdateOffer.NeedsMove))
+        assertEquals(
+            offerKey("com.whatsapp", latest(revision = 1), UpdateOffer.NeedsMove),
+            offerKey("com.whatsapp", latest(revision = 3), UpdateOffer.NeedsMove),
+        )
+        assertNotEquals(
+            offerKey("com.whatsapp", latest(versionCode = 100), newVersion),
+            offerKey("com.whatsapp", latest(versionCode = 101), newVersion),
+        )
+    }
 }

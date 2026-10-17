@@ -112,7 +112,10 @@ interface PatchServer {
 
 /** Fetches the official APK from its publisher (production: ApiClient, which sends that host no account headers). */
 interface OfficialDownloader {
-    /** Content-Length from a HEAD request, or null when the host sends none. */
+    /**
+     * Content-Length from a HEAD request, or null when the host sends none. @throws ApiException
+     * (status 0 without an answer); PatchJob reads any other status as "size unknown".
+     */
     suspend fun size(url: String): Long?
 
     /**
@@ -236,7 +239,14 @@ class PatchJob(
         val context = currentCoroutineContext()
         val digest = MessageDigest.getInstance("SHA-256")
         try {
-            val size = downloader.size(url)
+            val size = try {
+                downloader.size(url)
+            } catch (error: ApiException) {
+                // An answer, just not to HEAD (some hosts refuse it): the size is unknown, and the
+                // download's own space check still applies. No answer at all is the network.
+                if (error.status == 0) throw error
+                null
+            }
             if (size != null) {
                 val shortfall = blocking { reserve(workDir, roomFor(size)) }
                 if (shortfall > 0) throw Stop(PatchFailure.NOT_ENOUGH_SPACE, shortfall)

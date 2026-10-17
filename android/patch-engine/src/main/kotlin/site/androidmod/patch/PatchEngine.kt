@@ -12,6 +12,7 @@ import kotlinx.serialization.json.put
 import org.apache.commons.compress.archivers.zip.ZipFile
 
 /** Everything one patch run needs; [workDir] holds the intermediate unsigned APK. */
+/** [paywallToken] is a secret: [toString] leaves it out, so a logged request never carries it. */
 data class PatchRequest(
     val official: File,
     val bundle: PatchBundle,
@@ -20,7 +21,10 @@ data class PatchRequest(
     val revision: Int,
     val workDir: File,
     val output: File,
-)
+) {
+    override fun toString() =
+        "PatchRequest(official=$official, bundle=$bundle, record=$record, revision=$revision, workDir=$workDir, output=$output)"
+}
 
 /** [visibleFeaturesOff] is [featuresOff] reduced to the titles worth showing the user. */
 data class PatchResult(val output: File, val featuresOff: List<String>, val visibleFeaturesOff: List<String>)

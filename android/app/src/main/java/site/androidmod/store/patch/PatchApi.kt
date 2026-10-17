@@ -1,9 +1,9 @@
 package site.androidmod.store.patch
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import site.androidmod.store.data.ApiClient
@@ -63,9 +63,10 @@ class PatchApi(private val api: ApiClient) {
 
     suspend fun signingKey(): SigningKeyResponse = api.decode(api.get("/api/signing-key"))
 
+    /** 0 for a body that says nothing usable: an object or array there must not throw out of [latest]. */
     private fun minStoreVersionCode(body: String?): Long {
         val root = runCatching { Json.parseToJsonElement(body.orEmpty()).jsonObject }.getOrNull()
-        return root?.get("min_store_version_code")?.jsonPrimitive?.longOrNull ?: 0L
+        return (root?.get("min_store_version_code") as? JsonPrimitive)?.longOrNull ?: 0L
     }
 
     private fun segment(value: String) = URLEncoder.encode(value, "UTF-8").replace("+", "%20")

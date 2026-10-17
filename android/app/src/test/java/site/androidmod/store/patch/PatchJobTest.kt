@@ -495,6 +495,23 @@ class PatchJobTest {
     }
 
     @Test
+    fun `a refused HEAD counts as an unknown size`() = runTest {
+        // whatsapp.com may answer HEAD with an error and still serve the GET: the download's
+        // own space check (ApiClient) applies then.
+        for (status in listOf(403, 405, 503)) {
+            val f = fixture()
+            f.sizeAnswer = { throw ApiException(status, "No HEAD") }
+            f.recordsByApk[OFFICIAL_SHA] = recordJson()
+
+            val outcome = f.run()
+
+            assertTrue("HEAD $status: $outcome", outcome is PatchOutcome.Ready)
+            assertTrue(f.reserveCalls.isEmpty())
+            assertEquals(PatchStage.Downloading(0, -1), f.stages[1])
+        }
+    }
+
+    @Test
     fun `not official stops before patching`() = runTest {
         val f = fixture()
         f.recordsByApk[OFFICIAL_SHA] = recordJson()
@@ -771,7 +788,6 @@ class PatchJobTest {
             Triple("cdn 401", { it.downloadError = ApiException(401, "Unauthorized") }, failed(PatchFailure.FAILED)),
             Triple("cdn 402", { it.downloadError = ApiException(402, "Payment required") }, failed(PatchFailure.FAILED)),
             Triple("head offline", { it.sizeAnswer = { throw ApiException(0, "Network error") } }, failed(PatchFailure.NETWORK)),
-            Triple("head 403", { it.sizeAnswer = { throw ApiException(403, "Forbidden") } }, failed(PatchFailure.FAILED)),
         )
         for ((name, setUp, expected) in cases) {
             val f = fixture()

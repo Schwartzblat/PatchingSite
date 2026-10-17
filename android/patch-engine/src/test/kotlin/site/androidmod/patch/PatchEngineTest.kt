@@ -142,6 +142,14 @@ class PatchEngineTest {
         assertFalse(merged.contentEquals(read(s.official, "AndroidManifest.xml")))
     }
 
+    @Test fun requestNeverPrintsThePaywallToken() {
+        val (_, req, _) = request(setup())
+        val printed = req.toString()
+        assertFalse("the paywall token is a secret: $printed", "tok\"en" in printed)
+        assertTrue(printed.startsWith("PatchRequest("))
+        assertTrue("the revision still shows", "revision=7" in printed)
+    }
+
     @Test fun unsupportedRecordRefused() = refused<PatchException.Unsupported>(setup(supported = false))
 
     @Test fun requiredKeyMissingRefused() =

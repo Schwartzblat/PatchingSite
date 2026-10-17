@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
  * class stays a plain JVM object that MockWebServer can drive.
  */
 class ApiClient(
-    private val client: OkHttpClient = defaultClient(),
+    client: OkHttpClient = defaultClient(),
     private val baseUrl: () -> String,
     private val token: () -> String?,
     /**
@@ -43,6 +43,25 @@ class ApiClient(
     private val storeVersionCode: () -> Long = { 0L },
 ) {
     val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * [client] plus a network interceptor that strips the account headers from every hop that
+     * is not our server. OkHttp follows redirects itself and, across hosts, drops only
+     * Authorization: X-Store-Version-Code would ride along to wherever our server redirected.
+     * A network interceptor sees each hop's own URL, so this holds however many hops there are.
+     */
+    private val client: OkHttpClient = client.newBuilder()
+        .addNetworkInterceptor { chain ->
+            val request = chain.request()
+            chain.proceed(
+                if (isOurs(request.url.toString())) {
+                    request
+                } else {
+                    request.newBuilder().removeHeader(AUTHORIZATION).removeHeader(STORE_VERSION_CODE).build()
+                },
+            )
+        }
+        .build()
 
     suspend fun get(path: String): String = execute(request(path).get().build())
 
@@ -355,8 +374,8 @@ class ApiClient(
 
     /** Credentials and store version: only ever for requests to our own server. */
     private fun signed(builder: Request.Builder): Request.Builder {
-        token()?.let { builder.header("Authorization", "Bearer $it") }
-        builder.header("X-Store-Version-Code", storeVersionCode().toString())
+        token()?.let { builder.header(AUTHORIZATION, "Bearer $it") }
+        builder.header(STORE_VERSION_CODE, storeVersionCode().toString())
         return builder
     }
 
@@ -375,6 +394,8 @@ class ApiClient(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val AUTHORIZATION = "Authorization"
+        private const val STORE_VERSION_CODE = "X-Store-Version-Code"
         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_NOT_MODIFIED = 304
