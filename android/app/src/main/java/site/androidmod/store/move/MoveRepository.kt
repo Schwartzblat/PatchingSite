@@ -457,6 +457,7 @@ class MoveRepository(
             MovePhase.RemovedBeforeSaved -> "WhatsApp removed before its backup was saved"
             MovePhase.NothingToDo -> "nothing to do"
             is MovePhase.NotPossibleYet -> "not possible yet (${phase.installed} > ${phase.newest})"
+            MovePhase.AndroidTooOld -> "move into ours not offered: Android too old to patch"
         }
         return if (guide.finished != null) "$phase, finished" else phase
     }

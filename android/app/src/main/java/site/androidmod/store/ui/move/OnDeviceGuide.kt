@@ -3,8 +3,10 @@ package site.androidmod.store.ui.move
 import site.androidmod.store.data.ApiException
 import site.androidmod.store.data.BuildVersion
 import site.androidmod.store.data.needsSubscription
+import site.androidmod.store.move.MoveDirection
 import site.androidmod.store.move.MoveGuide
 import site.androidmod.store.move.MovePhase
+import site.androidmod.store.patch.PATCH_MIN_SDK
 import site.androidmod.store.patch.PatchFailure
 import site.androidmod.store.patch.StoreUpdateRequired
 import site.androidmod.store.patch.message
@@ -36,6 +38,20 @@ fun hideMoveWhileKeyUnknown(guide: MoveGuide, onDevice: Boolean, keyKnown: Boole
     if (!onDevice || keyKnown || previous || guide.inProgress) return guide
     if (guide.phase !is MovePhase.AtStep && guide.phase !is MovePhase.NotPossibleYet) return guide
     return guide.copy(phase = MovePhase.NothingToDo)
+}
+
+/**
+ * Android 11 and 12 can't patch on the phone (patching needs [PATCH_MIN_SDK]), so once
+ * WhatsApp is patched there the move into ours - from the regular WhatsApp or from a previous
+ * build - could never reach its install: the guide says so up front ([MovePhase.AndroidTooOld])
+ * instead of starting it. Only the offer goes, as with [hideMoveWhileKeyUnknown]: the at-risk
+ * flags stay, going back (TO_OFFICIAL, and its offer from a previous build) is untouched, and
+ * a move already under way keeps its steps. Attention and RemovedBeforeSaved stay too.
+ */
+fun moveIntoOursOnOldAndroid(guide: MoveGuide, onDevice: Boolean, sdkInt: Int): MoveGuide {
+    if (!onDevice || sdkInt >= PATCH_MIN_SDK || guide.inProgress || guide.direction != MoveDirection.TO_OURS) return guide
+    if (guide.phase !is MovePhase.AtStep && guide.phase !is MovePhase.NotPossibleYet) return guide
+    return guide.copy(phase = MovePhase.AndroidTooOld)
 }
 
 /**

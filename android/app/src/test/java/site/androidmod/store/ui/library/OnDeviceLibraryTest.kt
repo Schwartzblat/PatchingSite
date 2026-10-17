@@ -50,5 +50,11 @@ class OnDeviceLibraryTest {
     @Test
     fun `an up-to-date message uses the app name`() {
         assertEquals("WhatsApp is up to date", upToDateMessage("WhatsApp"))
+        assertEquals("WhatsApp is up to date", noUpdateMessage("WhatsApp", sdkInt = 33))
+    }
+
+    @Test
+    fun `on android 12 an update request says why there is none`() {
+        assertEquals("Patching on this phone needs Android 13 or newer.", noUpdateMessage("WhatsApp", sdkInt = 32))
     }
 }

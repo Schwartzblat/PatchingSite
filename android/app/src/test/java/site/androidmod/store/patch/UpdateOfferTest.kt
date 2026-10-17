@@ -23,7 +23,8 @@ class UpdateOfferTest {
         installed: InstalledApp?,
         patchInfo: PatchInfo?,
         latest: LatestPatch,
-    ) = updateOffer(installed, patchInfo, latest, user, shared)
+        sdkInt: Int = 33,
+    ) = updateOffer(installed, patchInfo, latest, user, shared, sdkInt)
 
     @Test
     fun `newer version`() {
@@ -64,6 +65,21 @@ class UpdateOfferTest {
     @Test
     fun `missing patch info counts as revision zero`() {
         assertEquals(UpdateOffer.PatchUpdate(emptyList()), offer(installed(), null, latest(revision = 1)))
+    }
+
+    @Test
+    fun `android 11 and 12 are offered nothing, since they can't patch`() {
+        for (sdk in listOf(30, 31, 32)) {
+            assertEquals(UpdateOffer.None, offer(installed(versionCode = 99), info(2), latest(versionCode = 100), sdk))
+            assertEquals(UpdateOffer.None, offer(installed(), info(1), latest(revision = 2), sdk))
+            assertEquals(UpdateOffer.None, offer(installed(signer = shared), null, latest(), sdk))
+        }
+    }
+
+    @Test
+    fun `android 13 is offered updates`() {
+        assertEquals(UpdateOffer.NewVersion("2.25.1"), offer(installed(versionCode = 99), info(2), latest(versionCode = 100), 33))
+        assertEquals(UpdateOffer.NeedsMove, offer(installed(signer = shared), null, latest(), 36))
     }
 
     @Test

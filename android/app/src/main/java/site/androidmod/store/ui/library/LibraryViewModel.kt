@@ -1,5 +1,6 @@
 package site.androidmod.store.ui.library
 
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -27,11 +28,14 @@ import site.androidmod.store.install.Versions
 import site.androidmod.store.move.InstallGate
 import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.store.data.needsSubscription
+import site.androidmod.store.patch.PATCH_MIN_SDK
+import site.androidmod.store.patch.PatchFailure
 import site.androidmod.store.patch.PatchMode
 import site.androidmod.store.patch.PatchService
 import site.androidmod.store.patch.StoreUpdateRequired
 import site.androidmod.store.patch.UpdateOffer
 import site.androidmod.store.patch.isValidUpdateRequest
+import site.androidmod.store.patch.message
 import site.androidmod.store.patch.readPatchInfo
 import site.androidmod.store.patch.updateOffer
 import site.androidmod.store.ui.NavRequest
@@ -75,6 +79,14 @@ internal fun libraryActionLabel(action: LibraryAction): String? = when (action) 
 }
 
 internal fun upToDateMessage(name: String) = "$name is up to date"
+
+/**
+ * What an outside update request (a notification, the patched app's own button) says when
+ * there is nothing to start. On Android 11 and 12 nothing can be patched, so "up to date"
+ * would be false whatever the server has.
+ */
+internal fun noUpdateMessage(name: String, sdkInt: Int): String =
+    if (sdkInt < PATCH_MIN_SDK) PatchFailure.ANDROID_TOO_OLD.message() else upToDateMessage(name)
 
 private const val SUBSCRIPTION_NEEDED = "You need a subscription to update."
 
@@ -271,7 +283,7 @@ class LibraryViewModel(
         }
         val offer = if (latest == null || installed == null) UpdateOffer.None else {
             val patchInfo = withContext(Dispatchers.IO) { installed.sourceDir?.let { readPatchInfo(File(it)) } }
-            updateOffer(installed, patchInfo, latest, userCert, container.move.ownSignature)
+            updateOffer(installed, patchInfo, latest, userCert, container.move.ownSignature, Build.VERSION.SDK_INT)
         }
         return LibraryEntry(
             packageName = pkg,
@@ -329,9 +341,11 @@ class LibraryViewModel(
             }
             val installed = container.installedApps.find(pkg) ?: return@launch
             val patchInfo = withContext(Dispatchers.IO) { installed.sourceDir?.let { readPatchInfo(File(it)) } }
-            val offer = updateOffer(installed, patchInfo, latest, userCertSha256(), container.move.ownSignature)
+            val offer = updateOffer(
+                installed, patchInfo, latest, userCertSha256(), container.move.ownSignature, Build.VERSION.SDK_INT,
+            )
             when (offer) {
-                UpdateOffer.None -> _installResults.trySend(upToDateMessage(name))
+                UpdateOffer.None -> _installResults.trySend(noUpdateMessage(name, Build.VERSION.SDK_INT))
                 is UpdateOffer.NewVersion, is UpdateOffer.PatchUpdate -> startUpdate(pkg, name)
                 UpdateOffer.NeedsMove -> NavigationRequests.request(NavRequest.Move)
             }

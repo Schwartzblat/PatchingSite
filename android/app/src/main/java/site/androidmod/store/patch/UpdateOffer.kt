@@ -15,14 +15,20 @@ sealed interface UpdateOffer {
     data object NeedsMove : UpdateOffer
 }
 
+/**
+ * What to offer for [installed], an on-device app. [sdkInt] is the phone's Android: below
+ * [PATCH_MIN_SDK] nothing can be built here, so neither an update nor the move to the user's
+ * key (which ends in a build) is offered.
+ */
 fun updateOffer(
     installed: InstalledApp?,
     patchInfo: PatchInfo?,
     latest: LatestPatch,
     userCertSha256: String?,
     sharedCertSha256: String?,
+    sdkInt: Int,
 ): UpdateOffer {
-    if (installed == null) return UpdateOffer.None
+    if (installed == null || sdkInt < PATCH_MIN_SDK) return UpdateOffer.None
     val signer = installed.signerSha256
     if (signer != null && signer == sharedCertSha256 && signer != userCertSha256) return UpdateOffer.NeedsMove
     // Not ours (the regular app): the guide handles that one.

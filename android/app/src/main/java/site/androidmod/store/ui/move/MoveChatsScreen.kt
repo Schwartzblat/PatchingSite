@@ -62,6 +62,8 @@ import site.androidmod.store.move.StepVariant
 import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.store.move.backupAgo
 import site.androidmod.store.move.backupTime
+import site.androidmod.store.patch.PatchFailure
+import site.androidmod.store.patch.message
 import site.androidmod.store.ui.ErrorBanner
 import site.androidmod.store.ui.LoadingState
 import site.androidmod.store.ui.formatBytes
@@ -164,6 +166,12 @@ fun MoveChatsScreen(
                 text = "Your WhatsApp (${phase.installed}) is newer than ours (${phase.newest}), and " +
                     "WhatsApp can't move chats to an older version. We'll publish a newer one soon. " +
                     "Check back in a few days.",
+                action = "Back",
+                onAction = onBack,
+            )
+            MovePhase.AndroidTooOld -> Panel(
+                title = "Not possible on this phone",
+                text = PatchFailure.ANDROID_TOO_OLD.message(),
                 action = "Back",
                 onAction = onBack,
             )

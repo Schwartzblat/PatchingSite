@@ -19,6 +19,7 @@ import site.androidmod.store.patch.PatchFailure
 import site.androidmod.store.patch.PatchStage
 import site.androidmod.store.patch.PatchState
 import site.androidmod.store.patch.StoreUpdateRequired
+import site.androidmod.store.patch.message
 import site.androidmod.store.ui.patch.patchControlText
 import site.androidmod.store.ui.patch.patchFailureOffersRetry
 import site.androidmod.store.ui.patch.patchProgress
@@ -105,6 +106,52 @@ class OnDeviceGuideTest {
         val underWay = guide(facts(signature = "d".repeat(64), record = record()), previous = false)
         assertTrue(underWay.inProgress)
         assertEquals(underWay, hideMoveWhileKeyUnknown(underWay, onDevice = true, keyKnown = false, previous = false))
+    }
+
+    // --- Android 11 and 12 can't patch (I4) ---
+
+    @Test
+    fun `on android 12 the move into ours says it needs android 13`() {
+        val regular = guide(facts(signature = OFFICIAL_SIG), previous = false)
+        assertEquals(MoveDirection.TO_OURS, regular.direction)
+        assertTrue(regular.phase is MovePhase.AtStep)
+
+        val held = moveIntoOursOnOldAndroid(regular, onDevice = true, sdkInt = 32)
+
+        assertEquals(MovePhase.AndroidTooOld, held.phase)
+        // Only the offer goes: the chat-loss guards stay.
+        assertTrue(held.officialAtRisk)
+        assertEquals("Patching on this phone needs Android 13 or newer.", PatchFailure.ANDROID_TOO_OLD.message())
+    }
+
+    @Test
+    fun `on android 12 a previous build is not offered the move either, but can go back`() {
+        val previous = guide(previousInstalled, previous = true)
+        assertEquals(MoveDirection.TO_OURS, previous.direction)
+        assertEquals(MovePhase.AndroidTooOld, moveIntoOursOnOldAndroid(previous, onDevice = true, sdkInt = 31).phase)
+        assertTrue("going back stays on offer", moveIntoOursOnOldAndroid(previous, onDevice = true, sdkInt = 31).offersReturn)
+
+        val goingBack = guide(previousInstalled, previous = true, previousGoesBack = true)
+        assertEquals(MoveDirection.TO_OFFICIAL, goingBack.direction)
+        assertEquals(goingBack, moveIntoOursOnOldAndroid(goingBack, onDevice = true, sdkInt = 31))
+    }
+
+    @Test
+    fun `not possible yet also reads as needing android 13 there`() {
+        val tooNew = guide(facts(signature = OFFICIAL_SIG), previous = false, newest = "2.0.0")
+        assertTrue(tooNew.phase is MovePhase.NotPossibleYet)
+        assertEquals(MovePhase.AndroidTooOld, moveIntoOursOnOldAndroid(tooNew, onDevice = true, sdkInt = 30).phase)
+    }
+
+    @Test
+    fun `android 13, off-device, or a move under way is left alone`() {
+        val regular = guide(facts(signature = OFFICIAL_SIG), previous = false)
+        assertEquals(regular, moveIntoOursOnOldAndroid(regular, onDevice = true, sdkInt = 33))
+        assertEquals(regular, moveIntoOursOnOldAndroid(regular, onDevice = false, sdkInt = 30))
+
+        val underWay = guide(facts(signature = OFFICIAL_SIG, record = record()), previous = false)
+        assertTrue(underWay.inProgress)
+        assertEquals(underWay, moveIntoOursOnOldAndroid(underWay, onDevice = true, sdkInt = 30))
     }
 
     @Test

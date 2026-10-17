@@ -178,6 +178,13 @@ sealed interface MovePhase {
     /** The official WhatsApp is newer than our newest build, which could not restore its backup. */
     data class NotPossibleYet(val installed: String, val newest: String) : MovePhase
 
+    /**
+     * WhatsApp is patched on the phone, and this one runs Android 11 or 12, where nothing can
+     * be patched: the move into ours could never be finished, so it is not offered. Going back
+     * is unaffected. See ui/move/OnDeviceGuide.kt's moveIntoOursOnOldAndroid.
+     */
+    data object AndroidTooOld : MovePhase
+
     /** The engine stopped, or the device is in a state the guide has no words for. */
     data object Attention : MovePhase
 

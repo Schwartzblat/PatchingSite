@@ -1,5 +1,6 @@
 package site.androidmod.store.ui.move
 
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -113,6 +114,7 @@ sealed interface MoveEvent {
  */
 class MoveViewModel(
     private val container: Container = StoreApp.instance.container,
+    private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MoveState())
@@ -143,7 +145,8 @@ class MoveViewModel(
             parkedFromPrevious = state.parkedFromPrevious,
             previousGoesBack = state.previousGoesBack,
         )
-        hideMoveWhileKeyUnknown(guide, state.onDevice, keyKnown = !state.keyUnknown, previous = state.previous)
+        val shown = hideMoveWhileKeyUnknown(guide, state.onDevice, keyKnown = !state.keyUnknown, previous = state.previous)
+        moveIntoOursOnOldAndroid(shown, state.onDevice, sdkInt)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MoveGuide.Empty)
 
     private var refreshJob: Job? = null

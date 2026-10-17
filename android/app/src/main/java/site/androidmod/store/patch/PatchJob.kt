@@ -33,6 +33,9 @@ import java.security.MessageDigest
 /** Why a build runs: the guide's DOWNLOAD step, or an update of the installed app. */
 enum class PatchMode { GUIDE, UPDATE }
 
+/** Patching on the phone needs Android 13 (ArtHooks); below it nothing can be built here. */
+const val PATCH_MIN_SDK = 33
+
 /** Where a build is, for the progress notification and the screens. */
 sealed interface PatchStage {
     data object CheckingVersion : PatchStage
@@ -157,7 +160,7 @@ class PatchJob(
             clearWorkDir(keep = null)
             workDir.mkdirs()
             if (!signedIn()) return failed(PatchFailure.SIGNED_OUT)
-            if (sdkInt < MIN_SDK) return failed(PatchFailure.ANDROID_TOO_OLD)
+            if (sdkInt < PATCH_MIN_SDK) return failed(PatchFailure.ANDROID_TOO_OLD)
 
             onStage(PatchStage.CheckingVersion)
             val latest = try {
@@ -326,8 +329,6 @@ class PatchJob(
     private class Stop(val reason: PatchFailure, val bytesNeeded: Long = -1, cause: Throwable? = null) : Exception(cause)
 
     private companion object {
-        /** ArtHooks needs Android 13. */
-        const val MIN_SDK = 33
         const val HTTP_NOT_FOUND = 404
         const val OFFICIAL_APK = "official.apk"
         const val SIGNED_APK = "signed.apk"

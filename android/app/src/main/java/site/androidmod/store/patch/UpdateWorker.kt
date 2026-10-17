@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
@@ -61,7 +62,8 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 continue
             }
             val patchInfo = withContext(Dispatchers.IO) { installed.sourceDir?.let { readPatchInfo(File(it)) } }
-            val offer = updateOffer(installed, patchInfo, latest, userCert, sharedCert)
+            // Nothing on Android 11 and 12, which can't patch (updateOffer).
+            val offer = updateOffer(installed, patchInfo, latest, userCert, sharedCert, Build.VERSION.SDK_INT)
             if (offer == UpdateOffer.None) continue
             val key = offerKey(pkg, latest, offer)
             if (key in settings.notifiedOffers) continue

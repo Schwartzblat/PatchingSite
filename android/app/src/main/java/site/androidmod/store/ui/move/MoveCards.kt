@@ -31,6 +31,8 @@ import site.androidmod.store.move.MoveDirection
 import site.androidmod.store.move.MoveGuide
 import site.androidmod.store.move.MovePhase
 import site.androidmod.store.move.WHATSAPP_PACKAGE
+import site.androidmod.store.patch.PatchFailure
+import site.androidmod.store.patch.message
 import site.androidmod.store.ui.emailSupport
 import site.androidmod.store.ui.openLink
 import site.androidmod.store.ui.settings.supportEmailBody
@@ -49,6 +51,11 @@ fun WhatsAppMoveCard(guide: MoveGuide, onOpen: () -> Unit) {
             text = "Not possible yet. Your WhatsApp (${phase.installed}) is newer than ours " +
                 "(${phase.newest}), and WhatsApp can't move chats to an older version. We'll " +
                 "publish a newer one soon. Check back in a few days.",
+        )
+        // Said up front rather than offering a move this phone could never finish.
+        MovePhase.AndroidTooOld -> MoveSurface(
+            title = if (guide.fromPreviousBuild) "Move to the new update system" else "Keep your chats",
+            text = PatchFailure.ANDROID_TOO_OLD.message(),
         )
         MovePhase.Attention -> MoveSurface(
             title = "Your chat move needs attention",
