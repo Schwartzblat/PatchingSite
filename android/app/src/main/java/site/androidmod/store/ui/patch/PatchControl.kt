@@ -12,6 +12,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import site.androidmod.store.patch.PatchRegistry
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import site.androidmod.store.patch.PatchFailure
 import site.androidmod.store.patch.PatchStage
 import site.androidmod.store.patch.PatchState
@@ -116,8 +117,10 @@ fun PatchQuestionHost() {
 @Composable
 fun FeaturesOffDialog(featureTitles: List<String>, onAnswer: (proceed: Boolean) -> Unit) {
     AlertDialog(
-        // Back counts as Cancel: the job must not wait on a dialog nobody can see.
+        // Back counts as Cancel: the job must not wait on a dialog nobody can see. A stray
+        // tap outside it does not: it would cancel a build the user may want.
         onDismissRequest = { onAnswer(false) },
+        properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text("Some features are off in this version") },
         text = {
             Column {

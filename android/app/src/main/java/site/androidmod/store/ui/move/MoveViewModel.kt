@@ -266,13 +266,15 @@ class MoveViewModel(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            val problem = latestProblem(error) ?: throw error
+            val moveActive = _state.value.moveActive
+            val problem = latestProblem(error, moveActive) ?: throw error
             if (error is ApiException && error.isAuth) container.auth.expireSession()
             _state.value = _state.value.copy(
                 versionsError = problem.message, latestNeedsSubscription = problem.needsSubscription,
             )
-            if (problem.storeUpdateRequired && !selfUpdateTried) {
+            if (guideStartsSelfUpdate(problem, moveActive, selfUpdateTried)) {
                 // Once per visit: it downloads a whole store, and every resume lands here again.
+                // Never mid-move: the guide doesn't replace the store under a move by itself.
                 selfUpdateTried = true
                 // Its own job: a refresh (every resume) must not cancel a download half way.
                 viewModelScope.launch {

@@ -64,6 +64,33 @@ class OnDeviceGuideTest {
         assertNull(latestProblem(IllegalStateException("not ours")))
     }
 
+    @Test
+    fun `mid-move the guide starts no store update of its own`() {
+        val update = latestProblem(StoreUpdateRequired(500), moveActive = true)!!
+        assertTrue(update.storeUpdateRequired)
+        // Nothing updates by itself, so "It's updating now" would be false; the button below does it.
+        assertEquals("This app needs an update first. Tap Download WhatsApp to update it.", update.message)
+        assertFalse(guideStartsSelfUpdate(update, moveActive = true, alreadyTried = false))
+
+        val idle = latestProblem(StoreUpdateRequired(500), moveActive = false)!!
+        assertEquals("This app needs an update first. It's updating now.", idle.message)
+        assertTrue(guideStartsSelfUpdate(idle, moveActive = false, alreadyTried = false))
+        assertFalse("once per visit", guideStartsSelfUpdate(idle, moveActive = false, alreadyTried = true))
+        assertFalse(guideStartsSelfUpdate(latestProblem(ApiException(500, "Boom"))!!, moveActive = false, alreadyTried = false))
+    }
+
+    @Test
+    fun `an update's Installed state does not stand in for the guide's download`() {
+        // Left in the registry by an earlier Library update: the guide's step must offer its own build.
+        assertNull(guidePatchState(PatchState.Installed))
+        assertEquals("Download WhatsApp", patchControlText(guidePatchState(PatchState.Installed), ready = false))
+        val running = PatchState.Running(PatchStage.Patching)
+        assertEquals(running, guidePatchState(running))
+        val failed = PatchState.Failed(PatchFailure.NETWORK, "x")
+        assertEquals(failed, guidePatchState(failed))
+        assertNull(guidePatchState(null))
+    }
+
     // --- an unknown signing key (R9) ---
 
     private val previousInstalled = facts(signature = PREVIOUS_SIG)

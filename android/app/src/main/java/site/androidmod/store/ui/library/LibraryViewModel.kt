@@ -85,8 +85,19 @@ internal fun upToDateMessage(name: String) = "$name is up to date"
  * there is nothing to start. On Android 11 and 12 nothing can be patched, so "up to date"
  * would be false whatever the server has.
  */
-internal fun noUpdateMessage(name: String, sdkInt: Int): String =
-    if (sdkInt < PATCH_MIN_SDK) PatchFailure.ANDROID_TOO_OLD.message() else upToDateMessage(name)
+internal fun noUpdateMessage(name: String, sdkInt: Int, keyKnown: Boolean = true): String = when {
+    sdkInt < PATCH_MIN_SDK -> PatchFailure.ANDROID_TOO_OLD.message()
+    // Without the user's key their own build can't be told apart, so "up to date" isn't known.
+    !keyKnown -> "Couldn't check for an update. Try again later."
+    else -> upToDateMessage(name)
+}
+
+/** Android refused to start the update's service: the app was in the background by then. */
+internal const val UPDATE_NOT_STARTED = "Open the app and tap Update again."
+
+/** Whether [action]'s button can be tapped: no on-device Update while a chat move is under way. */
+internal fun libraryActionEnabled(action: LibraryAction, moveInProgress: Boolean): Boolean =
+    action != LibraryAction.UPDATE || !moveInProgress
 
 private const val SUBSCRIPTION_NEEDED = "You need a subscription to update."
 
@@ -300,7 +311,9 @@ class LibraryViewModel(
 
     /** Begins the on-device update of [pkg]; progress comes from PatchRegistry. */
     fun startUpdate(pkg: String, name: String?) {
-        PatchService.start(StoreApp.instance, pkg, PatchMode.UPDATE, name)
+        if (!PatchService.start(StoreApp.instance, pkg, PatchMode.UPDATE, name)) {
+            _installResults.trySend(UPDATE_NOT_STARTED)
+        }
     }
 
     /**
@@ -320,6 +333,7 @@ class LibraryViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: StoreUpdateRequired) {
+                _installResults.trySend(PatchFailure.STORE_UPDATE_REQUIRED.message())
                 // Its own job: leaving this screen must not cancel a store download half way.
                 viewModelScope.launch {
                     try {
@@ -341,11 +355,13 @@ class LibraryViewModel(
             }
             val installed = container.installedApps.find(pkg) ?: return@launch
             val patchInfo = withContext(Dispatchers.IO) { installed.sourceDir?.let { readPatchInfo(File(it)) } }
+            val userCert = userCertSha256()
             val offer = updateOffer(
-                installed, patchInfo, latest, userCertSha256(), container.move.ownSignature, Build.VERSION.SDK_INT,
+                installed, patchInfo, latest, userCert, container.move.ownSignature, Build.VERSION.SDK_INT,
             )
             when (offer) {
-                UpdateOffer.None -> _installResults.trySend(noUpdateMessage(name, Build.VERSION.SDK_INT))
+                UpdateOffer.None ->
+                    _installResults.trySend(noUpdateMessage(name, Build.VERSION.SDK_INT, keyKnown = userCert != null))
                 is UpdateOffer.NewVersion, is UpdateOffer.PatchUpdate -> startUpdate(pkg, name)
                 UpdateOffer.NeedsMove -> NavigationRequests.request(NavRequest.Move)
             }

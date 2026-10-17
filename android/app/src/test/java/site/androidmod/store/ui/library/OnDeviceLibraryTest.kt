@@ -7,6 +7,7 @@ import org.junit.Test
 import site.androidmod.store.install.InstalledApp
 import site.androidmod.store.install.VersionOrder
 import site.androidmod.store.patch.UpdateOffer
+import site.androidmod.store.patch.foregroundStartAllowed
 
 class OnDeviceLibraryTest {
 
@@ -56,5 +57,29 @@ class OnDeviceLibraryTest {
     @Test
     fun `on android 12 an update request says why there is none`() {
         assertEquals("Patching on this phone needs Android 13 or newer.", noUpdateMessage("WhatsApp", sdkInt = 32))
+    }
+
+    @Test
+    fun `without the user's key an update request can't say it is up to date`() {
+        assertEquals(
+            "Couldn't check for an update. Try again later.",
+            noUpdateMessage("WhatsApp", sdkInt = 34, keyKnown = false),
+        )
+        assertEquals("WhatsApp is up to date", noUpdateMessage("WhatsApp", sdkInt = 34, keyKnown = true))
+    }
+
+    @Test
+    fun `Update is off while a chat move is under way`() {
+        assertFalse(libraryActionEnabled(LibraryAction.UPDATE, moveInProgress = true))
+        assertTrue(libraryActionEnabled(LibraryAction.UPDATE, moveInProgress = false))
+        // The move button leads into the guide, which is where a move under way continues.
+        assertTrue(libraryActionEnabled(LibraryAction.MOVE, moveInProgress = true))
+    }
+
+    @Test
+    fun `a refused service start is told apart`() {
+        assertTrue(foregroundStartAllowed { })
+        assertFalse(foregroundStartAllowed { throw IllegalStateException("app is in background") })
+        assertEquals("Open the app and tap Update again.", UPDATE_NOT_STARTED)
     }
 }

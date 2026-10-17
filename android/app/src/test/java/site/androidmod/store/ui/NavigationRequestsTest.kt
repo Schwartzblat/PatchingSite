@@ -19,6 +19,13 @@ class NavigationRequestsTest {
     }
 
     @Test
+    fun `the library extra opens the Library and nothing else`() {
+        assertEquals(NavRequest.Library, requestFrom(null, false, 0, library = true))
+        // An update request outranks it.
+        assertEquals(NavRequest.Update("com.whatsapp"), requestFrom("com.whatsapp", false, 0, library = true))
+    }
+
+    @Test
     fun `no extras is no request`() {
         assertNull(requestFrom(null, false, 0))
     }
@@ -27,5 +34,6 @@ class NavigationRequestsTest {
     fun `a relaunch from Recents replays nothing`() {
         assertNull(requestFrom("com.whatsapp", false, fromHistory or Intent.FLAG_ACTIVITY_NEW_TASK))
         assertNull(requestFrom(null, true, fromHistory))
+        assertNull(requestFrom(null, false, fromHistory, library = true))
     }
 }

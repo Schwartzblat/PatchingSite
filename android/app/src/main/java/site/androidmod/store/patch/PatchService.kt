@@ -39,6 +39,19 @@ import site.androidmod.store.update.StoreSelfUpdate
 import java.io.File
 
 /**
+ * Runs [start], a foreground-service start; false when Android refused it. Started from the
+ * background - an update request whose `latest` check finished after the user left the app -
+ * startForegroundService throws ForegroundServiceStartNotAllowedException on Android 12+,
+ * an IllegalStateException, as Android 11's refusal is.
+ */
+internal fun foregroundStartAllowed(start: () -> Unit): Boolean = try {
+    start()
+    true
+} catch (error: IllegalStateException) {
+    false
+}
+
+/**
  * Runs on-device builds in the foreground: the official APK is ~90 MB and patching takes
  * minutes, so backgrounding the app must not kill it. One job per package.
  */
@@ -365,14 +378,19 @@ class PatchService : Service() {
         private const val EXTRA_MODE = "mode"
         private const val EXTRA_NAME = "name"
 
-        /** [name] is the catalogue's display name for the notifications; null uses the last catalogue's name, then WhatsApp/the package. */
-        fun start(context: Context, pkg: String, mode: PatchMode, name: String? = null) {
+        /**
+         * [name] is the catalogue's display name for the notifications; null uses the last
+         * catalogue's name, then WhatsApp/the package. False when Android refused the start
+         * because the app is not in the foreground (see [foregroundStartAllowed]): nothing
+         * runs, and the caller says so.
+         */
+        fun start(context: Context, pkg: String, mode: PatchMode, name: String? = null): Boolean {
             val intent = Intent(context, PatchService::class.java).apply {
                 putExtra(EXTRA_PACKAGE, pkg)
                 putExtra(EXTRA_MODE, mode.name)
                 putExtra(EXTRA_NAME, name)
             }
-            context.startForegroundService(intent)
+            return foregroundStartAllowed { context.startForegroundService(intent) }
         }
     }
 }

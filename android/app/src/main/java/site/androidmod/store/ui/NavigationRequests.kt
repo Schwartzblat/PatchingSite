@@ -11,6 +11,9 @@ sealed interface NavRequest {
 
     /** Open the one-time move guide. */
     data object Move : NavRequest
+
+    /** Open the Library; nothing starts. */
+    data object Library : NavRequest
 }
 
 /**
@@ -35,9 +38,10 @@ object NavigationRequests {
  * The request an incoming intent carries. Null for one relaunched from Recents: the task's
  * base intent keeps its extras, and replaying them would start an update nobody just asked for.
  */
-fun requestFrom(update: String?, move: Boolean, flags: Int): NavRequest? = when {
+fun requestFrom(update: String?, move: Boolean, flags: Int, library: Boolean = false): NavRequest? = when {
     flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 -> null
     update != null -> NavRequest.Update(update)
     move -> NavRequest.Move
+    library -> NavRequest.Library
     else -> null
 }

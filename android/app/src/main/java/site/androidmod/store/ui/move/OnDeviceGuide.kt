@@ -8,6 +8,7 @@ import site.androidmod.store.move.MoveGuide
 import site.androidmod.store.move.MovePhase
 import site.androidmod.store.patch.PATCH_MIN_SDK
 import site.androidmod.store.patch.PatchFailure
+import site.androidmod.store.patch.PatchState
 import site.androidmod.store.patch.StoreUpdateRequired
 import site.androidmod.store.patch.message
 
@@ -64,12 +65,40 @@ fun offersUndoGoingBack(previous: Boolean, previousGoesBack: Boolean, inProgress
 /** Why PatchApi.latest failed, in the guide's words. */
 data class LatestProblem(val message: String, val needsSubscription: Boolean, val storeUpdateRequired: Boolean)
 
-/** Null for anything that is not one of the server's answers; the caller lets that propagate. */
-fun latestProblem(error: Throwable): LatestProblem? = when {
-    error is StoreUpdateRequired ->
-        LatestProblem(PatchFailure.STORE_UPDATE_REQUIRED.message(), needsSubscription = false, storeUpdateRequired = true)
+/**
+ * The 426 text while a move is under way: the guide doesn't update the store by itself then
+ * ([guideStartsSelfUpdate]), so "It's updating now" would be false. The download below does
+ * it (PatchService updates the store on a 426), so the user is pointed there.
+ */
+const val STORE_UPDATE_MID_MOVE = "This app needs an update first. Tap Download WhatsApp to update it."
+
+/**
+ * Null for anything that is not one of the server's answers; the caller lets that propagate.
+ * [moveActive]: a move is under way (see [STORE_UPDATE_MID_MOVE]).
+ */
+fun latestProblem(error: Throwable, moveActive: Boolean = false): LatestProblem? = when {
+    error is StoreUpdateRequired -> LatestProblem(
+        if (moveActive) STORE_UPDATE_MID_MOVE else PatchFailure.STORE_UPDATE_REQUIRED.message(),
+        needsSubscription = false,
+        storeUpdateRequired = true,
+    )
     error is ApiException && error.needsSubscription ->
         LatestProblem(PatchFailure.NEEDS_SUBSCRIPTION.message(), needsSubscription = true, storeUpdateRequired = false)
     error is ApiException -> LatestProblem(error.message, needsSubscription = false, storeUpdateRequired = false)
     else -> null
 }
+
+/**
+ * Whether the guide's latest check starts the store's own update: on a 426, once per visit
+ * ([alreadyTried]), and never while a move is under way ([moveActive]) - replacing the store
+ * mid-move is the user's call, from the download button.
+ */
+fun guideStartsSelfUpdate(problem: LatestProblem, moveActive: Boolean, alreadyTried: Boolean): Boolean =
+    problem.storeUpdateRequired && !moveActive && !alreadyTried
+
+/**
+ * The patch state the guide's download shows. [PatchState.Installed] is left in the
+ * registry by an earlier update from the Library (UPDATE mode): it says nothing about this
+ * step, which offers its own build, so it reads as idle.
+ */
+fun guidePatchState(state: PatchState?): PatchState? = state.takeUnless { it == PatchState.Installed }

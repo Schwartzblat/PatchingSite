@@ -139,6 +139,7 @@ fun LibraryScreen(
                         ready = ready,
                         installing = state.installing,
                         patchState = patchStates[entry.packageName],
+                        moveInProgress = moveGuide.inProgress,
                         onUpdate = { viewModel.startUpdate(entry.packageName, entry.name) },
                         onMove = onOpenMoveGuide,
                         onSubscribe = onSubscribe,
@@ -202,6 +203,7 @@ private fun LibraryCard(
     ready: DownloadKey?,
     installing: DownloadKey?,
     patchState: PatchState?,
+    moveInProgress: Boolean,
     onUpdate: () -> Unit,
     onMove: () -> Unit,
     onSubscribe: () -> Unit,
@@ -264,7 +266,11 @@ private fun LibraryCard(
                     }
                     val label = libraryActionLabel(action)
                     if (label != null && !showPatchControl) {
-                        Button(onClick = if (action == LibraryAction.MOVE) onMove else onUpdate) { Text(label) }
+                        Button(
+                            onClick = if (action == LibraryAction.MOVE) onMove else onUpdate,
+                            // Mid-move the guide owns installing WhatsApp.
+                            enabled = libraryActionEnabled(action, moveInProgress),
+                        ) { Text(label) }
                     }
                     if (entry.installed != null) {
                         OutlinedButton(

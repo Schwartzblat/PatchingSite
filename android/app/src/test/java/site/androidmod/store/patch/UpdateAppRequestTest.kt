@@ -1,5 +1,6 @@
 package site.androidmod.store.patch
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,5 +33,36 @@ class UpdateAppRequestTest {
     @Test
     fun `a package that is not installed is refused`() {
         assertFalse(isValidUpdateRequest("com.whatsapp", onDevice) { false })
+    }
+
+    // --- where UpdateAppActivity sends a request (M10) ---
+
+    @Test
+    fun `an installed on-device package opens its update`() {
+        assertEquals(UpdateAppRoute.UPDATE, updateAppRoute("com.whatsapp", onDevice) { true })
+    }
+
+    @Test
+    fun `a real package the store doesn't update here still opens the Library`() {
+        // Not on-device (the server hasn't switched it yet), or not installed: no update starts,
+        // but the user who tapped the patched app's update button lands somewhere.
+        assertEquals(UpdateAppRoute.OPEN_LIBRARY, updateAppRoute("com.tranzmate", onDevice) { true })
+        assertEquals(UpdateAppRoute.OPEN_LIBRARY, updateAppRoute("com.whatsapp", onDevice) { false })
+    }
+
+    @Test
+    fun `junk opens nothing`() {
+        assertEquals(UpdateAppRoute.IGNORE, updateAppRoute(null, onDevice) { true })
+        assertEquals(UpdateAppRoute.IGNORE, updateAppRoute("", onDevice) { true })
+        assertEquals(UpdateAppRoute.IGNORE, updateAppRoute("whatsapp", setOf("whatsapp")) { true })
+        assertEquals(UpdateAppRoute.IGNORE, updateAppRoute("com.whatsapp; rm", onDevice) { true })
+        assertEquals(UpdateAppRoute.IGNORE, updateAppRoute("../com.whatsapp", onDevice) { true })
+    }
+
+    @Test
+    fun `junk is never looked up`() {
+        var asked = false
+        updateAppRoute("com.whatsapp; rm", setOf("com.whatsapp; rm")) { asked = true; true }
+        assertFalse(asked)
     }
 }

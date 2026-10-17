@@ -1,5 +1,6 @@
 package site.androidmod.store.ui.move
 
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
@@ -12,6 +13,9 @@ import site.androidmod.store.patch.PatchRegistry
 import site.androidmod.store.patch.PatchService
 import site.androidmod.store.ui.ErrorBanner
 import site.androidmod.store.ui.patch.PatchControl
+
+/** Android refused to start the build's service (the app was not in the foreground). */
+private const val GUIDE_NOT_STARTED = "Open the app and try again."
 
 /** The lead above the download when WhatsApp is built on the phone (the DOWNLOAD step's). */
 internal const val ON_DEVICE_DOWNLOAD_LEAD =
@@ -47,9 +51,14 @@ internal fun GuideDownloadControl(
     if (!ready) ErrorBanner(state.versionsError)
     PatchControl(
         packageName = WHATSAPP_PACKAGE,
-        state = patches[WHATSAPP_PACKAGE],
+        // An earlier Library update's "Installed" is not this step's download.
+        state = guidePatchState(patches[WHATSAPP_PACKAGE]),
         ready = ready,
-        onStart = { PatchService.start(context, WHATSAPP_PACKAGE, PatchMode.GUIDE, name = "WhatsApp") },
+        onStart = {
+            if (!PatchService.start(context, WHATSAPP_PACKAGE, PatchMode.GUIDE, name = "WhatsApp")) {
+                Toast.makeText(context, GUIDE_NOT_STARTED, Toast.LENGTH_LONG).show()
+            }
+        },
         onSubscribe = onSubscribe,
     )
 }

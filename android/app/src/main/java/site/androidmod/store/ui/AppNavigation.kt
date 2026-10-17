@@ -197,6 +197,10 @@ fun AppNavigation() {
                 NavigationRequests.consume()
                 openMoveGuide()
             }
+            NavRequest.Library -> {
+                NavigationRequests.consume()
+                openTab(Routes.LIBRARY)
+            }
         }
     }
 

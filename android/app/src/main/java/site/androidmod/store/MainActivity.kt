@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import site.androidmod.store.patch.UpdateAppActivity
 import site.androidmod.store.patch.UpdateWorker
 import site.androidmod.store.ui.AppNavigation
 import site.androidmod.store.ui.NavRequest
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
                 intent.getStringExtra(UpdateWorker.EXTRA_OPEN_UPDATE),
                 intent.getBooleanExtra(UpdateWorker.EXTRA_OPEN_MOVE, false),
                 intent.flags,
+                library = intent.getBooleanExtra(UpdateAppActivity.EXTRA_OPEN_LIBRARY, false),
             )
         } catch (error: RuntimeException) {
             null
