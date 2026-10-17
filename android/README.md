@@ -566,13 +566,18 @@ The password reaches fastsigner on stdin only (the engine's `FastSigner`), and t
 screen shows only the certificate's SHA-1. `SignatureVerifier` accepts an APK signed by
 the store's own key, or by the cached user key and nothing else.
 
-**fastsigner.** The signer is a static executable shipped as `libfastsigner.so` under
+**fastsigner.** The signer is an NDK (bionic) executable shipped as `libfastsigner.so` under
 `app/src/main/jniLibs/{arm64-v8a,x86_64}/`. `packaging.jniLibs.useLegacyPackaging = true`
 in `app/build.gradle.kts` makes Android extract it to `nativeLibraryDir`, where it can be
-executed; inside the APK it could not be. To refresh the binaries after changing
-`tools/fastsigner`, build it there in release mode for `aarch64-unknown-linux-gnu` and for the
-host (`target/release/fastsigner`, x86_64), and run `scripts/update-fastsigner.sh [fastsigner-checkout]`.
-It refuses anything that is not the right architecture or not statically linked.
+executed; inside the APK it could not be. It must be a bionic build, not glibc (static or
+not): glibc's startup calls `set_robust_list`, which Android's app seccomp filter traps, so
+the process dies with SIGSYS (exit 159) from the store even though the same binary runs fine
+from `adb shell`. To refresh the binaries after changing `tools/fastsigner`, run
+`scripts/update-fastsigner.sh [fastsigner-checkout]`: it builds both Android targets with the
+NDK (`$ANDROID_NDK_HOME`, else the newest under `$ANDROID_HOME/ndk`) into a temporary target
+directory and refuses anything that is not the right architecture, dynamically linked against
+`/system/bin/linker64`, with only bionic system libraries as dependencies.
+`FastsignerBinariesTest` checks the committed ELF headers.
 
 **The bundle key pin.** `patch/BundleKey.kt` holds the public half of the key that signs
 patch bundles; the private half lives outside every repo. A store trusts a bundle only if
