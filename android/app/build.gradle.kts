@@ -1,5 +1,9 @@
 import java.time.Duration
 import java.time.Instant
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE
 
 plugins {
     alias(libs.plugins.android.application)
@@ -223,5 +227,104 @@ tasks.matching { it.name in setOf("assembleRelease", "bundleRelease", "assembleS
                 "KEY_PASSWORD in $envFilePath - the same four names " +
                 "server/utils/apps_utils.py reads - or in the environment."
         }
+    }
+}
+
+// --- Android framework stubs -------------------------------------------------
+//
+// ARSCLib (under :patch-engine) ships its own copies of framework classes -
+// android.util.AttributeSet, android.content.res.XmlResourceParser and
+// org.xmlpull.v1.* - so that it runs on a desktop JVM. R8 took them as program
+// classes shadowing the real ones, found nothing in the program implementing
+// XmlResourceParser, concluded every XmlResourceParser is null and turned Compose's
+// vector loading into `throw null`: every minified build crashed at launch in
+// painterResource(), while debug, unminified, was fine. A phone always has the real
+// classes, so what goes into this app's APK takes ARSCLib through a transform that
+// drops them; its frameworks/*.apk and everything else stay. org/xmlpull/ has to go
+// with android/: alone, the framework's XmlResourceParser would implement ARSCLib's
+// XmlPullParser, and R8 refuses a library class that implements a program one.
+// :patch-engine's tests, :patch-cli and this app's unit tests run on a desktop JVM,
+// need the copies, and still get the jar as published.
+//
+// Every minified variant then checks R8's input before R8 runs, and fails the build
+// if any jar there - ARSCLib or another - defines a class android.jar defines.
+
+/** ARSCLib's jar minus its framework classes; any other jar passes through untouched. */
+abstract class StripArscLibFrameworkClasses : TransformAction<TransformParameters.None> {
+    @get:InputArtifact
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val inputArtifact: Provider<FileSystemLocation>
+
+    override fun transform(outputs: TransformOutputs) {
+        val jar = inputArtifact.get().asFile
+        if (!jar.name.startsWith("ARSCLib-")) {
+            outputs.file(inputArtifact)
+            return
+        }
+        val frameworkPackages = listOf("android/", "org/xmlpull/")
+        ZipFile(jar).use { zip ->
+            ZipOutputStream(outputs.file(jar.name).outputStream().buffered()).use { out ->
+                for (entry in zip.entries()) {
+                    if (frameworkPackages.any { entry.name.startsWith(it) }) continue
+                    out.putNextEntry(ZipEntry(entry.name).apply { time = entry.time })
+                    zip.getInputStream(entry).use { it.copyTo(out) }
+                    out.closeEntry()
+                }
+            }
+        }
+    }
+}
+
+val frameworkClassesStripped =
+    Attribute.of("site.androidmod.frameworkClassesStripped", Boolean::class.javaObjectType)
+
+dependencies {
+    attributesSchema { attribute(frameworkClassesStripped) }
+    artifactTypes.maybeCreate("jar").attributes.attribute(frameworkClassesStripped, false)
+    registerTransform(StripArscLibFrameworkClasses::class) {
+        from.attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar").attribute(frameworkClassesStripped, false)
+        to.attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar").attribute(frameworkClassesStripped, true)
+    }
+}
+
+fun classEntries(jar: File): Set<String> = ZipFile(jar).use { zip ->
+    zip.entries().asSequence().map { it.name }.filter { it.endsWith(".class") }.toSet()
+}
+
+androidComponents {
+    val frameworkJars = sdkComponents.bootClasspath
+    onVariants { variant ->
+        // The classpath that goes into the APK. Only it: unit tests run on a desktop JVM,
+        // and ARSCLib is on no compile classpath (:patch-engine declares it implementation).
+        variant.runtimeConfiguration.attributes.attribute(frameworkClassesStripped, true)
+        if (!variant.isMinifyEnabled) return@onVariants
+        val variantName = variant.name.replaceFirstChar { it.uppercaseChar() }
+        // The classes jar of every dependency, AARs and projects included: what R8 reads.
+        val r8Input = variant.runtimeConfiguration.incoming.artifactView {
+            attributes { attribute(ARTIFACT_TYPE_ATTRIBUTE, "android-classes-jar") }
+        }.files
+        val verify = tasks.register("verify${variantName}NoFrameworkClasses") {
+            group = "verification"
+            description =
+                "Fails if a jar R8 reads for ${variant.name} defines a class android.jar defines."
+            inputs.files(frameworkJars)
+            inputs.files(r8Input)
+            doLast {
+                val frameworkClasses =
+                    frameworkJars.get().flatMapTo(HashSet()) { classEntries(it.asFile) }
+                val found = r8Input.flatMap { jar ->
+                    (classEntries(jar) intersect frameworkClasses).sorted()
+                        .map { "${jar.name}: $it" }
+                }
+                check(found.isEmpty()) {
+                    "R8 would read copies of Android framework classes for ${variant.name}, " +
+                        "take them for the app's own and miscompile code that uses them (see " +
+                        "\"Android framework stubs\" in app/build.gradle.kts):\n" +
+                        found.joinToString("\n") { "  $it" }
+                }
+            }
+        }
+        tasks.matching { it.name == "minify${variantName}WithR8" }
+            .configureEach { dependsOn(verify) }
     }
 }

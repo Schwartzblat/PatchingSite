@@ -716,3 +716,15 @@ protobuf-lite reads by name (otherwise the token store could not parse its own
 keyset); and the coroutines Main dispatcher, whose ServiceLoader lookup R8 rewrites
 into a direct construction. Repeat that check after adding a dependency that uses
 reflection, or a model that is looked up by name.
+
+**No dependency may bring its own copy of a framework class.** ARSCLib, under
+`:patch-engine`, ships `android.util.AttributeSet`,
+`android.content.res.XmlResourceParser` and `org.xmlpull.v1.*` so it runs on a desktop
+JVM. Given to R8, those copies shadowed the framework's, and R8 compiled Compose's
+vector loading into `throw null`: every minified build crashed at launch while debug ran
+fine. So the APK takes ARSCLib through an artifact transform that drops them ("Android
+framework stubs" in `app/build.gradle.kts`); `:patch-engine`'s tests, `:patch-cli` and
+the app's unit tests keep the jar as published. Before R8 runs,
+`verifyReleaseNoFrameworkClasses` (and the staging twin) fails the build if any jar R8
+reads defines a class `android.jar` defines. If it fires after a dependency change,
+strip that jar's copies the same way rather than adding `-keep` rules.
