@@ -298,18 +298,30 @@ androidComponents {
         // and ARSCLib is on no compile classpath (:patch-engine declares it implementation).
         variant.runtimeConfiguration.attributes.attribute(frameworkClassesStripped, true)
         if (!variant.isMinifyEnabled) return@onVariants
-        val variantName = variant.name.replaceFirstChar { it.uppercaseChar() }
+        // Only strings reach the task action, not the variant.
+        val variantName = variant.name
+        val taskSuffix = variantName.replaceFirstChar { it.uppercaseChar() }
         // The classes jar of every dependency, AARs and projects included: what R8 reads.
         val r8Input = variant.runtimeConfiguration.incoming.artifactView {
             attributes { attribute(ARTIFACT_TYPE_ATTRIBUTE, "android-classes-jar") }
         }.files
-        val verify = tasks.register("verify${variantName}NoFrameworkClasses") {
+        val verify = tasks.register("verify${taskSuffix}NoFrameworkClasses") {
             group = "verification"
             description =
-                "Fails if a jar R8 reads for ${variant.name} defines a class android.jar defines."
+                "Fails if a jar R8 reads for $variantName defines a class android.jar defines."
             inputs.files(frameworkJars)
             inputs.files(r8Input)
             doLast {
+                // An artifact type nothing produces resolves to no files, without an error,
+                // and an empty view would pass below. So first prove the view is R8's input:
+                // it must hold ARSCLib, as transformed for the APK.
+                check(r8Input.any { it.name.startsWith("ARSCLib-") }) {
+                    "verify${taskSuffix}NoFrameworkClasses sees no ARSCLib in R8's input for " +
+                        "$variantName (${r8Input.files.size} jars), so it would prove nothing: " +
+                        "AGP's \"android-classes-jar\" artifact type or the wiring changed. If " +
+                        "ARSCLib was dropped on purpose, drop \"Android framework stubs\" in " +
+                        "app/build.gradle.kts with it."
+                }
                 val frameworkClasses =
                     frameworkJars.get().flatMapTo(HashSet()) { classEntries(it.asFile) }
                 val found = r8Input.flatMap { jar ->
@@ -317,14 +329,16 @@ androidComponents {
                         .map { "${jar.name}: $it" }
                 }
                 check(found.isEmpty()) {
-                    "R8 would read copies of Android framework classes for ${variant.name}, " +
+                    "R8 would read copies of Android framework classes for $variantName, " +
                         "take them for the app's own and miscompile code that uses them (see " +
                         "\"Android framework stubs\" in app/build.gradle.kts):\n" +
                         found.joinToString("\n") { "  $it" }
                 }
             }
         }
-        tasks.matching { it.name == "minify${variantName}WithR8" }
-            .configureEach { dependsOn(verify) }
+        // Before R8 when its task is there; assemble and bundle are the public entry points,
+        // so a renamed R8 task cannot take the check out of the build.
+        val guarded = setOf("minify${taskSuffix}WithR8", "assemble$taskSuffix", "bundle$taskSuffix")
+        tasks.matching { it.name in guarded }.configureEach { dependsOn(verify) }
     }
 }
