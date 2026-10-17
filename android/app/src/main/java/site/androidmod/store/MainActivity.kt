@@ -18,6 +18,7 @@ import site.androidmod.store.patch.UpdateWorker
 import site.androidmod.store.ui.AppNavigation
 import site.androidmod.store.ui.NavRequest
 import site.androidmod.store.ui.NavigationRequests
+import site.androidmod.store.ui.requestFrom
 import site.androidmod.store.ui.theme.StoreTheme
 
 class MainActivity : ComponentActivity() {
@@ -58,12 +59,19 @@ class MainActivity : ComponentActivity() {
 
     /** A notification tap or the patched app's update button: where in the store to go. */
     private fun handleRequest(intent: Intent?) {
-        val pkg = intent?.getStringExtra(UpdateWorker.EXTRA_OPEN_UPDATE)
-        when {
-            pkg != null -> NavigationRequests.request(NavRequest.Update(pkg))
-            intent?.getBooleanExtra(UpdateWorker.EXTRA_OPEN_MOVE, false) == true ->
-                NavigationRequests.request(NavRequest.Move)
+        intent ?: return
+        // The extras may come from another app: on older Android reading one unparcels all
+        // of them, and an unknown Parcelable throws. That is "no request", not a crash.
+        val request = try {
+            requestFrom(
+                intent.getStringExtra(UpdateWorker.EXTRA_OPEN_UPDATE),
+                intent.getBooleanExtra(UpdateWorker.EXTRA_OPEN_MOVE, false),
+                intent.flags,
+            )
+        } catch (error: RuntimeException) {
+            null
         }
+        if (request != null) NavigationRequests.request(request)
     }
 
     override fun onStart() {

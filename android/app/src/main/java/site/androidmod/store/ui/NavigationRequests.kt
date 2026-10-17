@@ -30,3 +30,14 @@ object NavigationRequests {
         _pending.value = null
     }
 }
+
+/**
+ * The request an incoming intent carries. Null for one relaunched from Recents: the task's
+ * base intent keeps its extras, and replaying them would start an update nobody just asked for.
+ */
+fun requestFrom(update: String?, move: Boolean, flags: Int): NavRequest? = when {
+    flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 -> null
+    update != null -> NavRequest.Update(update)
+    move -> NavRequest.Move
+    else -> null
+}

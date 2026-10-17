@@ -25,7 +25,12 @@ class UpdateAppActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = StoreApp.instance.container
-        val pkg = intent?.getStringExtra(EXTRA_PACKAGE)
+        // Another app's extras: an unknown Parcelable makes the read throw on older Android.
+        val pkg = try {
+            intent?.getStringExtra(EXTRA_PACKAGE)
+        } catch (error: RuntimeException) {
+            null
+        }
         if (isValidUpdateRequest(pkg, container.settings.onDevicePackages) { container.installedApps.find(it) != null }) {
             startActivity(
                 Intent(this, MainActivity::class.java)
