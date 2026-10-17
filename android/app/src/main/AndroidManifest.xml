@@ -9,10 +9,11 @@
          android.permission.REQUEST_DELETE_PACKAGES". A normal permission: granted
          at install, no runtime prompt. -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
-    <!-- Lets the store update ITSELF without the "Do you want to update this app?"
-         dialog on Android 12+. A normal permission that silences nothing by itself:
-         a session must also ask for USER_ACTION_NOT_REQUIRED, and SessionInstaller
-         asks only when the package being installed is this app. -->
+    <!-- Lets the store update itself, and update an app it installed (the app's
+         installer of record), without the "Do you want to update this app?" dialog on
+         Android 12+. A normal permission that silences nothing by itself: a session must
+         also ask for USER_ACTION_NOT_REQUIRED, and SessionInstaller asks only for those
+         two cases (silentInstallAllowed), after SignatureVerifier has accepted the build. -->
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

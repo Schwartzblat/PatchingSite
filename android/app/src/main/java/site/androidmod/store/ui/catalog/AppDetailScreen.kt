@@ -201,11 +201,7 @@ fun AppDetailScreen(
     }
 }
 
-/**
- * The same wording and colours as the Library card, so one app's installed state
- * reads the same on both screens. "up to date" is only claimed once there is a
- * build list to compare against.
- */
+/** An on-device app has no server builds to list: where its build comes from, and where its updates are. */
 @Composable
 private fun OnDevicePanel() {
     Surface(
@@ -221,6 +217,11 @@ private fun OnDevicePanel() {
     }
 }
 
+/**
+ * The same wording and colours as the Library card, so one app's installed state
+ * reads the same on both screens. "up to date" is only claimed once there is a
+ * build list to compare against.
+ */
 @Composable
 private fun InstalledStatus(installed: InstalledApp?, latest: String?) {
     val order = if (installed != null && latest != null) {

@@ -52,8 +52,10 @@ internal fun foregroundStartAllowed(start: () -> Unit): Boolean = try {
 }
 
 /**
- * Runs on-device builds in the foreground: the official APK is ~90 MB and patching takes
- * minutes, so backgrounding the app must not kill it. One job per package.
+ * Runs on-device builds in the foreground: the official WhatsApp APK is about 155 MB and its
+ * download is most of a build (patching and signing took about 2 s on the emulator), so
+ * leaving the app must not stop it. One job per package. An update installs from here too,
+ * and may wait up to 30 minutes for the user to confirm it from a notification (UpdateInstall).
  */
 class PatchService : Service() {
 

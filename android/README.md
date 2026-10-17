@@ -220,7 +220,9 @@ process died. On timeout the session is abandoned and the install fails with
 "Installation didn't finish. Tap Install to try again." Giving up and delivering a
 verdict are mutually exclusive, so a verdict that arrives late is dropped rather
 than overwriting that message, and a late confirmation request for an abandoned
-session does not open a dialog.
+session does not open a dialog. That is every install's default
+(`InstallConfirmation.DIALOG`); an on-device update, which nobody may be watching, asks
+differently (see "On-device patching", "Where files go").
 
 `SignatureVerifier` needs the base APK of a bundle as a file, so it copies the base
 out of the zip into `cacheDir` for the check and deletes it before the install
@@ -481,10 +483,12 @@ otherwise pass the signature check.
 On Android 12+ `SessionInstaller` asks for `USER_ACTION_NOT_REQUIRED` when the package
 being installed is the store itself or an app the store installed (its installer of
 record), and the manifest declares `UPDATE_PACKAGES_WITHOUT_USER_ACTION`, so there is
-no "Do you want to update this app?" dialog (`silentInstallAllowed`). Anything else
-keeps its dialog, and so does an app a user installed by hand. Play Protect's "App
-scan recommended" prompt can still appear, because it is the device's verifier, not
-the installer's dialog.
+no "Do you want to update this app?" dialog (`silentInstallAllowed`). That covers every
+app the store installed, off-device ones as much as on-device updates of WhatsApp, and
+`SignatureVerifier` and WhatsApp's keep-chats gate still run first. Anything else keeps
+its dialog: the guide's first install, and an app a user installed by hand or with adb.
+Play Protect's "App scan recommended" prompt can still appear, because it is the
+device's verifier, not the installer's dialog.
 
 Replacing its own APK kills the app, and Android does not relaunch it. The banner
 says so while installing. `UpdatedReceiver` listens for `MY_PACKAGE_REPLACED` in
@@ -505,13 +509,19 @@ below applies and the download, `/api/list`, guide and Library work as described
 The server side (records, bundles, the key and paywall-token endpoints) is described in
 the repo README, "On-device patching endpoints". It needs Android 13 (API 33, for
 ArtHooks); the store's minSdk stays 30, so an older phone gets "Patching on this phone
-needs Android 13 or newer." instead of a build.
+needs Android 13 or newer." instead of a build. It is not offered anything it can't
+finish either: on Android 11 and 12 `updateOffer` is always `None` (no Update or Move
+button, no update notification), and the move guide's way into ours shows that sentence
+up front (`MovePhase.AndroidTooOld`) while going back stays available.
 
 **The pieces** (package `patch/`, in the order a build uses them):
 
 1. `PatchApi` is the client for `/api/patch/{pkg}/latest`, `/artifacts`, `/bundle/{version}`,
    `/api/app-token` and `/api/signing-key`. A 426 from `latest` becomes
-   `StoreUpdateRequired`; 401, 402 and 404 stay `ApiException`.
+   `StoreUpdateRequired`; 401, 402 and 404 stay `ApiException`. `ApiClient` sends the bearer
+   token and `X-Store-Version-Code` only to the base URL's host, on every hop: a network
+   interceptor strips both from a redirect anywhere else (OkHttp itself drops only
+   `Authorization`). A HEAD that whatsapp.com refuses just leaves the size unknown.
 2. `BundleCache` keeps `filesDir/patch/bundles/<pkg>/<patcherVersion>.zip` and its SHA-256
    beside it, asks the server with `If-None-Match`, and re-verifies the zip against the
    pinned key on every open. A bundle that fails verification, or is for another package
@@ -528,7 +538,8 @@ needs Android 13 or newer." instead of a build.
    user-facing words in `PatchFailure.message`; a coroutine cancellation is rethrown, never
    reported as a failure. The job never touches an installed app; it ends by handing over a file.
 4. `PatchService` runs jobs in a `dataSync` foreground service, one per package, because the
-   download is about 90 MB and patching takes minutes. It posts progress and result
+   official WhatsApp download is about 155 MB and can outlive the screen; patching and
+   signing take about 2 seconds on the emulator. It posts progress and result
    notifications (`PatchNotifications`), and on Android 15's foreground time limit it
    cancels the jobs. `PatchRegistry` is the process-wide state the screens read
    (`PatchState`), like `DownloadRegistry`; it also carries the user's answer to the
@@ -538,23 +549,32 @@ needs Android 13 or newer." instead of a build.
    build, from the installed APK: the revision and the features that were off.
 
 **Where files go.** `filesDir/patch/work/<pkg>` is the job's scratch space. The job empties
-it when it starts and ends, and `StoreApp` wipes `patch/work` at launch. It is never under
-`filesDir/downloads`, which `DownloadCleanup` prunes. A guide build (`PatchMode.GUIDE`) is
+it when it starts and ends, and `StoreApp` wipes `patch/work` and `patch/ready` at launch.
+Neither is under `filesDir/downloads`, which `DownloadCleanup` prunes. A guide build (`PatchMode.GUIDE`) is
 handed over at `DownloadPaths.targetFile(downloads, DownloadKey(pkg, versionName), "apk")`
 and marked `DownloadState.Done`, so the guide's install step takes it exactly as it takes a
 server build. An update (`PatchMode.UPDATE`) goes to `filesDir/patch/ready` and is installed
 by the service straight away through `Container.installer()` (for WhatsApp after
-`MoveRepository.beforeInstall`, the same gate that puts a parked backup back), then deleted.
+`MoveRepository.beforeInstall`, the same gate that puts a parked backup back), then deleted
+once the outcome is known. Usually that install is silent (see "How the store updates
+itself"). When Android still wants its dialog (a WhatsApp not installed by the store), the
+user may have left the app during the download, where the dialog can't be started: the
+service's install (`UpdateInstall`) passes an `InstallConfirmation` whose notification,
+"Tap to install WhatsApp <version>", carries the system's confirm intent, and waits up to
+30 minutes for that session instead of three. The notification goes when the session
+ends; no confirmation in time fails with "The update wasn't confirmed. Tap Update to try
+again."
 
 **In the screens.** `GuideDownloadControl` replaces the move guide's download with
 `PatchControl` when the server flag is on, and "Not possible yet" compares against the
 server's `latest`. The guide's steps are unchanged. `PatchControl` (`ui/patch`) is shared with
-the Library, whose card shows "Update" (or "Move to the new update system") from the offer.
+the Library, whose card shows "Update" (or "Move to the new update system") from the offer;
+Update is disabled while a chat move is under way.
 When visible features are off in this version, the job stops and the app asks "Some features
 are off in this version" with Continue and Cancel; the notification says to open the app.
-Back, Cancel, or no answer for 30 minutes counts as Cancel. A record
-with `supported: false` (the crawler's verdict) is not asked about: the job ends with "Not
-supported yet".
+Back, Cancel, or no answer for 30 minutes counts as Cancel; a tap outside the dialog does
+not. A record with `supported: false` (the crawler's verdict) is not asked about: the job
+ends with "Not supported yet".
 
 **Signing key.** One per account, from `GET /api/signing-key`, kept by `SigningKeyStore` in
 `filesDir/signing` (a PKCS#12 file and a small JSON beside it) and cleared on every way a
@@ -563,8 +583,10 @@ session ends (`AuthRepository.endSession`). `backup_rules.xml` and
 it that way. A fetch that began before a sign-out is discarded rather than stored. Nobody
 logs or prints the key, its password or the paywall token; their `toString` hides them.
 The password reaches fastsigner on stdin only (the engine's `FastSigner`), and the Settings
-screen shows only the certificate's SHA-1. `SignatureVerifier` accepts an APK signed by
-the store's own key, or by the cached user key and nothing else.
+screen shows only the certificate's SHA-1, and only once WhatsApp is on-device; while the
+installed WhatsApp is on another key it adds that the key applies after the one-time move.
+`SignatureVerifier` accepts an APK signed by the store's own key, or by the cached user key
+and nothing else.
 
 **fastsigner.** The signer is an NDK (bionic) executable shipped as `libfastsigner.so` under
 `app/src/main/jniLibs/{arm64-v8a,x86_64}/`. `packaging.jniLibs.useLegacyPackaging = true`
@@ -599,25 +621,24 @@ server for `latest` and `updateOffer` decides:
   `patch-info.json`; the notification lists the features that come back.
 - `NeedsMove`: still on the old shared-key build. The tap opens the move guide once to
   move to the user's own key; an update cannot install over it.
-- `None`: not on-device, not ours (the regular app), or current.
+- `None`: not on-device, not ours (the regular app), current, or Android 11/12.
 
-An offer is announced once (`SettingsStore.notifiedOffers`, keyed by package, version code,
-revision and kind), and is not remembered when notifications are off. A 402 ends the run.
+An offer is announced once (`SettingsStore.notifiedOffers`, keyed by package, version code
+and kind, plus the revision for a `PatchUpdate`), and is not remembered when notifications
+are off. A 402 ends the run.
 Tapping the notification opens `MainActivity` with an extra that `NavigationRequests`
 holds until the app can act (after sign-in, if need be); `LibraryViewModel.handleUpdate`
-then asks again, so a stale notification says "is up to date" instead of building, and
-starts the update. A relaunch from Recents is ignored. A 426 makes the store update itself
-first (`StoreSelfUpdate`), as does a bundle needing a newer store.
+then asks again, so a stale notification says "is up to date" instead of building (or
+"Couldn't check for an update. Try again later." when the user's key can't be fetched),
+and starts the update. A relaunch from Recents is ignored. A 426 makes the store update
+itself first (`StoreSelfUpdate`), as does a bundle needing a newer store; the move guide
+doesn't start that by itself while a move is under way.
 
 A patched app's own update button opens `UpdateAppActivity`: action
 `site.androidmod.store.action.UPDATE_APP`, string extra `package`. It is exported and has
-`CATEGORY_DEFAULT`, so it validates the extra (a well-formed package name, an `on_device`
-package, installed) and forwards to `MainActivity`; anything else finishes silently.
-
-**Silent installs.** `USER_ACTION_NOT_REQUIRED` now covers every app the store itself
-installed, not only the store. Updating WhatsApp over the patched build therefore needs no
-system dialog on Android 12+; the first install of the guide, and anything installed by
-hand, still shows one.
+`CATEGORY_DEFAULT`, so it validates the extra (`updateAppRoute`): an installed `on_device`
+package is forwarded to `MainActivity` for its update, any other well-formed package name
+opens the Library with nothing started, and anything else finishes silently.
 
 **Which WhatsApp is "ours".** With the server flag off, ours is a build signed with the
 store's certificate, as before. With it on, ours is a build signed with the user's own key,
