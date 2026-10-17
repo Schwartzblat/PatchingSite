@@ -6,8 +6,10 @@
 # The binaries must be bionic builds: they run from the app's nativeLibraryDir under
 # Android's app seccomp filter, which kills a glibc executable (static or not) with SIGSYS
 # at startup (set_robust_list). The NDK comes from $ANDROID_NDK_HOME, else the newest
-# directory under ${ANDROID_HOME:-$HOME/Android/Sdk}/ndk. The build goes into a temporary
-# CARGO_TARGET_DIR; the checkout is never written to.
+# stable one under ${ANDROID_HOME:-$HOME/Android/Sdk}/ndk (a beta or rc is skipped). The
+# build goes into a temporary CARGO_TARGET_DIR; the checkout is never written to. Build
+# paths are remapped, because the binaries ship in a public repo and rustc embeds the
+# source path of every crate that can panic: unmapped, that is the builder's home.
 set -euo pipefail
 
 android_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,8 +19,10 @@ api=30 # the store's minSdk
 
 ndk="${ANDROID_NDK_HOME:-}"
 if [ -z "$ndk" ]; then
-    ndk="$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/*/ 2>/dev/null | sort -V | tail -n1 || true)"
-    ndk="${ndk%/}"
+    for dir in $(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/*/ 2>/dev/null | sort -V); do
+        # Pkg.Revision is e.g. 28.2.13676358, or 29.0.13846066-beta3 for a pre-release.
+        grep -q '^Pkg.Revision = [0-9.]*$' "$dir/source.properties" 2>/dev/null && ndk="${dir%/}"
+    done
 fi
 tc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 [ -x "$tc/aarch64-linux-android$api-clang" ] || { echo "no usable NDK (looked in '$ndk'); set ANDROID_NDK_HOME" >&2; exit 1; }
@@ -29,6 +33,7 @@ trap 'rm -rf "$target_dir"' EXIT
 (
     cd "$src"
     export CARGO_TARGET_DIR="$target_dir"
+    export RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$src=/fastsigner"
     export AR_x86_64_linux_android="$tc/llvm-ar" AR_aarch64_linux_android="$tc/llvm-ar"
     export CC_x86_64_linux_android="$tc/x86_64-linux-android$api-clang"
     export CC_aarch64_linux_android="$tc/aarch64-linux-android$api-clang"
@@ -47,6 +52,7 @@ verify_one() { # <rust target> <abi dir> <expected arch, as `file` prints it>
     for lib in $needed; do
         case "$lib" in libc.so|libdl.so|libm.so|liblog.so) ;; *) echo "$abi: unexpected NEEDED library $lib" >&2; exit 1 ;; esac
     done
+    if grep -q -a -F "$HOME" "$bin"; then echo "$abi: the binary still contains $HOME" >&2; exit 1; fi
 }
 
 install_one() { # <rust target> <abi dir>

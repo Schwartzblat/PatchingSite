@@ -5,6 +5,7 @@ first key stored for a user must win and stay for good.
 """
 import base64
 import hashlib
+import importlib.util
 import shutil
 import subprocess
 import threading
@@ -25,8 +26,10 @@ import database
 from tests.bundle_helpers import build_module_apk
 from utils import jwt_utils, patch_store, signing_keys
 
-FASTSIGNER = Path("/home/alon/workspace/PatchingMonorepo/utils/Stitch/src/stitch/bin/fastsigner")
-APKSIGNER = Path("/home/alon/Android/Sdk/build-tools/37.0.0/apksigner")
+# The fastsigner Stitch ships (and the server signs with), and apksigner when on PATH.
+_STITCH = importlib.util.find_spec("stitch")
+FASTSIGNER = Path(_STITCH.origin).parent / "bin" / "fastsigner" if _STITCH and _STITCH.origin else Path("/nonexistent")
+APKSIGNER = Path(shutil.which("apksigner") or "/nonexistent")
 
 
 def make_user(username):
