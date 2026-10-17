@@ -66,8 +66,15 @@ fun WhatsAppMoveCard(guide: MoveGuide, onOpen: () -> Unit) {
             guide.inProgress -> MoveSurface(
                 title = "Finish moving your chats",
                 text = "You're on step ${guide.direction.numberOf(phase.step)} of ${guide.direction.steps.size}: " +
-                    "${phase.step.title(guide.direction)}.",
+                    "${phase.step.title(guide.direction, guide.fromPreviousBuild)}.",
                 action = "Continue",
+                onAction = onOpen,
+            )
+            guide.direction == MoveDirection.TO_OURS && guide.fromPreviousBuild -> MoveSurface(
+                title = "Move to the new update system",
+                text = "Your patched WhatsApp is an older build. Move it once and updates will install with " +
+                    "one tap after that. Your chats come along.",
+                action = "Start",
                 onAction = onOpen,
             )
             guide.direction == MoveDirection.TO_OURS -> MoveSurface(

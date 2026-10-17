@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.patcher.migrate.SpareCopy
 import com.patcher.migrate.Status
 import com.patcher.migrate.Step
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import site.androidmod.store.Container
 import site.androidmod.store.StoreApp
 import site.androidmod.store.data.ApiException
@@ -31,6 +33,7 @@ import site.androidmod.store.move.MoveGuide
 import site.androidmod.store.move.SaveProblem
 import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.store.move.moveGuide
+import site.androidmod.store.update.StoreSelfUpdate
 
 /** A step that stopped, in the guide's words, with the engine's for the Details fold. */
 data class MoveFailure(val message: String, val details: List<String>)
@@ -61,6 +64,17 @@ data class MoveState(
     /** WhatsApp's builds, newest first. */
     val versions: List<BuildVersion> = emptyList(),
     val versionsError: String? = null,
+    /** WhatsApp is patched on the phone: the server's `latest`, not its builds, is what is newest. */
+    val onDevice: Boolean = false,
+    /** The server's latest WhatsApp version (on-device only); null until it has loaded. */
+    val latestVersion: String? = null,
+    /** The latest check was refused for want of a subscription (402). */
+    val latestNeedsSubscription: Boolean = false,
+    /**
+     * On-device, the user's signing key is neither cached nor fetchable right now, so the
+     * user's own build can't be told from the regular one; see hideMoveWhileKeyUnknown.
+     */
+    val keyUnknown: Boolean = false,
     val acks: MoveAcks = MoveAcks(),
     /** What a blocking step is doing right now ("Saving your backup…"), or null. */
     val busy: String? = null,
@@ -70,6 +84,8 @@ data class MoveState(
 
 /** One read of the phone, taken off the main thread and applied on it. */
 private data class DeviceRead(
+    val onDevice: Boolean,
+    val keyKnown: Boolean,
     val status: Status,
     val ours: Boolean,
     val parkedFromOurs: Boolean,
@@ -112,13 +128,13 @@ class MoveViewModel(
 
     val guide: StateFlow<MoveGuide> = combine(_state, DownloadRegistry.downloads) { state, _ ->
         val status = state.status ?: return@combine MoveGuide.Empty
-        moveGuide(
+        val guide = moveGuide(
             status = status,
             ours = state.ours,
             parkedFromOurs = state.parkedFromOurs,
             moveActive = state.moveActive,
             toOfficialHint = state.toOfficialHint,
-            newestVersion = state.versions.firstOrNull()?.version,
+            newestVersion = guideNewestVersion(state.onDevice, state.versions, state.latestVersion),
             downloaded = downloadedKey(state) != null,
             now = state.readAt,
             startedAt = state.startedAt,
@@ -128,9 +144,11 @@ class MoveViewModel(
             parkedFromPrevious = state.parkedFromPrevious,
             previousGoesBack = state.previousGoesBack,
         )
+        hideMoveWhileKeyUnknown(guide, state.onDevice, keyKnown = !state.keyUnknown, previous = state.previous)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MoveGuide.Empty)
 
     private var refreshJob: Job? = null
+    private var selfUpdateTried = false
 
     init {
         refresh()
@@ -152,6 +170,9 @@ class MoveViewModel(
         refreshJob = viewModelScope.launch {
             val oldBackupChosen = _state.value.acks.oldBackup
             val read = withContext(Dispatchers.IO) {
+                // Before the phone is read: which build is the user's own depends on the key.
+                val onDevice = WHATSAPP_PACKAGE in container.settings.onDevicePackages
+                val keyKnown = !onDevice || signingKeyKnown()
                 try {
                     container.move.track(oldBackupChosen)
                 } catch (error: Throwable) {
@@ -160,6 +181,8 @@ class MoveViewModel(
                 }
                 val status = container.move.status()
                 DeviceRead(
+                    onDevice = onDevice,
+                    keyKnown = keyKnown,
                     status = status,
                     ours = container.move.isOurs(status.facts),
                     parkedFromOurs = container.move.parkedFromOurs(status.facts),
@@ -174,6 +197,7 @@ class MoveViewModel(
                 )
             }
             _state.value = _state.value.copy(
+                onDevice = read.onDevice, keyUnknown = !read.keyKnown,
                 status = read.status, ours = read.ours, parkedFromOurs = read.parkedFromOurs,
                 previous = read.previous, parkedFromPrevious = read.parkedFromPrevious,
                 previousGoesBack = read.previousGoesBack,
@@ -182,17 +206,70 @@ class MoveViewModel(
                 spareCopies = read.spareCopies,
                 startedAt = container.move.startedAt, readAt = System.currentTimeMillis(),
             )
-            if (_state.value.versions.isEmpty()) loadVersions()
+            val current = _state.value
+            if (if (current.onDevice) current.latestVersion == null else current.versions.isEmpty()) loadVersions()
+        }
+    }
+
+    /**
+     * Whether the user's signing key is on the phone, fetching it when it is not. Bounded,
+     * since the guide waits for it; a failure only means "unknown", which the guide
+     * handles (hideMoveWhileKeyUnknown), and the next read tries again.
+     */
+    private suspend fun signingKeyKnown(): Boolean {
+        if (container.signingKeys.cached() != null) return true
+        return try {
+            withTimeoutOrNull(KEY_FETCH_TIMEOUT_MILLIS) { container.signingKeys.get() } != null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // The message may come from the server's reply; the key itself is never in it.
+            Log.w(TAG, "Fetching the signing key failed", error)
+            if (error is ApiException && error.isAuth) container.auth.expireSession()
+            false
         }
     }
 
     private suspend fun loadVersions() {
+        if (_state.value.onDevice) {
+            loadLatest()
+            return
+        }
         try {
             val versions = container.catalog.versions(WHATSAPP_PACKAGE)
             _state.value = _state.value.copy(versions = versions, versionsError = null)
         } catch (error: ApiException) {
             if (error.isAuth) container.auth.expireSession()
             _state.value = _state.value.copy(versionsError = error.message)
+        }
+    }
+
+    /** On-device: the newest WhatsApp the server can patch, in place of its list of builds. */
+    private suspend fun loadLatest() {
+        try {
+            val latest = container.patchApi.latest(WHATSAPP_PACKAGE)
+            _state.value = _state.value.copy(
+                latestVersion = latest.versionName, versionsError = null, latestNeedsSubscription = false,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            val problem = latestProblem(error) ?: throw error
+            if (error is ApiException && error.isAuth) container.auth.expireSession()
+            _state.value = _state.value.copy(
+                versionsError = problem.message, latestNeedsSubscription = problem.needsSubscription,
+            )
+            if (problem.storeUpdateRequired && !selfUpdateTried) {
+                // Once per visit: it downloads a whole store, and every resume lands here again.
+                selfUpdateTried = true
+                try {
+                    StoreSelfUpdate.run(container)
+                } catch (updateError: CancellationException) {
+                    throw updateError
+                } catch (updateError: Exception) {
+                    Log.w(TAG, "Store self-update failed", updateError)
+                }
+            }
         }
     }
 
@@ -432,5 +509,6 @@ class MoveViewModel(
 
     private companion object {
         const val TAG = "PatchedStore"
+        const val KEY_FETCH_TIMEOUT_MILLIS = 15_000L
     }
 }

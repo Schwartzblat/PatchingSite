@@ -110,13 +110,18 @@ enum class GuideStep {
     RESTORE,
     FINISH;
 
-    fun title(direction: MoveDirection): String {
+    /** [fromPreviousBuild]: the WhatsApp being left is a previous build, which the removal step names so. */
+    fun title(direction: MoveDirection, fromPreviousBuild: Boolean = false): String {
         val back = direction == MoveDirection.TO_OFFICIAL
         return when (this) {
             ALLOW_ACCESS -> "Allow file access"
             BACK_UP -> "Back up your chats in WhatsApp"
             DOWNLOAD -> "Download the new WhatsApp"
-            REMOVE_OLD -> if (back) "Remove our WhatsApp" else "Remove the old WhatsApp"
+            REMOVE_OLD -> when {
+                fromPreviousBuild -> "Remove your current patched WhatsApp"
+                back -> "Remove our WhatsApp"
+                else -> "Remove the old WhatsApp"
+            }
             INSTALL_NEW -> if (back) "Install WhatsApp from the Play Store" else "Install the new WhatsApp"
             RESTORE -> "Restore your chats"
             FINISH -> "Finish up"

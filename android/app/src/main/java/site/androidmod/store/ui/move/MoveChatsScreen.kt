@@ -167,12 +167,22 @@ fun MoveChatsScreen(
                 action = "Back",
                 onAction = onBack,
             )
-            MovePhase.NothingToDo -> Panel(
-                title = "Nothing to move",
-                text = "WhatsApp isn't installed, so there are no chats to move.",
-                action = "Back",
-                onAction = onBack,
-            )
+            MovePhase.NothingToDo -> if (state.keyUnknown) {
+                // Hidden on purpose (hideMoveWhileKeyUnknown): saying "nothing to move" would be false.
+                Panel(
+                    title = "Checking your WhatsApp…",
+                    text = "We couldn't check which WhatsApp you have yet. Check your connection and try again.",
+                    action = "Try again",
+                    onAction = viewModel::refresh,
+                )
+            } else {
+                Panel(
+                    title = "Nothing to move",
+                    text = "WhatsApp isn't installed, so there are no chats to move.",
+                    action = "Back",
+                    onAction = onBack,
+                )
+            }
             MovePhase.RemovedBeforeSaved -> RemovedBeforeSavedPanel(onContact = contact, onBack = onBack)
             is MovePhase.AtStep -> {
                 if ((phase.step == GuideStep.ALLOW_ACCESS || phase.step == GuideStep.BACK_UP) && !guide.inProgress) {
@@ -181,10 +191,15 @@ fun MoveChatsScreen(
                 state.failure?.let { failure ->
                     FailurePanel(failure, onContact = contact, onDismiss = viewModel::dismissFailure)
                 }
+                if (offersUndoGoingBack(state.previous, state.previousGoesBack, guide.inProgress)) {
+                    TextButton(onClick = { viewModel.chooseGoingBack(false) }) {
+                        Text("Move to the new update system instead")
+                    }
+                }
                 guide.direction.steps.forEach { step ->
                     StepRow(
                         number = guide.direction.numberOf(step),
-                        title = step.title(guide.direction),
+                        title = step.title(guide.direction, guide.fromPreviousBuild),
                         done = guide.isDone(step),
                         current = step == phase.step,
                     ) {
@@ -226,6 +241,7 @@ private fun StepBody(
     onContact: () -> Unit,
 ) {
     val context = LocalContext.current
+    val onDevice = viewModel.state.collectAsStateWithLifecycle().value.onDevice
     val startDownload = {
         newest?.let {
             DownloadService.start(
@@ -301,8 +317,14 @@ private fun StepBody(
         }
 
         GuideStep.DOWNLOAD -> {
-            Lead("Download it now, while your old WhatsApp still works. Nothing changes on your phone yet.")
-            DownloadControl(newest, download, versionsError, viewModel::retryVersions, startDownload, onSubscribe)
+            Lead(
+                if (onDevice) {
+                    ON_DEVICE_DOWNLOAD_LEAD
+                } else {
+                    "Download it now, while your old WhatsApp still works. Nothing changes on your phone yet."
+                }
+            )
+            GuideDownloadControl(viewModel, newest, download, startDownload, onSubscribe)
             SavedCopyNotes(guide, viewModel)
         }
 
@@ -347,7 +369,7 @@ private fun StepBody(
             MediaLostWarning(guide)
             if (variant == StepVariant.NEEDS_DOWNLOAD) {
                 Lead("The download was cleared. Download it again. Your backup is safe.")
-                DownloadControl(newest, download, versionsError, viewModel::retryVersions, startDownload, onSubscribe)
+                GuideDownloadControl(viewModel, newest, download, startDownload, onSubscribe)
             } else {
                 Lead("We'll put your backup back where WhatsApp looks for it, then install the new WhatsApp.")
                 Numbered(
@@ -712,7 +734,7 @@ internal fun WarningBox(text: String, title: String? = null) {
 }
 
 @Composable
-private fun Progress(label: String, fraction: Float?) {
+internal fun Progress(label: String, fraction: Float?) {
     Text(
         label,
         style = MaterialTheme.typography.labelLarge,

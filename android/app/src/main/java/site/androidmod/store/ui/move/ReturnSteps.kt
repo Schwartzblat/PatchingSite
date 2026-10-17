@@ -83,6 +83,8 @@ private fun RemoveOurs(
     onSubscribe: () -> Unit,
 ) {
     val context = LocalContext.current
+    // A previous build is no longer "ours": the user's own key is.
+    val current = if (guide.fromPreviousBuild) "your current patched WhatsApp" else "our WhatsApp"
     if (variant == StepVariant.DATA_KEPT) {
         WarningBox(
             title = "WhatsApp kept its data",
@@ -90,11 +92,11 @@ private fun RemoveOurs(
         )
         Numbered(
             "Download our WhatsApp and tap **Install WhatsApp**. Don't open it.",
-            "Tap **Remove our WhatsApp**. This time leave **Keep app data** unticked.",
+            "Tap **Remove $current**. This time leave **Keep app data** unticked.",
         )
         val key = viewModel.downloadedKey()
         if (key == null) {
-            DownloadControl(newest, download, versionsError, viewModel::retryVersions, onDownload, onSubscribe)
+            GuideDownloadControl(viewModel, newest, download, onDownload, onSubscribe)
         } else {
             if (libraryState.needsInstallPermission) {
                 InstallPermissionBanner(onOpenSettings = { libraryViewModel.openInstallPermissionSettings(context) })
@@ -109,10 +111,10 @@ private fun RemoveOurs(
     }
     if (variant == StepVariant.BACKUP_SAVED) {
         StatusLine("Your backup is saved in a safe place ✓", PapSuccess)
-        Lead("Now remove our WhatsApp. Android will ask you to confirm.")
+        Lead("Now remove $current. Android will ask you to confirm.")
     } else {
         Lead(
-            "We'll move your backup to a safe place, then Android will ask you to remove our WhatsApp. " +
+            "We'll move your backup to a safe place, then Android will ask you to remove $current. " +
                 "Your backup stays safe."
         )
     }
@@ -124,7 +126,7 @@ private fun RemoveOurs(
     if (variant != StepVariant.BACKUP_SAVED) {
         Hint("Do this right after your backup. Messages that arrive in between won't come along.")
     }
-    MainButton("Remove our WhatsApp", onClick = viewModel::removeOldWhatsApp)
+    MainButton("Remove $current", onClick = viewModel::removeOldWhatsApp)
     // Before the park only: once parked, BACKUP_SAVED already says it is safe.
     if (variant == StepVariant.NORMAL) SavedCopyNotes(guide, viewModel)
 }
