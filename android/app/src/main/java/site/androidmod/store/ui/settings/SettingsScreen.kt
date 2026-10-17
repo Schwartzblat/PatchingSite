@@ -39,6 +39,7 @@ import kotlinx.coroutines.withContext
 import site.androidmod.store.BuildConfig
 import site.androidmod.store.R
 import site.androidmod.store.StoreApp
+import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.store.patch.formatSha1
 import site.androidmod.store.ui.SiteLinks
 import site.androidmod.store.ui.auth.AuthViewModel
@@ -67,14 +68,17 @@ fun SettingsScreen(
     // The Activity's context: a Custom Tab or a mail app started from the
     // application context is a background launch and may not appear.
     val context = LocalContext.current
-    // Fetched on the way in, off the main thread; any failure just leaves the row out.
-    val signingSha1 by produceState<String?>(null, container) {
-        value = if (!container.auth.isSignedIn) {
+    // Fetched on the way in, off the main thread, and only once WhatsApp is patched on the
+    // phone (showsSigningKey); any failure just leaves the row out.
+    val signingKey by produceState<SigningKeyRow?>(null, container) {
+        value = if (!container.auth.isSignedIn || !showsSigningKey(container.settings.onDevicePackages)) {
             null
         } else {
             withContext(Dispatchers.IO) {
                 try {
-                    formatSha1(container.signingKeys.get().certSha1)
+                    val key = container.signingKeys.get()
+                    val installedSigner = container.installedApps.find(WHATSAPP_PACKAGE)?.signerSha256
+                    SigningKeyRow(formatSha1(key.certSha1), signingKeyHint(installedSigner, key.certSha256))
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -146,17 +150,17 @@ fun SettingsScreen(
             )
         }
 
-        signingSha1?.let { sha1 ->
+        signingKey?.let { row ->
             LinkSection(title = "Signing key") {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Text("Signing key SHA-1", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        sha1,
+                        row.sha1,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                     Text(
-                        "Needed for Google Drive backup setup.",
+                        row.hint,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
