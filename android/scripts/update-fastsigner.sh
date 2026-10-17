@@ -17,7 +17,7 @@ api=30 # the store's minSdk
 
 ndk="${ANDROID_NDK_HOME:-}"
 if [ -z "$ndk" ]; then
-    ndk="$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/*/ 2>/dev/null | sort -V | tail -n1)"
+    ndk="$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/ndk/*/ 2>/dev/null | sort -V | tail -n1 || true)"
     ndk="${ndk%/}"
 fi
 tc="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -34,10 +34,10 @@ trap 'rm -rf "$target_dir"' EXIT
     export CC_aarch64_linux_android="$tc/aarch64-linux-android$api-clang"
     export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$tc/x86_64-linux-android$api-clang"
     export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$tc/aarch64-linux-android$api-clang"
-    cargo build --release --target x86_64-linux-android --target aarch64-linux-android
+    cargo build --locked --release --target x86_64-linux-android --target aarch64-linux-android
 )
 
-install_one() { # <rust target> <abi dir> <expected arch, as `file` prints it>
+verify_one() { # <rust target> <abi dir> <expected arch, as `file` prints it>
     local bin="$target_dir/$1/release/fastsigner" abi="$2" arch="$3" desc needed lib
     [ -f "$bin" ] || { echo "missing $bin" >&2; exit 1; }
     desc="$(file -b "$bin")"
@@ -47,10 +47,17 @@ install_one() { # <rust target> <abi dir> <expected arch, as `file` prints it>
     for lib in $needed; do
         case "$lib" in libc.so|libdl.so|libm.so|liblog.so) ;; *) echo "$abi: unexpected NEEDED library $lib" >&2; exit 1 ;; esac
     done
-    mkdir -p "$jni/$abi"
-    install -m 755 "$bin" "$jni/$abi/libfastsigner.so"
-    echo "$abi: fastsigner $(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 }
 
-install_one aarch64-linux-android arm64-v8a "ARM aarch64"
-install_one x86_64-linux-android x86_64 "x86-64"
+install_one() { # <rust target> <abi dir>
+    mkdir -p "$jni/$2"
+    install -m 755 "$target_dir/$1/release/fastsigner" "$jni/$2/libfastsigner.so"
+    echo "$2: fastsigner $(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+}
+
+# Verify both before copying either, so a failure never leaves mixed old/new binaries.
+verify_one aarch64-linux-android arm64-v8a "ARM aarch64"
+verify_one x86_64-linux-android x86_64 "x86-64"
+
+install_one aarch64-linux-android arm64-v8a
+install_one x86_64-linux-android x86_64
