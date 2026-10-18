@@ -26,114 +26,35 @@ class GenericPatchEngineTest {
 
     private companion object {
         val user by lazy { TestKeys.generate("user") }
-        val dev by lazy { TestKeys.generate("developer") }
         val other by lazy { TestKeys.generate("other") }
         const val TOKEN = "tok\"en-secret-1"
-        const val PKG = "com.example.app"
+        const val PKG = GenericFixtures.PKG
         val V1 = Regex("META-INF/(MANIFEST\\.MF|[^/]+\\.(SF|RSA|DSA|EC))")
-        val HOOK_ABIS = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
-        fun hook(abi: String) = ByteArray(32) { (HOOK_ABIS.indexOf(abi) + 20).toByte() }
+        fun hook(abi: String) = GenericFixtures.hook(abi)
         fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
     }
 
-    private val ec = ecKeyPair()
+    private val fx = GenericFixtures(tmp)
+    private val moduleDex = fx.moduleDex
+    private val paywallDex = fx.paywallDex
+    private val appDex2 = fx.appDex2
+    private val baseManifest = fx.baseManifest
     private val work by lazy { File(tmp.root, "work") }
     private val engine by lazy { GenericPatchEngine(apksigSigner(user)) }
 
-    private val moduleDex = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/smali_generator/InitProviderGeneric;")))
-    private val paywallDex = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/paywall/InitProviderPaywallGeneric;")))
-    private val appClasses = listOf(
-        TinyClass("Lcom/applovin/sdk/AppLovinSdk;", listOf(TinyMethod(TinyDex.constString(0)))),
-        TinyClass("Lcom/example/app/Main;"),
-    )
-    private val appDex2 = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/example/app/Second;")))
-    private val baseManifest = manifestWith(
-        PKG, versionCode = 5, versionName = "1.0", targetSdk = 34, components = listOf("activity" to "$PKG.Main"),
-    )
-
-    private fun resource(name: String) = GenericPatchEngineTest::class.java.getResource(name)!!.readBytes()
-
-    private fun moduleApk(): ByteArray = zip(
-        tmp.newFile(),
-        listOf("AndroidManifest.xml" to SyntheticApks.manifest("com.smali_generator"), "classes.dex" to moduleDex) +
-            HOOK_ABIS.map { "lib/$it/libarthooks.so" to hook(it) } +
-            listOf("resources.arsc" to ByteArray(40) { 6 }),
-    ).readBytes()
-
-    private fun paywallApk(): ByteArray = zip(
-        tmp.newFile(),
-        listOf(
-            "AndroidManifest.xml" to SyntheticApks.manifest("com.paywall"),
-            "classes.dex" to paywallDex,
-            "resources.arsc" to ByteArray(56) { 8 },
-        ),
-    ).readBytes()
-
     private fun bundle(
         patcherVersion: String = "1.0.0",
-        module: ByteArray = moduleApk(),
-        paywall: ByteArray = paywallApk(),
+        module: ByteArray = fx.moduleApk(),
+        paywall: ByteArray = fx.paywallApk(),
         pkg: String = PatchBundle.GENERIC_PACKAGE,
-    ): PatchBundle {
-        val kindFile = if (pkg == PatchBundle.GENERIC_PACKAGE) {
-            "catalog.json" to resource("/generic/catalog.json")
-        } else {
-            "features.json" to """{"required_keys":[],"official_cert_sha256":["00"],"features":[]}""".toByteArray()
-        }
-        val files = mapOf(
-            "module.apk" to module,
-            "paywall.apk" to paywall,
-            "manifest-additions.xml" to resource("/generic/manifest-additions.xml"),
-            kindFile,
-        )
-        val meta = mapOf(
-            "format" to 1, "package" to pkg, "patcher_version" to patcherVersion, "min_sdk" to 33,
-            "min_store_version_code" to 0, "dex_order" to listOf("module.apk", "paywall.apk"),
-        )
-        return PatchBundle.open(bundleZip(tmp.newFile(), files, meta, ec.private), ec.public)
-    }
+    ) = fx.bundle(patcherVersion, module, paywall, pkg)
 
     private val bundle by lazy { bundle() }
 
-    /** An installed-app APK, signed by its developer with v1 (so it carries signature files) as well as v2 and v3. */
-    @Suppress("DEPRECATION")
-    private fun devSigned(dir: File, name: String, entries: List<Pair<String, ByteArray>>, stored: Boolean = false): File {
-        val unsigned = zip(tmp.newFile(), entries, stored)
-        val signed = File(dir, name)
-        com.android.apksig.ApkSigner.Builder(
-            listOf(com.android.apksig.ApkSigner.SignerConfig.Builder("dev", dev.privateKey, listOf(dev.cert)).build()),
-        ).setInputApk(unsigned).setOutputApk(signed).setMinSdkVersion(33).setV1SigningEnabled(true).build().sign()
-        return signed
-    }
-
-    /** The synthetic app: a base with an AppLovin class and no libs, and splits config.arm64_v8a and config.en. */
     private fun app(
-        classes: List<TinyClass> = appClasses,
+        classes: List<TinyClass> = fx.appClasses,
         baseExtra: List<Pair<String, ByteArray>> = emptyList(),
-    ): List<File> {
-        val dir = tmp.newFolder()
-        val base = devSigned(
-            dir, "base.apk",
-            listOf(
-                "AndroidManifest.xml" to baseManifest,
-                "classes.dex" to TinyDex.build(listOf("https://ms.applvn.com/x"), classes),
-                "classes2.dex" to appDex2,
-                "assets/app.txt" to "app asset".toByteArray(),
-            ) + baseExtra,
-        )
-        fun split(name: String) = manifestWith(PKG, versionCode = 5, split = name)
-        val abi = devSigned(
-            dir, "split_config.arm64_v8a.apk",
-            listOf("AndroidManifest.xml" to split("config.arm64_v8a"), "lib/arm64-v8a/libapp.so" to ByteArray(64) { 1 }),
-            stored = true,
-        )
-        val en = devSigned(
-            dir, "split_config.en.apk",
-            listOf("AndroidManifest.xml" to split("config.en"), "resources.arsc" to ByteArray(32) { 3 }),
-            stored = true,
-        )
-        return listOf(base, abi, en)
-    }
+    ) = fx.app(classes, baseExtra)
 
     private fun request(
         apks: List<File>,
@@ -305,7 +226,7 @@ class GenericPatchEngineTest {
 
     @Test fun pairipClassesRefused() {
         val out = tmp.newFolder()
-        val e = refused<PatchException.Unpatchable>(request(app(classes = appClasses + TinyClass("Lcom/pairip/VMRunner;")), out))
+        val e = refused<PatchException.Unpatchable>(request(app(classes = fx.appClasses + TinyClass("Lcom/pairip/VMRunner;")), out))
         assertEquals(listOf(CantPatch.PAIRIP), e.reasons)
         assertNothingLeft(out)
     }

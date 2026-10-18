@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
+    `java-test-fixtures`
 }
 
 // The on-device patcher engine: pure JVM (no Android APIs) so it runs inside :app and
@@ -15,6 +16,10 @@ dependencies {
     implementation(libs.apksig)
     implementation(libs.serialization.json)
     testImplementation(libs.junit)
+    testFixturesImplementation(libs.commons.compress)
+    testFixturesImplementation(libs.arsclib)
+    testFixturesImplementation(libs.apksig)
+    testFixturesImplementation(libs.junit)
 }
 
 tasks.test {
