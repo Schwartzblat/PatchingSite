@@ -1,0 +1,501 @@
+{
+  "app_frame_packages": [
+    "com.unity3d.player.",
+    "io.flutter.",
+    "com.facebook.react.",
+    "org.cocos2dx.",
+    "org.godotengine.",
+    "com.google.firebase.",
+    "com.google.android.gms.",
+    "com.google.android.play.",
+    "com.facebook.",
+    "com.android.billingclient.",
+    "com.android.vending.",
+    "com.unity.purchasing.",
+    "com.adjust.",
+    "com.appsflyer.",
+    "io.branch."
+  ],
+  "format": 1,
+  "harvest_bare_tlds": [
+    "ai",
+    "app",
+    "biz",
+    "cc",
+    "cloud",
+    "cn",
+    "co",
+    "com",
+    "de",
+    "gg",
+    "in",
+    "info",
+    "io",
+    "jp",
+    "kr",
+    "link",
+    "ly",
+    "me",
+    "mobi",
+    "net",
+    "org",
+    "ru",
+    "sg",
+    "tech",
+    "tv",
+    "xyz"
+  ],
+  "package_roots": [
+    "android",
+    "androidx",
+    "com",
+    "dalvik",
+    "io",
+    "java",
+    "javax",
+    "kotlin",
+    "net",
+    "org"
+  ],
+  "protected_hosts": [
+    "google.com",
+    "googleapis.com",
+    "gstatic.com",
+    "googleusercontent.com",
+    "ggpht.com",
+    "gvt1.com",
+    "gvt2.com",
+    "youtube.com",
+    "ytimg.com",
+    "googlevideo.com",
+    "android.com",
+    "firebaseio.com",
+    "firebaseapp.com",
+    "crashlytics.com",
+    "app-measurement.com",
+    "goo.gl",
+    "g.co",
+    "facebook.com",
+    "fb.com",
+    "fbcdn.net",
+    "facebook.net",
+    "instagram.com",
+    "whatsapp.com",
+    "apple.com",
+    "amazon.com",
+    "microsoft.com",
+    "twitter.com",
+    "x.com",
+    "t.co",
+    "tiktok.com",
+    "unity3d.com",
+    "unity.com",
+    "yandex.ru",
+    "yandex.net",
+    "yandex.com",
+    "bytedance.com",
+    "samsung.com",
+    "huawei.com",
+    "amazonaws.com",
+    "cloudfront.net",
+    "akamai.net",
+    "akamaihd.net",
+    "akamaized.net",
+    "edgesuite.net",
+    "edgekey.net",
+    "fastly.net",
+    "cloudflare.com",
+    "cloudflare.net",
+    "jsdelivr.net",
+    "unpkg.com",
+    "azureedge.net",
+    "windows.net",
+    "jquery.com",
+    "github.com",
+    "githubusercontent.com",
+    "adjust.com",
+    "adjust.net.in",
+    "appsflyer.com",
+    "onelink.me",
+    "branch.io",
+    "app.link",
+    "kochava.com",
+    "singular.net",
+    "sentry.io",
+    "bugsnag.com",
+    "onesignal.com",
+    "ipify.org",
+    "ip-api.com",
+    "ipinfo.io",
+    "ipapi.co",
+    "ifconfig.me",
+    "icanhazip.com",
+    "w3.org",
+    "iana.org",
+    "iab.com",
+    "iabtechlab.com",
+    "iab.net",
+    "apache.org",
+    "xmlpull.org",
+    "json.org",
+    "schema.org",
+    "example.com",
+    "localhost"
+  ],
+  "sdks": [
+    {
+      "hosts": [
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "googletagservices.com",
+        "2mdn.net",
+        "admob.com",
+        "adservice.google.com"
+      ],
+      "name": "Google Mobile Ads",
+      "packages": [
+        "com.google.android.gms.ads.",
+        "com.google.android.gms.internal.ads.",
+        "com.google.ads."
+      ]
+    },
+    {
+      "hosts": [
+        "applovin.com",
+        "applvn.com",
+        "appl.vn",
+        "safedk.com",
+        "axon.ai"
+      ],
+      "name": "AppLovin",
+      "packages": [
+        "com.applovin."
+      ]
+    },
+    {
+      "hosts": [
+        "supersonicads.com",
+        "supersonic.com",
+        "ironsrc.com",
+        "ironsrc.mobi",
+        "ironsource.mobi",
+        "mediation.unity3d.com"
+      ],
+      "name": "ironSource / LevelPlay",
+      "packages": [
+        "com.ironsource.",
+        "com.unity3d.mediation.",
+        "com.unity3d.ironsourceads."
+      ]
+    },
+    {
+      "hosts": [
+        "unityads.unity3d.com",
+        "unityads.unitychina.cn",
+        "acquire.unity3dusercontent.com"
+      ],
+      "name": "Unity Ads",
+      "packages": [
+        "com.unity3d.ads.",
+        "com.unity3d.services."
+      ]
+    },
+    {
+      "hosts": [],
+      "name": "Meta Audience Network",
+      "packages": [
+        "com.facebook.ads."
+      ]
+    },
+    {
+      "hosts": [
+        "vungle.com",
+        "vungle.akadns.net",
+        "liftoff.io",
+        "liftoff-creatives.io"
+      ],
+      "name": "Liftoff / Vungle",
+      "packages": [
+        "com.vungle."
+      ]
+    },
+    {
+      "hosts": [
+        "mintegral.com",
+        "mintegral.net",
+        "rayjump.com",
+        "mtgglobals.com",
+        "mobvista.com"
+      ],
+      "name": "Mintegral",
+      "packages": [
+        "com.mbridge.",
+        "com.mintegral."
+      ]
+    },
+    {
+      "hosts": [
+        "pangle.io",
+        "pangleglobal.com",
+        "pangolin-sdk-toutiao.com",
+        "pangolin-sdk-toutiao-b.com",
+        "tiktokpangle.us",
+        "tiktokpangle-cdn-us.com",
+        "pglstatp.com",
+        "pglstatp-toutiao.com"
+      ],
+      "name": "Pangle",
+      "packages": [
+        "com.bytedance.sdk.openadsdk.",
+        "com.bytedance.sdk.component.",
+        "com.pgl."
+      ]
+    },
+    {
+      "hosts": [
+        "inmobi.com",
+        "inmobicdn.net"
+      ],
+      "name": "InMobi",
+      "packages": [
+        "com.inmobi."
+      ]
+    },
+    {
+      "hosts": [
+        "chartboost.com"
+      ],
+      "name": "Chartboost",
+      "packages": [
+        "com.chartboost."
+      ]
+    },
+    {
+      "hosts": [
+        "fyber.com",
+        "inner-active.mobi",
+        "inner-active.com"
+      ],
+      "name": "DT Exchange / Fyber",
+      "packages": [
+        "com.fyber.",
+        "com.digitalturbine."
+      ]
+    },
+    {
+      "hosts": [
+        "an.yandex.ru",
+        "adsdk.yandex.ru",
+        "yandexadexchange.net",
+        "adfox.ru"
+      ],
+      "name": "Yandex Mobile Ads",
+      "packages": [
+        "com.yandex.mobile.ads."
+      ]
+    },
+    {
+      "hosts": [
+        "amazon-adsystem.com"
+      ],
+      "name": "Amazon Publisher Services",
+      "packages": [
+        "com.amazon.device.ads.",
+        "com.amazon.aps."
+      ]
+    },
+    {
+      "hosts": [
+        "smaato.net",
+        "smaato.com"
+      ],
+      "name": "Smaato",
+      "packages": [
+        "com.smaato."
+      ]
+    },
+    {
+      "hosts": [
+        "bidmachine.io"
+      ],
+      "name": "BidMachine",
+      "packages": [
+        "io.bidmachine."
+      ]
+    },
+    {
+      "hosts": [
+        "hyprmx.com"
+      ],
+      "name": "HyprMX",
+      "packages": [
+        "com.hyprmx."
+      ]
+    },
+    {
+      "hosts": [
+        "pubnative.net",
+        "verve.com"
+      ],
+      "name": "Verve / PubNative",
+      "packages": [
+        "net.pubnative."
+      ]
+    },
+    {
+      "hosts": [
+        "ogury.io",
+        "ogury.co",
+        "presage.io"
+      ],
+      "name": "Ogury",
+      "packages": [
+        "io.presage.",
+        "com.ogury."
+      ]
+    },
+    {
+      "hosts": [
+        "moloco.com",
+        "adsmoloco.com"
+      ],
+      "name": "Moloco",
+      "packages": [
+        "com.moloco."
+      ]
+    },
+    {
+      "hosts": [
+        "superawesome.tv"
+      ],
+      "name": "SuperAwesome",
+      "packages": [
+        "tv.superawesome."
+      ]
+    },
+    {
+      "hosts": [
+        "kidoz.net"
+      ],
+      "name": "Kidoz",
+      "packages": [
+        "com.kidoz."
+      ]
+    },
+    {
+      "hosts": [
+        "tapjoy.com",
+        "tapjoyads.com"
+      ],
+      "name": "Tapjoy",
+      "packages": [
+        "com.tapjoy."
+      ]
+    },
+    {
+      "hosts": [
+        "adcolony.com",
+        "adtilt.com"
+      ],
+      "name": "AdColony",
+      "packages": [
+        "com.adcolony."
+      ]
+    },
+    {
+      "hosts": [
+        "startappservice.com",
+        "start.io"
+      ],
+      "name": "Start.io",
+      "packages": [
+        "com.startapp."
+      ]
+    },
+    {
+      "hosts": [
+        "mopub.com"
+      ],
+      "name": "MoPub",
+      "packages": [
+        "com.mopub."
+      ]
+    },
+    {
+      "hosts": [],
+      "name": "Bigo Ads",
+      "packages": [
+        "sg.bigo.ads."
+      ]
+    },
+    {
+      "hosts": [
+        "criteo.com",
+        "criteo.net"
+      ],
+      "name": "Criteo",
+      "packages": [
+        "com.criteo."
+      ]
+    },
+    {
+      "hosts": [
+        "pubmatic.com"
+      ],
+      "name": "PubMatic",
+      "packages": [
+        "com.pubmatic."
+      ]
+    },
+    {
+      "hosts": [
+        "adnxs.com",
+        "adsrvr.org",
+        "rubiconproject.com",
+        "openx.net",
+        "casalemedia.com",
+        "taboola.com",
+        "outbrain.com",
+        "adform.net",
+        "smartadserver.com",
+        "teads.tv",
+        "adsafeprotected.com",
+        "moatads.com",
+        "doubleverify.com",
+        "serving-sys.com",
+        "flashtalking.com",
+        "yieldmo.com",
+        "sharethrough.com"
+      ],
+      "name": "Ad tech (web)",
+      "packages": []
+    }
+  ],
+  "url_rules": [
+    [
+      "graph.facebook.com",
+      "/network_ads_common"
+    ],
+    [
+      "www.facebook.com",
+      "/adnw_"
+    ],
+    [
+      "www.facebook.com",
+      "/an/"
+    ],
+    [
+      "www.gstatic.com",
+      "/admob/"
+    ],
+    [
+      "www.google.com",
+      "/pagead/"
+    ],
+    [
+      "www.google.com",
+      "/ads/"
+    ]
+  ]
+}

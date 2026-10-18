@@ -27,4 +27,8 @@ tasks.test {
         "patch.fastsigner",
         rootProject.file("../../utils/Stitch/src/stitch/bin/fastsigner").path,
     )
+    systemProperty(
+        "patch.genericCorpus",
+        "${System.getProperty("user.home")}/.cache/androidmod/generic-corpus",
+    )
 }
