@@ -10,9 +10,9 @@ class SmaliTextTest {
             "a'b\\c" to "a\\'b\\\\c",
             "t\tn\nr\r" to "t\\tn\\nr\\r",
             "\u0001" to "\\u0001",
-            "é" to "é",
+            "é" to "\\u00e9",
             "\u007f" to "\\u007f",
-            "😀" to "😀",
+            "😀" to "\\ud83d\\ude00",
         )
         for ((input, escaped) in cases) assertEquals(input, escaped, SmaliText.escape(input))
     }
