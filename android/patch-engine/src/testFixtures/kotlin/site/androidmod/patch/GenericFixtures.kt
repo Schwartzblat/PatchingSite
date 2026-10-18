@@ -58,6 +58,7 @@ class GenericFixtures(private val tmp: TemporaryFolder) {
         module: ByteArray = moduleApk(),
         paywall: ByteArray = paywallApk(),
         pkg: String = PatchBundle.GENERIC_PACKAGE,
+        additions: ByteArray = resource("/generic/manifest-additions.xml"),
     ): File {
         val kindFile = if (pkg == PatchBundle.GENERIC_PACKAGE) {
             "catalog.json" to resource("/generic/catalog.json")
@@ -67,7 +68,7 @@ class GenericFixtures(private val tmp: TemporaryFolder) {
         val files = mapOf(
             "module.apk" to module,
             "paywall.apk" to paywall,
-            "manifest-additions.xml" to resource("/generic/manifest-additions.xml"),
+            "manifest-additions.xml" to additions,
             kindFile,
         )
         val meta = mapOf(
@@ -82,7 +83,8 @@ class GenericFixtures(private val tmp: TemporaryFolder) {
         module: ByteArray = moduleApk(),
         paywall: ByteArray = paywallApk(),
         pkg: String = PatchBundle.GENERIC_PACKAGE,
-    ): PatchBundle = PatchBundle.open(bundleFile(patcherVersion, module, paywall, pkg), ec.public)
+        additions: ByteArray = resource("/generic/manifest-additions.xml"),
+    ): PatchBundle = PatchBundle.open(bundleFile(patcherVersion, module, paywall, pkg, additions), ec.public)
 
     /** An installed-app APK, signed by its developer with v1 (so it carries signature files) as well as v2 and v3. */
     @Suppress("DEPRECATION")
@@ -99,12 +101,13 @@ class GenericFixtures(private val tmp: TemporaryFolder) {
     fun app(
         classes: List<TinyClass> = appClasses,
         baseExtra: List<Pair<String, ByteArray>> = emptyList(),
+        manifest: ByteArray = baseManifest,
     ): List<File> {
         val dir = tmp.newFolder()
         val base = devSigned(
             dir, "base.apk",
             listOf(
-                "AndroidManifest.xml" to baseManifest,
+                "AndroidManifest.xml" to manifest,
                 "classes.dex" to TinyDex.build(listOf("https://ms.applvn.com/x"), classes),
                 "classes2.dex" to appDex2,
                 "assets/app.txt" to "app asset".toByteArray(),

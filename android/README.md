@@ -679,11 +679,13 @@ corpus apps.
 **Checks** (`GenericChecks`, from manifests and zip listings only): an app is refused
 (`PatchException.Unpatchable`, with `CantPatch` reasons) when it uses PairIP, a shared user
 id, a target SDK the device would refuse to install (below 23 on Android 14, below 24 from
-Android 15; older devices enforce none), or when it is already patched and this isn't a Refresh. The ABI
-rule picks which hook goes in: the app's own 64-bit or 32-bit libs decide, `armeabi` gets
+Android 15; older devices enforce none), or when it is already patched and this isn't a
+Refresh. The ABI rule picks which hook goes in: the app's own 64-bit or 32-bit libs decide, `armeabi` gets
 the v7a hook under `lib/armeabi/`, and an ARM-only app on an x86 device is
-`NEEDS_TRANSLATION`. The store (plan 4) adds the checks that need Android: installed
-signature, free space and the picker.
+`NEEDS_TRANSLATION`. The store (plan 4) adds the checks that need Android: a system app,
+the store itself, a signer that is neither the shared key nor the user's key, an app not
+listed in `/api/apps`, and OBB files. It also offers the picker, and reserves `bytesNeeded`
+plus the saved original before patching.
 
 **Refresh** (`GenericSource.PATCHED`) re-patches from our own copy: the original manifest
 is kept as `assets/patcher/original-manifest.axml`, and `assets/patcher/patch-info.json`

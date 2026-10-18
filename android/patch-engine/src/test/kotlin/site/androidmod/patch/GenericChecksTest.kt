@@ -43,6 +43,48 @@ class GenericChecksTest {
         assertTrue(inspect(apk(m(34, "activity" to "com.other.pairip.X"))).cantPatch.isEmpty())
     }
 
+    @Test fun pairipLibInSplitFlagged() {
+        val base = apk(m())
+        val cfg = apk(manifestWith("com.app", versionCode = 5, split = "config.arm64_v8a"), "lib/arm64-v8a/libpairipcore.so")
+        assertEquals(listOf(CantPatch.PAIRIP), inspect(base, cfg).cantPatch)
+        // a lib the base was patched with is not the app's
+        val ours = apk(m(), "lib/arm64-v8a/libpairipcore.so")
+        assertTrue(inspect(ours, skip = setOf("lib/arm64-v8a/libpairipcore.so")).cantPatch.isEmpty())
+    }
+
+    @Test fun pairipApplicationClassFlagged() {
+        fun app(name: String) = apk(manifestWith("com.app", versionCode = 5, targetSdk = 34, applicationName = name))
+        assertEquals(listOf(CantPatch.PAIRIP), inspect(app("com.pairip.application.Application")).cantPatch)
+        assertTrue(inspect(app("com.other.pairip.App")).cantPatch.isEmpty())
+    }
+
+    @Test fun unreadableManifestIsBadApk() {
+        val junk = zip(File(tmp.root, "junk-manifest.apk"), listOf("AndroidManifest.xml" to byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)))
+        try {
+            inspect(junk)
+            org.junit.Assert.fail("expected BadApk")
+        } catch (e: PatchException.BadApk) {
+            // expected
+        }
+    }
+
+    @Test fun nonPatchFailureIsWrappedAsBadApk() {
+        // A zip whose entry name is malformed makes java.util.zip throw a RuntimeException, not an IOException.
+        val f = File(tmp.root, "badname.apk")
+        zip(f, listOf("AndroidManifest.xml" to byteArrayOf(1)))
+        val bytes = f.readBytes()
+        // corrupt the central directory's name length so the name runs past its record
+        val cd = String(bytes, Charsets.ISO_8859_1).lastIndexOf("PK\u0001\u0002")
+        bytes[cd + 28] = 0x7f
+        f.writeBytes(bytes)
+        try {
+            inspect(f)
+            org.junit.Assert.fail("expected BadApk")
+        } catch (e: PatchException.BadApk) {
+            // expected
+        }
+    }
+
     @Test fun sharedUserIdFlagged() {
         assertEquals(listOf(CantPatch.SHARED_USER_ID), inspect(apk(m(shared = "com.app.shared"))).cantPatch)
     }

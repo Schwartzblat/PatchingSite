@@ -18,6 +18,10 @@ data class AdScanResult(val artifacts: Map<String, String>, val pairip: Boolean,
  * file. Here a class is in that directory when its descriptor starts with `L` + the package as a path + `/`,
  * and each literal is put back into its smali form with [SmaliText.escape] before the same regexes run. That
  * text is printable ASCII with no line breaks, so Java's and Python's regex semantics agree on it.
+ *
+ * Approved differences from the desktop: the phone also counts dex files apktool skips (`classes0.dex`,
+ * `classes1.dex`, `classes02.dex`, or a base with no `classes.dex`); it scans dex in splits, where Stitch
+ * decodes the base only; and a dex under `assets/` is scanned by neither.
  */
 object AdScan {
     // The Python regexes, unchanged. Python's re.match is matchesAt(_, 0) here; finditer is findAll.

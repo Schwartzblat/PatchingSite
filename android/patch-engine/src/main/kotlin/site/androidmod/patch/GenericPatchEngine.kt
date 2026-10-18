@@ -82,6 +82,10 @@ class GenericPatchEngine(private val signer: ApkSigner) {
             appManifest,
             ManifestPatcher.rewriteAuthorities(bundle.bytes(ADDITIONS), AUTHORITY_PREFIX, "${facts.packageName}."),
         )
+        // A leftover placeholder authority would fail the install (INSTALL_FAILED_CONFLICTING_PROVIDER) after the original is gone.
+        ManifestPatcher.providerAuthorities(manifest).firstOrNull { it.startsWith(AUTHORITY_PREFIX) }?.let {
+            throw PatchException.BadBundle("provider authority $it was not rewritten to ${facts.packageName}")
+        }
         val inputs = BuildInputs(
             manifest = manifest,
             modules = bundle.meta.dexOrder.map(bundle::bytes),
@@ -111,6 +115,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         val unsigned = File(r.workDir, "generic-base.unsigned.apk")
         val outputs = try {
             ApkBuilder.build(base, inputs, unsigned, options)
+            checkNotNull(info) { "the build did not describe itself" }
             signAndVerify(r, facts, unsigned)
         } finally {
             unsigned.delete()
@@ -138,6 +143,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         var done = false
         try {
             sign(unsignedBase, outputs[0], written)
+            unsignedBase.delete() // the splits need the room
             for (i in 1 until r.apks.size) {
                 val stripped = File(r.workDir, "generic-split.unsigned.apk")
                 try {
@@ -217,13 +223,15 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         private const val SLACK_BYTES = 8L shl 20
 
         /**
-         * Disk a run needs in its work and output dirs: every APK's size (the re-signed splits and the stripped
-         * split being signed), twice the base and modules (the unsigned and the signed base), and 8 MiB of slack.
-         * The saved original is the caller's.
+         * Disk a run needs in its work and output dirs, at the moment the last split is signed: every APK's size
+         * (the signed base and splits), the base and modules once more (the unsigned base, which exists until the
+         * base is signed, and the signed base), the largest split once more (the stripped copy being signed, and
+         * its signer's temp copy), and 8 MiB of slack. The saved original is the caller's.
          */
         fun bytesNeeded(apks: List<File>, bundle: PatchBundle): Long {
             val modules = bundle.meta.dexOrder.sumOf { bundle.bytes(it).size.toLong() }
-            return apks.sumOf { it.length() } + 2 * ((apks.firstOrNull()?.length() ?: 0L) + modules) + SLACK_BYTES
+            val largestSplit = apks.drop(1).maxOfOrNull { it.length() } ?: 0L
+            return apks.sumOf { it.length() } + 2 * ((apks.firstOrNull()?.length() ?: 0L) + modules) + largestSplit + SLACK_BYTES
         }
 
         private fun sha256Hex(bytes: ByteArray): String =

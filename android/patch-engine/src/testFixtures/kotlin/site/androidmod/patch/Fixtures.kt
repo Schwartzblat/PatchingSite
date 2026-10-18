@@ -46,6 +46,9 @@ fun manifestWith(
     minSdk: Int? = null,
     targetSdk: Int? = null,
     components: List<Pair<String, String>> = emptyList(),
+    applicationName: String? = null,
+    /** `<provider>`s as (android:name, android:authorities). */
+    providers: List<Pair<String, String>> = emptyList(),
 ): ByteArray {
     val am = com.reandroid.arsc.chunk.xml.AndroidManifestBlock.empty()
     am.packageName = pkg
@@ -58,8 +61,14 @@ fun manifestWith(
     if (minSdk != null) am.minSdkVersion = minSdk
     if (targetSdk != null) am.targetSdkVersion = targetSdk
     val app = am.getOrCreateApplicationElement()
+    if (applicationName != null) app.getOrCreateAndroidAttribute("name", 0x01010003).setValueAsString(applicationName)
     for ((tag, name) in components) {
         app.newElement(tag).getOrCreateAndroidAttribute("name", 0x01010003).setValueAsString(name)
+    }
+    for ((name, authorities) in providers) {
+        val p = app.newElement("provider")
+        p.getOrCreateAndroidAttribute("name", 0x01010003).setValueAsString(name)
+        p.getOrCreateAndroidAttribute("authorities", 0x01010018).setValueAsString(authorities)
     }
     am.refreshFull()
     return am.bytes

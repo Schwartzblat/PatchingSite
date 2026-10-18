@@ -97,6 +97,17 @@ class GenericPatchEngineTest {
         }
     }
 
+    /** Two zips with the same entry names, in order, and the same contents (their timestamps are ignored). */
+    private fun assertSameZipContents(label: String, a: ByteArray, b: ByteArray) {
+        fun contents(bytes: ByteArray) = java.util.zip.ZipInputStream(bytes.inputStream()).use { z ->
+            generateSequence { z.nextEntry }.map { it.name to z.readBytes().toList() }.toList()
+        }
+        val (ca, cb) = contents(a) to contents(b)
+        assertTrue(label, ca.isNotEmpty())
+        assertEquals(label, ca.map { it.first }, cb.map { it.first })
+        for ((x, y) in ca.zip(cb)) assertEquals("$label ${x.first}", x.second, y.second)
+    }
+
     private fun assertNothingLeft(out: File, vararg allowed: String) {
         assertEquals(allowed.toList(), out.list().orEmpty().sorted())
         assertEquals(emptyList<String>(), work.list().orEmpty().toList())
@@ -188,7 +199,11 @@ class GenericPatchEngineTest {
         assertArrayEquals(read(b1, "AndroidManifest.xml"), read(b2, "AndroidManifest.xml"))
         assertEquals("providers once each", 2, authorities(read(b2, "AndroidManifest.xml")!!).size)
         assertEquals("""{"token":"new-token"}""", String(read(b2, "assets/paywall.json")!!))
-        for (name in names(b1) - "assets/paywall.json") assertArrayEquals(name, read(b1, name), read(b2, name))
+        for (name in names(b1) - "assets/paywall.json") {
+            // ApkBuilder stamps the current time, so a nested APK's bytes differ by its DOS times: compare what's inside.
+            if (name.startsWith("assets/stitch/") && name.endsWith(".apk")) assertSameZipContents(name, read(b1, name)!!, read(b2, name)!!)
+            else assertArrayEquals(name, read(b1, name), read(b2, name))
+        }
         assertEquals(first.info, second.info)
         assertEquals(first.facts, second.facts)
         for (i in 1 until first.apks.size) assertSameBesidesSignature(first.apks[i], second.apks[i])
@@ -280,9 +295,35 @@ class GenericPatchEngineTest {
 
     @Test fun bytesNeededCoversTheFormula() {
         val b = bundle(module = ByteArray(4000), paywall = ByteArray(500))
-        val apks = listOf(1000, 300, 200).map { n -> tmp.newFile().also { it.writeBytes(ByteArray(n)) } }
-        // all APKs 1500, plus 2 x (base 1000 + modules 4500), plus 8 MiB
-        assertEquals(1500L + 11_000L + 8_388_608L, GenericPatchEngine.bytesNeeded(apks, b))
+        // a split bigger than the base: 1000 + 300 + 2500 = 3800
+        val apks = listOf(1000, 300, 2500).map { n -> tmp.newFile().also { it.writeBytes(ByteArray(n)) } }
+        // all APKs 3800, plus 2 x (base 1000 + modules 4500), plus the largest split 2500, plus 8 MiB
+        assertEquals(3800L + 11_000L + 2500L + 8_388_608L, GenericPatchEngine.bytesNeeded(apks, b))
+        // no splits: nothing extra
+        assertEquals(1000L + 11_000L + 8_388_608L, GenericPatchEngine.bytesNeeded(apks.take(1), b))
+    }
+
+    private fun additionsWith(vararg providers: Pair<String, String>) =
+        manifestWith("generic", providers = providers.toList())
+
+    @Test fun foreignAuthoritiesStayAndGenericOnesAreRewritten() {
+        val b = fx.bundle(additions = additionsWith("a.P" to "generic.one;other.two", "a.Q" to "plain.three"))
+        val result = engine.patch(request(app(), bundle = b))
+        assertEquals(
+            listOf("$PKG.one;other.two", "plain.three"),
+            ManifestPatcher.providerAuthorities(read(result.apks[0], "AndroidManifest.xml")!!).let { listOf(it[0] + ";" + it[1], it[2]) },
+        )
+    }
+
+    @Test fun leftoverGenericAuthorityRefusedBeforeAnyOutput() {
+        // The app itself declares a provider that still starts with "generic.": rewriting never touches the app's manifest.
+        val appManifest = manifestWith(
+            PKG, versionCode = 5, versionName = "1.0", targetSdk = 34, providers = listOf("$PKG.Left" to "generic.leftover"),
+        )
+        val out = tmp.newFolder()
+        val e = refused<PatchException.BadBundle>(request(fx.app(manifest = appManifest), out))
+        assertTrue(e.message, "generic.leftover" in e.message!!)
+        assertNothingLeft(out)
     }
 
     @Test fun badInputListRefused() {

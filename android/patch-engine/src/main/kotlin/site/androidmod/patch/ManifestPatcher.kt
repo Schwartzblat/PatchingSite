@@ -15,6 +15,8 @@ data class ManifestFacts(
     val sharedUserId: String?,
     /** `android:name` of every activity, alias, service, receiver and provider, as written. */
     val componentNames: List<String>,
+    /** `android:name` of `<application>` (its Application class), as written. */
+    val applicationName: String? = null,
 )
 
 /** Merges the bundle's `manifest-additions.xml` (binary AXML) into the app's binary manifest. */
@@ -44,7 +46,15 @@ object ManifestPatcher {
             targetSdk = m.targetSdkVersion,
             sharedUserId = root?.let { attrValue(it, ATTR_SHARED_USER_ID) },
             componentNames = components,
+            applicationName = m.applicationElement?.let { attrValue(it, ATTR_NAME) },
         )
+    }
+
+    /** Every `;`-separated `<provider>` authority in [manifest], as written. */
+    fun providerAuthorities(manifest: ByteArray): List<String> {
+        val app = load(manifest).applicationElement ?: return emptyList()
+        return children(app).filter { it.name == "provider" }
+            .mapNotNull { attrValue(it, ATTR_AUTHORITIES) }.flatMap { it.split(';') }
     }
 
     /**

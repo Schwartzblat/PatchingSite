@@ -2,7 +2,7 @@ package site.androidmod.patch
 
 /** Text forms the desktop's smali output uses, so the on-device scan sees what the desktop finder sees. */
 object SmaliText {
-    /** baksmali's `StringUtils.writeEscapedString`: quotes and backslash escaped, \n \r \t as such, everything else (controls, 0x7f and up, surrogates one by one) as \uXXXX. */
+    /** apktool 3.0.2's `DexFormattedWriter.writeQuotedString` (the smali writer Stitch decodes with): quotes and backslash escaped, \n \r \t as such, everything else (controls, 0x7f and up, surrogates one by one) as \uXXXX. */
     fun escape(s: String): String {
         val sb = StringBuilder(s.length + 8)
         for (c in s) {

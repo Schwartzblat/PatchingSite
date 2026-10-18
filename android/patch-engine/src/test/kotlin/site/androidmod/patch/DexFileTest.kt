@@ -65,6 +65,29 @@ class DexFileTest {
         }
     }
 
+    @Test fun codeItemPastTheEndIsBadApk() {
+        // The class_data comes after its code_item, so a plain cut can't reach the code_item walk: damage the code_item instead.
+        val bytes = TinyDex.build(listOf("A"), listOf(cls("LA;", TinyDex.constString(0))))
+        val n = bytes.size
+        // the file ends with the method's code_off, a 2-byte uleb128
+        val codeOff = (bytes[n - 2].toInt() and 0x7f) or ((bytes[n - 1].toInt() and 0x7f) shl 7)
+        assertTrue(bytes[n - 2].toInt() < 0 && bytes[n - 1].toInt() >= 0)
+        assertEquals("the code_item starts with registers_size 1", 1, bytes[codeOff].toInt())
+
+        fun message(damaged: ByteArray): String = try {
+            DexFile(damaged).constStrings(0)
+            throw AssertionError("accepted")
+        } catch (e: PatchException.BadApk) {
+            e.message!!
+        }
+
+        val farCodeOff = bytes.copyOf().also { it[n - 2] = 0xff.toByte(); it[n - 1] = 0x7f }
+        assertEquals("bad dex: code_item out of range", message(farCodeOff))
+
+        val bigInsns = bytes.copyOf().also { it[codeOff + 14] = 0x7f } // insns_size = 0x7fxxxxxx units
+        assertEquals("bad dex: insns out of range", message(bigInsns))
+    }
+
     @Test fun instructionRunningPastTheEndIsBadApk() {
         val bytes = TinyDex.build(listOf("A"), listOf(cls("LA;", listOf(0x001a))))
         try { DexFile(bytes).constStrings(0); throw AssertionError("accepted") } catch (_: PatchException.BadApk) {}

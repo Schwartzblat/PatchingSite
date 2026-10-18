@@ -48,6 +48,7 @@ object GenericChecks {
         var base: ManifestFacts? = null
         var baseEntries = emptySet<String>()
         val splits = mutableSetOf<String>()
+        var pairipLib = false
         for ((i, apk) in apks.withIndex()) {
             val (manifest, names) = try {
                 ZipFile(apk).use { z ->
@@ -55,7 +56,10 @@ object GenericChecks {
                         ?: throw PatchException.BadApk("${apk.name} has no AndroidManifest.xml")
                     z.getInputStream(entry).use { it.readBytes() } to z.entries().asSequence().map { it.name }.toSet()
                 }
-            } catch (e: java.io.IOException) {
+            } catch (e: PatchException) {
+                throw e
+            } catch (e: Exception) {
+                // java.util.zip also throws unchecked exceptions on malformed entries.
                 throw PatchException.BadApk("Cannot read ${apk.name}: ${e.message}", e)
             }
             val facts = ManifestPatcher.facts(manifest)
@@ -74,10 +78,12 @@ object GenericChecks {
             for (name in names) {
                 if (i == 0 && name in skipInBase) continue
                 LIB_ENTRY.matchEntire(name)?.let { libAbis += it.groupValues[1] }
+                if (name.startsWith("lib/") && name.endsWith("/libpairipcore.so")) pairipLib = true
             }
         }
         val b = base!!
-        val pairip = baseEntries.any { it.startsWith("lib/") && it.endsWith("/libpairipcore.so") } ||
+        // PairIP's native lib can sit in any split, and its wrapper Application is named in the base manifest.
+        val pairip = pairipLib || b.applicationName?.startsWith("com.pairip.") == true ||
             b.componentNames.any { it.startsWith("com.pairip.") }
         val targetSdk = b.targetSdk ?: b.minSdk ?: 1
         val (libTarget, abiReason) = AbiChoice.choose(libAbis, deviceAbis)
