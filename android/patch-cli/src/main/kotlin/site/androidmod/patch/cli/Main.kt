@@ -35,7 +35,7 @@ private val REQUIRED = listOf(
 )
 private val OPTIONAL = listOf("keystore-alias", "key-pass-env", "token", "revision")
 
-private class UsageError(message: String) : Exception(message)
+internal class UsageError(message: String) : Exception(message)
 
 private fun defaultSigner(c: SignerConfig): ApkSigner =
     FastSigner(c.fastsigner, c.keystore, c.password, c.alias, c.keyPassword)
@@ -47,14 +47,14 @@ fun run(
     signerFactory: (SignerConfig) -> ApkSigner = ::defaultSigner,
 ): Int {
     val workDir = Files.createTempDirectory("patch-cli").toFile()
+    var usage = USAGE
     try {
-        val flags = parse(args)
-        fun envValue(flag: String): CharArray {
-            val name = flags.getValue(flag)
-            val value = env[name]
-            if (value.isNullOrEmpty()) throw UsageError("environment variable $name (--$flag) is not set or empty")
-            return value.toCharArray()
+        when (args.firstOrNull()) {
+            "generic" -> { usage = GENERIC_USAGE; return generic(args.drop(1), env, signerFactory, workDir) }
+            "scan" -> { usage = SCAN_USAGE; return scan(args.drop(1)) }
         }
+        val flags = parse(args.toList(), REQUIRED, OPTIONAL).mapValues { it.value.single() }
+        fun envValue(flag: String) = envPassword(env, flags.getValue(flag), flag)
         val revision = flags["revision"]?.let {
             it.toIntOrNull() ?: throw UsageError("--revision must be an integer, got '$it'")
         } ?: 1
@@ -94,7 +94,7 @@ fun run(
         return 0
     } catch (e: UsageError) {
         System.err.println("patch-cli: ${e.message}")
-        System.err.println(USAGE)
+        System.err.println(usage)
         return 2
     } catch (e: PatchException) {
         System.err.println("patch-cli: ${e.message}")
@@ -110,25 +110,43 @@ fun run(
     }
 }
 
-private fun inputError(message: String): Int {
+internal fun inputError(message: String): Int {
     System.err.println("patch-cli: $message")
     return 1
 }
 
-private fun parse(args: Array<String>): Map<String, String> {
-    val known = REQUIRED + OPTIONAL
-    val flags = mutableMapOf<String, String>()
+/** The password in environment variable [name] (given by flag [flag]); never taken from a flag value. */
+internal fun envPassword(env: Map<String, String>, name: String, flag: String): CharArray {
+    val value = env[name]
+    if (value.isNullOrEmpty()) throw UsageError("environment variable $name (--$flag) is not set or empty")
+    return value.toCharArray()
+}
+
+/**
+ * Parses `--flag value` pairs. Flags in [repeatable] may repeat (values kept in order), [switches] take no value
+ * (stored as an empty value), every other flag is given at most once.
+ */
+internal fun parse(
+    args: List<String>,
+    required: List<String>,
+    optional: List<String>,
+    repeatable: Set<String> = emptySet(),
+    switches: Set<String> = emptySet(),
+): Map<String, List<String>> {
+    val known = required + optional
+    val flags = mutableMapOf<String, MutableList<String>>()
     var i = 0
     while (i < args.size) {
         val arg = args[i]
         val name = arg.removePrefix("--")
         if (!arg.startsWith("--") || name !in known) throw UsageError("unknown argument: $arg")
-        if (i + 1 >= args.size) throw UsageError("$arg needs a value")
-        if (name in flags) throw UsageError("$arg given twice")
-        flags[name] = args[i + 1]
-        i += 2
+        val isSwitch = name in switches
+        if (!isSwitch && i + 1 >= args.size) throw UsageError("$arg needs a value")
+        if (name in flags && name !in repeatable) throw UsageError("$arg given twice")
+        flags.getOrPut(name) { mutableListOf() }.add(if (isSwitch) "" else args[i + 1])
+        i += if (isSwitch) 1 else 2
     }
-    val missing = REQUIRED.filter { it !in flags }
+    val missing = required.filter { it !in flags }
     if (missing.isNotEmpty()) throw UsageError("missing: ${missing.joinToString { "--$it" }}")
     return flags
 }

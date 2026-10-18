@@ -14,7 +14,10 @@ application {
 
 dependencies {
     implementation(project(":patch-engine"))
+    implementation(libs.serialization.json)
     testImplementation(libs.junit)
+    testImplementation(testFixtures(project(":patch-engine")))
+    testImplementation(libs.apksig)
 }
 
 tasks.test {
@@ -22,5 +25,9 @@ tasks.test {
     systemProperty(
         "patch.bundleKey",
         "${System.getProperty("user.home")}/.config/androidmod/bundle-signing.pub.pem",
+    )
+    systemProperty(
+        "patch.fastsigner",
+        rootProject.file("../../utils/Stitch/src/stitch/bin/fastsigner").path,
     )
 }

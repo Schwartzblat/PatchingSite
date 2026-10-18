@@ -664,6 +664,51 @@ Use it, not a debug build, to prove on a device that R8 left the engine's reflec
 `app/proguard-rules.pro` only silences warnings for commons-compress's optional codecs, and
 the rest is checked by running the minified build.
 
+### Patching any app
+
+Besides WhatsApp, `:patch-engine` can remove ads from any installed app. It uses the
+**generic bundle** (`PatchBundle.isGeneric`, package `generic`): the same signed zip with
+the hook module, the paywall module and the manifest additions, but an ad catalog
+(`catalog.json`) in place of per-app features. `GenericPatchEngine` takes the app's APKs
+(base first, then splits), scans the dex files for ad SDKs, and rebuilds the base with the
+modules, providers and `assets/` added. Every split is re-signed unchanged with the user's
+key. Nothing is decompiled: `AdScan` reads the dex directly and gives the artifacts the
+desktop finder gives, which `GoldenScanTest` checks against `golden.py`'s output for the
+corpus apps.
+
+**Checks** (`GenericChecks`, from manifests and zip listings only): an app is refused
+(`PatchException.Unpatchable`, with `CantPatch` reasons) when it uses PairIP, a shared user
+id, a target SDK the device would refuse to install (below 23 on Android 14, below 24 from
+Android 15; older devices enforce none), or when it is already patched and this isn't a Refresh. The ABI
+rule picks which hook goes in: the app's own 64-bit or 32-bit libs decide, `armeabi` gets
+the v7a hook under `lib/armeabi/`, and an ARM-only app on an x86 device is
+`NEEDS_TRANSLATION`. The store (plan 4) adds the checks that need Android: installed
+signature, free space and the picker.
+
+**Refresh** (`GenericSource.PATCHED`) re-patches from our own copy: the original manifest
+is kept as `assets/patcher/original-manifest.axml`, and `assets/patcher/patch-info.json`
+(kind `generic`, patcher version, bundle id, the ABI used, the SDKs found, the entries
+added) says what was done and marks the copy as ours. A Refresh ends with the same
+entries as patching the original.
+
+**On a desktop** `patch-cli` has two commands (WhatsApp's flags with no command are
+unchanged). Passwords come from environment variables named by flags, never from flags:
+
+```
+patch-cli scan    --base FILE [--split FILE]... --bundle FILE --bundle-key FILE
+patch-cli generic --base FILE [--split FILE]... --bundle FILE --bundle-key FILE
+                  --fastsigner FILE --keystore FILE --keystore-pass-env NAME
+                  [--keystore-alias NAME] [--key-pass-env NAME]
+                  --abis A,B,... --sdk N [--token TOKEN] [--refresh] --out-dir DIR
+```
+
+`scan` prints the artifacts as JSON (keys sorted, two-space indent), to compare with a
+golden. `generic` signs with the keystore (its only alias, or `--keystore-alias`), takes the
+cert's SHA-256 from it, and writes the signed base and splits to `--out-dir`. `--abis` and
+`--sdk` describe the target device (`adb shell getprop ro.product.cpu.abilist` and
+`ro.build.version.sdk`). Exit codes: 0, 2 for usage errors, 1 for a failure
+(`patch-cli: cannot patch: PAIRIP` for a refused app).
+
 ## Help, bug reports and links
 
 Settings has three sections of links. Help: "How to install", "Report a bug" and
