@@ -58,6 +58,8 @@ class PatchEngine(private val signer: ApkSigner) {
 
     private fun run(request: PatchRequest): PatchResult {
         val (official, bundle, record) = Triple(request.official, request.bundle, request.record)
+        if (bundle.isGeneric) throw PatchException.BadBundle("a generic bundle cannot patch ${record.packageName}")
+        val features = bundle.features ?: throw PatchException.BadBundle("bundle has no features.json")
         if (!record.supported) {
             throw PatchException.Unsupported("${record.packageName} ${record.versionName} is not supported")
         }
@@ -75,12 +77,12 @@ class PatchEngine(private val signer: ApkSigner) {
             )
         }
         val present = record.artifacts.filterValues { it.isNotEmpty() }.keys
-        val missingRequired = bundle.features.requiredKeys.filter { it !in present }
+        val missingRequired = features.requiredKeys.filter { it !in present }
         if (missingRequired.isNotEmpty()) {
             throw PatchException.Unsupported("${record.packageName} ${record.versionName} lacks required keys: $missingRequired")
         }
-        val featuresOff = featuresOff(bundle.features, record)
-        OfficialApk.verify(official, bundle.features.officialCertSha256)
+        val featuresOff = featuresOff(features, record)
+        OfficialApk.verify(official, features.officialCertSha256)
         if (DexHash.dexSha256(official) != record.dexSha256) {
             throw PatchException.RecordMismatch("The record is for a different build of $appPackage")
         }
@@ -117,7 +119,7 @@ class PatchEngine(private val signer: ApkSigner) {
         } finally {
             unsigned.delete()
         }
-        return PatchResult(request.output, featuresOff, bundle.features.visibleTitles(featuresOff))
+        return PatchResult(request.output, featuresOff, features.visibleTitles(featuresOff))
     }
 
     private fun artifactory(record: VersionRecord): ByteArray =

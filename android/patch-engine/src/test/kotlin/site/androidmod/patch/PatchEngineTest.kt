@@ -118,6 +118,31 @@ class PatchEngineTest {
         assertFalse(File(work, "unsigned.apk").exists())
     }
 
+    @Test fun genericBundleRefusedForAnApp() {
+        val s = setup()
+        val catalog = """{"format":1,"sdks":[],"protected_hosts":[],"url_rules":[],"app_frame_packages":[],"harvest_bare_tlds":[],"package_roots":[]}"""
+        val files = mapOf(
+            "module.apk" to SyntheticApks.moduleA(tmp.newFile()).readBytes(),
+            "paywall.apk" to SyntheticApks.moduleB(tmp.newFile()).readBytes(),
+            "manifest-additions.xml" to additions(),
+            "catalog.json" to catalog.toByteArray(),
+        )
+        val meta = mapOf(
+            "format" to 1, "package" to "generic", "patcher_version" to "3.0.0", "min_sdk" to 30,
+            "min_store_version_code" to 5, "dex_order" to listOf("module.apk", "paywall.apk"),
+        )
+        val generic = PatchBundle.open(bundleZip(tmp.newFile(), files, meta, ec.private), ec.public)
+        val (engine, req, work) = request(Setup(s.official, generic, s.record))
+        try {
+            engine.patch(req)
+            fail("expected BadBundle")
+        } catch (e: PatchException.BadBundle) {
+            assertTrue(e.message, e.message!!.contains("generic"))
+        }
+        assertFalse(req.output.exists())
+        assertFalse(File(work, "unsigned.apk").exists())
+    }
+
     @Test fun patchesSyntheticApp() {
         val s = setup()
         val (engine, req, work) = request(s)
@@ -170,7 +195,7 @@ class PatchEngineTest {
 
     @Test fun featuresOffFunctionListsDerivedThenRecordOnly() {
         val s = setup(artifacts = """{"A":"a"}""", featuresOff = """["f2","zz"]""")
-        assertEquals(listOf("f2", "zz"), featuresOff(s.bundle.features, s.record))
+        assertEquals(listOf("f2", "zz"), featuresOff(s.bundle.features!!, s.record))
     }
 
     @Test fun emptyFeatureKeyAndRecordOnlyIdsUnion() {

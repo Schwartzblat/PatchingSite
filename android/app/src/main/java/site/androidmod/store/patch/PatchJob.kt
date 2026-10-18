@@ -173,6 +173,7 @@ class PatchJob(
                 throw error
             }
             val bundle = server.bundle(pkg, latest.patcherVersion)
+            val features = bundle.features ?: return failed(PatchFailure.FAILED)
             if (bundle.meta.minSdk > sdkInt) return failed(PatchFailure.ANDROID_TOO_OLD)
             if (bundle.meta.minStoreVersionCode > storeVersionCode) {
                 return failed(PatchFailure.STORE_UPDATE_REQUIRED, minStoreVersionCode = bundle.meta.minStoreVersionCode)
@@ -180,7 +181,7 @@ class PatchJob(
 
             val official = File(workDir, OFFICIAL_APK)
             val apkSha256 = downloadOfficial(latest.apkUrl, official, onStage)
-            blocking { verifyOfficial(official, bundle.features.officialCertSha256) }
+            blocking { verifyOfficial(official, features.officialCertSha256) }
 
             // By the file's own hashes, not latest's: whatsapp.com may have moved on meanwhile.
             val recordJson = server.record(pkg, latest.patcherVersion, apkSha256 = apkSha256)
@@ -190,7 +191,7 @@ class PatchJob(
             if (!record.supported) return failed(PatchFailure.NOT_SUPPORTED_YET)
             val revision = revisionOf(recordJson) ?: latest.revision
 
-            val titles = bundle.features.visibleTitles(featuresOff(bundle.features, record))
+            val titles = features.visibleTitles(featuresOff(features, record))
             if (titles.isNotEmpty() && !confirm(titles)) return PatchOutcome.Cancelled
 
             val token = server.appToken(pkg)

@@ -30,13 +30,22 @@ data class BundleMeta(
 /** A verified patch bundle (Stitch `bundle.py`): every entry is read once, checked, and served from memory. */
 class PatchBundle private constructor(
     val meta: BundleMeta,
-    val features: Features,
+    /** Null exactly for a generic bundle. */
+    val features: Features?,
+    /** Non-null exactly for a generic bundle. */
+    val catalog: AdCatalog?,
+    /** Lowercase hex SHA-256 of the `bundle.json` bytes. */
+    val id: String,
     private val entries: Map<String, ByteArray>,
 ) {
+    val isGeneric: Boolean get() = meta.packageName == GENERIC_PACKAGE
+
     fun bytes(name: String): ByteArray =
         entries[name] ?: throw PatchException.BadBundle("bundle has no $name")
 
     companion object {
+        const val GENERIC_PACKAGE = "generic"
+        private val CATALOG_FORMATS = setOf(1)
         private const val META = "bundle.json"
         private const val SIG = "bundle.sig"
         internal const val MAX_ENTRY_BYTES = 32L shl 20
@@ -74,6 +83,10 @@ class PatchBundle private constructor(
                     dexOrder = obj.getValue("dex_order").let { json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>()), it) },
                     files = (obj.getValue("files") as JsonObject).mapValues { it.value.jsonPrimitive.content },
                 )
+                for (name in all.keys + meta.files.keys + meta.dexOrder.filter { it !in meta.files }) checkName(name)
+                for (name in meta.dexOrder) {
+                    if (name !in meta.files) throw PatchException.BadBundle("dex_order names $name, which is not a listed file")
+                }
                 val actual = all.keys - setOf(META, SIG)
                 if (meta.files.keys != actual) {
                     throw PatchException.BadBundle("bundle files differ from $META: ${(meta.files.keys xor actual).sorted()}")
@@ -81,8 +94,21 @@ class PatchBundle private constructor(
                 for ((name, digest) in meta.files) {
                     if (sha256Hex(all.getValue(name)) != digest) throw PatchException.BadBundle("hash mismatch for $name")
                 }
-                val features = json.decodeFromString(Features.serializer(), all.getValue("features.json").toString(Charsets.UTF_8))
-                return PatchBundle(meta, features, all.filterKeys { it != META && it != SIG })
+                val id = sha256Hex(metaBytes)
+                val rest = all.filterKeys { it != META && it != SIG }
+                if (meta.packageName == GENERIC_PACKAGE) {
+                    if ("features.json" in rest) throw PatchException.BadBundle("a generic bundle must not have features.json")
+                    val raw = rest["catalog.json"] ?: throw PatchException.BadBundle("a generic bundle needs catalog.json")
+                    val text = raw.toString(Charsets.UTF_8)
+                    val catalogFormat = json.parseToJsonElement(text).jsonObject.getValue("format").jsonPrimitive.int
+                    if (catalogFormat !in CATALOG_FORMATS) throw PatchException.BadBundle("unsupported catalog format $catalogFormat")
+                    val catalog = json.decodeFromString(AdCatalog.serializer(), text)
+                    if (catalog.urlRules.any { it.size != 2 }) throw PatchException.BadBundle("catalog url_rules must each be [host, path]")
+                    return PatchBundle(meta, null, catalog, id, rest)
+                }
+                val raw = rest["features.json"] ?: throw PatchException.BadBundle("bundle has no features.json")
+                val features = json.decodeFromString(Features.serializer(), raw.toString(Charsets.UTF_8))
+                return PatchBundle(meta, features, null, id, rest)
             } catch (e: PatchException) {
                 throw e
             } catch (e: IOException) {
@@ -92,6 +118,10 @@ class PatchBundle private constructor(
             } catch (e: RuntimeException) { // missing keys, bad JSON, wrong types
                 throw PatchException.BadBundle("unreadable bundle: ${e.message}")
             }
+        }
+
+        private fun checkName(name: String) {
+            if (name.isEmpty() || '/' in name || '\\' in name || ".." in name) throw PatchException.BadBundle("bad entry name: $name")
         }
 
         /** Reads [input] fully, counting bytes as they arrive (headers are not trusted); over either cap is a [PatchException.BadBundle]. */
