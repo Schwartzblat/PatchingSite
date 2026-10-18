@@ -102,6 +102,108 @@ class ApkBuilderTest {
         assertFalse(dir.list()!!.any { it.endsWith(".tmp") })
     }
 
+    @Test fun libTargetPutsOnlyThatAbi() {
+        val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        val module = zip(
+            File(dir, "hooks.apk"),
+            listOf("classes.dex" to SyntheticApks.dexA) +
+                abis.mapIndexed { i, abi -> "lib/$abi/libarthooks.so" to ByteArray(16) { (i + 10).toByte() } },
+        ).readBytes()
+        val o = File(dir, "abi-out.apk")
+        val added = ApkBuilder.build(
+            set.app, set.inputs.copy(modules = listOf(module)), o,
+            BuildOptions(libs = LibTarget("armeabi-v7a", "armeabi")),
+        )
+        assertEquals(listOf("lib/armeabi/libarthooks.so"), added.filter { it.startsWith("lib/") })
+        assertEquals(listOf("lib/armeabi/libarthooks.so", "lib/x86_64/libapp.so"), names(o).filter { it.startsWith("lib/") }.sorted())
+        assertArrayEquals(ByteArray(16) { 11 }, read(o, "lib/armeabi/libarthooks.so"))
+        assertEquals(ZipEntry.STORED, open(o) { it.getEntry("lib/armeabi/libarthooks.so").method })
+    }
+
+    @Test fun dropLeavesEntriesOutAndRenumbersDex() {
+        val o = File(dir, "drop-out.apk")
+        val added = ApkBuilder.build(set.app, set.inputs, o, BuildOptions(drop = setOf("classes2.dex", "META-INF/services/a.B")))
+        val n = names(o)
+        assertFalse("META-INF/services/a.B" in n)
+        assertArrayEquals(SyntheticApks.dexApp1, read(o, "classes.dex"))
+        assertArrayEquals(SyntheticApks.dexA, read(o, "classes2.dex"))
+        assertArrayEquals(SyntheticApks.dexB, read(o, "classes3.dex"))
+        assertFalse("classes4.dex" in n)
+        assertEquals(listOf("classes2.dex", "classes3.dex"), added.filter { it.endsWith(".dex") })
+        assertEquals(n.size, n.toSet().size)
+    }
+
+    @Test fun refuseCollisionsThrows() {
+        val o = File(dir, "collide.apk")
+        try {
+            ApkBuilder.build(set.app, set.inputs, o, BuildOptions(refuseCollisions = true))
+            fail("expected Unsupported")
+        } catch (e: PatchException.Unsupported) {
+            assertEquals("com.example.app already has assets/x.txt", e.message)
+        }
+        assertFalse(o.exists())
+        assertFalse(dir.list()!!.any { it.endsWith(".tmp") })
+        // A dropped entry no longer collides, and the replaced manifest never counts.
+        ApkBuilder.build(set.app, set.inputs, o, BuildOptions(drop = setOf("assets/x.txt"), refuseCollisions = true))
+        assertArrayEquals(SyntheticApks.moduleAsset, read(o, "assets/x.txt"))
+    }
+
+    @Test fun describeSeesEveryAddedName() {
+        val o = File(dir, "described.apk")
+        val seen = mutableListOf<List<String>>()
+        val added = ApkBuilder.build(
+            set.app, set.inputs, o,
+            BuildOptions(describe = { names -> seen += names; "assets/patcher/info.json" to names.joinToString("\n").toByteArray() }),
+        )
+        assertEquals(1, seen.size)
+        val expected = listOf(
+            "assets/patcher/artifactory.json", "assets/patcher/icon.png", "assets/patcher/info.json",
+            "assets/stitch/com.smali_generator.apk", "assets/x.txt", "classes3.dex", "classes4.dex", "lib/x86_64/libarthooks.so",
+        )
+        assertEquals(expected, added)
+        assertEquals(expected - "assets/patcher/info.json", seen.single())
+        assertEquals(seen.single().joinToString("\n"), String(read(o, "assets/patcher/info.json")!!))
+        assertEquals("written last", "assets/patcher/info.json", names(o).last())
+        // Without describe, the build still returns what it added, the manifest aside.
+        assertEquals(expected - "assets/patcher/info.json", ApkBuilder.build(set.app, set.inputs, File(dir, "plain.apk")))
+    }
+
+    @Test fun stripV1KeepsEverythingElseRaw() {
+        val signed = zip(
+            File(dir, "signed.apk"),
+            listOf(
+                "AndroidManifest.xml" to SyntheticApks.appManifest,
+                "META-INF/MANIFEST.MF" to "Manifest-Version: 1.0".toByteArray(),
+                "META-INF/DEV.SF" to ByteArray(4), "META-INF/DEV.RSA" to ByteArray(4),
+                "META-INF/K.EC" to ByteArray(4), "META-INF/K.DSA" to ByteArray(4),
+                "META-INF/sub/X.SF" to ByteArray(4), "META-INF/services/a.B" to "svc".toByteArray(),
+                "classes.dex" to SyntheticApks.dexApp1,
+            ),
+        )
+        // set.app mixes stored and deflated entries.
+        for (src in listOf(signed, set.app)) {
+            val o = File(dir, "stripped-${src.name}")
+            ApkBuilder.stripV1(src, o)
+            open(src) { s ->
+                open(o) { z ->
+                    val kept = s.entries.asSequence().filter {
+                        it.name !in setOf("META-INF/MANIFEST.MF", "META-INF/DEV.SF", "META-INF/DEV.RSA", "META-INF/K.EC", "META-INF/K.DSA", "META-INF/CERT.RSA")
+                    }.toList()
+                    assertEquals(kept.map { it.name }, z.entries.asSequence().map { it.name }.toList())
+                    for (e in kept) {
+                        val oe = z.getEntry(e.name)
+                        assertEquals(e.name, e.method, oe.method)
+                        assertEquals(e.name, e.crc, oe.crc)
+                        assertArrayEquals(e.name, s.getRawInputStream(e).readBytes(), z.getRawInputStream(oe).readBytes())
+                    }
+                }
+            }
+        }
+        assertTrue("META-INF/sub/X.SF" in names(File(dir, "stripped-signed.apk")))
+        assertTrue(names(File(dir, "stripped-app.apk")).contains("lib/x86_64/libapp.so"))
+        assertFalse(dir.list()!!.any { it.endsWith(".tmp") })
+    }
+
     @Test fun failureLeavesNoOutput() {
         val o = File(dir, "never.apk")
         try {

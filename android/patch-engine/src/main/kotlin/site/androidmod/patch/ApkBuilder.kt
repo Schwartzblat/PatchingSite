@@ -24,6 +24,24 @@ data class BuildInputs(
 )
 
 /**
+ * How [ApkBuilder.build] treats the source APK beyond the WhatsApp defaults.
+ *
+ * - [drop]: source entries left out, and not counted when numbering the new dex files.
+ * - [libs]: when set, only each module's `lib/<hookAbi>/<name>.so` is added, as `lib/<libDir>/<name>`
+ *   (stored). When null, a module lib is added for every ABI the source has (all of them if it has none).
+ * - [refuseCollisions]: an addition other than `AndroidManifest.xml` that a kept source entry already has
+ *   is [PatchException.Unsupported] instead of replacing it.
+ * - [describe]: called once, after every other addition is known, with their sorted names (the manifest
+ *   aside); it returns its own entry, which is written last.
+ */
+data class BuildOptions(
+    val drop: Set<String> = emptySet(),
+    val libs: LibTarget? = null,
+    val refuseCollisions: Boolean = false,
+    val describe: ((added: List<String>) -> Pair<String, ByteArray>)? = null,
+)
+
+/**
  * Writes the unsigned patched APK, mirroring Stitch's `inject_module_files`, except that the
  * official app's entries are copied raw (original compressed bytes). Entries are not aligned;
  * the signer does that.
@@ -35,17 +53,36 @@ object ApkBuilder {
 
     private class Added(val data: ByteArray, val stored: Boolean)
 
-    fun build(official: File, inputs: BuildInputs, out: File) {
+    /** Returns the sorted names of the entries it added (`AndroidManifest.xml`, always replaced, aside). */
+    fun build(official: File, inputs: BuildInputs, out: File, options: BuildOptions = BuildOptions()): List<String> =
+        writeAtomically(out, "build") { tmp -> write(official, inputs, tmp, options) }
+
+    /** Copies [apk] to [out] raw, entry for entry, without its v1 signature files (or its signing block). */
+    fun stripV1(apk: File, out: File) {
+        writeAtomically(out, "copy") { tmp ->
+            open(apk).use { src ->
+                ZipArchiveOutputStream(tmp).use { zos ->
+                    for (ze in src.entries) {
+                        if (!V1_SIGNATURE.matches(ze.name)) zos.addRawArchiveEntry(ZipArchiveEntry(ze), src.getRawInputStream(ze))
+                    }
+                }
+            }
+        }
+    }
+
+    /** Writes through a temp file next to [out], so [out] is either complete or untouched. */
+    private fun <T> writeAtomically(out: File, verb: String, write: (File) -> T): T {
         val tmp = try {
             File.createTempFile(out.name, ".tmp", out.absoluteFile.parentFile)
         } catch (e: IOException) {
             throw PatchException.Storage("cannot write ${out.name}: ${e.message}", e)
         }
         try {
-            write(official, inputs, tmp)
+            val result = write(tmp)
             Files.move(tmp.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            return result
         } catch (e: ZipException) {
-            throw PatchException.BadApk("cannot build ${out.name}: ${e.message}", e)
+            throw PatchException.BadApk("cannot $verb ${out.name}: ${e.message}", e)
         } catch (e: IOException) {
             throw PatchException.Storage("cannot write ${out.name}: ${e.message}", e)
         } finally {
@@ -53,19 +90,21 @@ object ApkBuilder {
         }
     }
 
-    private fun write(official: File, inputs: BuildInputs, tmp: File) {
-        val zip = try {
-            ZipFile.builder().setFile(official).get()
-        } catch (e: IOException) {
-            throw PatchException.BadApk("Cannot read the APK: ${e.message}", e)
-        }
-        zip.use { app ->
-            val appEntries = app.entries.asSequence().toList()
+    private fun open(apk: File): ZipFile = try {
+        ZipFile.builder().setFile(apk).get()
+    } catch (e: IOException) {
+        throw PatchException.BadApk("Cannot read the APK: ${e.message}", e)
+    }
+
+    private fun write(official: File, inputs: BuildInputs, tmp: File, options: BuildOptions): List<String> {
+        open(official).use { app ->
+            val appEntries = app.entries.asSequence().filter { it.name !in options.drop }.toList()
             val names = appEntries.map { it.name }
             val appAbis = names.filter { it.startsWith("lib/") }
                 .mapNotNull { it.split('/').getOrNull(1)?.takeIf { abi -> abi.isNotEmpty() && it.split('/').size > 2 } }
                 .toSet()
             var nextDex = (names.mapNotNull { DexHash.dexIndex(it) }.maxOrNull() ?: BigInteger.ZERO).toInt() + 1
+            val target = options.libs
 
             val additions = LinkedHashMap<String, Added>()
             additions[MANIFEST] = Added(inputs.manifest, stored = false)
@@ -77,10 +116,11 @@ object ApkBuilder {
                         additions[dexName(nextDex++)] = Added(files.getValue(n).data, stored = false)
                     }
                 for ((n, f) in files) {
-                    val abi = n.split('/').getOrNull(1)
-                    if (n.startsWith("lib/") && n.endsWith(".so") && n.split('/').size == 3 &&
-                        (appAbis.isEmpty() || abi in appAbis)
-                    ) {
+                    val parts = n.split('/')
+                    val isLib = n.startsWith("lib/") && n.endsWith(".so") && parts.size == 3
+                    if (isLib && target != null) {
+                        if (parts[1] == target.hookAbi) additions["lib/${target.libDir}/${parts[2]}"] = Added(f.data, stored = true)
+                    } else if (isLib && (appAbis.isEmpty() || parts[1] in appAbis)) {
                         additions[n] = Added(f.data, stored = true)
                     } else if (n.startsWith("assets/")) {
                         additions[n] = f
@@ -95,13 +135,30 @@ object ApkBuilder {
             }
             for ((n, b) in inputs.jsonAssets) additions[n] = Added(b, stored = false)
 
+            val kept = appEntries.filter { it.name != MANIFEST && !V1_SIGNATURE.matches(it.name) }
+            val keptNames = kept.mapTo(HashSet()) { it.name }
+            fun refuseCollision(name: String) {
+                if (options.refuseCollisions && name != MANIFEST && name in keptNames) {
+                    throw PatchException.Unsupported("${ManifestPatcher.packageName(inputs.manifest)} already has $name")
+                }
+            }
+            additions.keys.forEach(::refuseCollision)
+            val described = options.describe?.let { describe ->
+                val (name, data) = describe(additions.keys.filter { it != MANIFEST }.sorted())
+                require(name !in additions) { "described entry $name is already an addition" }
+                refuseCollision(name)
+                name to Added(data, stored = false)
+            }
+
             ZipArchiveOutputStream(tmp).use { zos ->
-                for (ze in appEntries) {
-                    if (ze.name == MANIFEST || V1_SIGNATURE.matches(ze.name) || ze.name in additions) continue
+                for (ze in kept) {
+                    if (ze.name in additions || ze.name == described?.first) continue
                     zos.addRawArchiveEntry(ZipArchiveEntry(ze), app.getRawInputStream(ze))
                 }
                 for ((n, a) in additions) put(zos, n, a)
+                described?.let { (n, a) -> put(zos, n, a) }
             }
+            return (additions.keys.filter { it != MANIFEST } + listOfNotNull(described?.first)).sorted()
         }
     }
 

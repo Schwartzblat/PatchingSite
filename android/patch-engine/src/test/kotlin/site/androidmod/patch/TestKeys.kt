@@ -34,3 +34,12 @@ object TestKeys {
         }
     }
 }
+
+/** Signs in-process with apksig under [key]: v2 and v3, minSdk 33, no v1 (what `PatchEngineTest.signedOfficial` does). */
+@Suppress("DEPRECATION")
+fun apksigSigner(key: TestKey): ApkSigner = ApkSigner { unsigned, signed ->
+    com.android.apksig.ApkSigner.Builder(
+        listOf(com.android.apksig.ApkSigner.SignerConfig.Builder("t", key.privateKey, listOf(key.cert)).build()),
+    ).setInputApk(unsigned).setOutputApk(signed).setMinSdkVersion(33)
+        .setV1SigningEnabled(false).setV2SigningEnabled(true).setV3SigningEnabled(true).build().sign()
+}

@@ -41,8 +41,6 @@ fun featuresOff(features: Features, record: VersionRecord): List<String> {
 
 /** Verifies the official APK against a bundle and record, then builds and signs the patched APK. */
 class PatchEngine(private val signer: ApkSigner) {
-    private val json = Json
-
     /**
      * Peak disk use is about 3x the size of the official APK (the official APK itself, the unsigned
      * intermediate, and the signer's temp file next to the output); callers should reserve at
@@ -91,9 +89,9 @@ class PatchEngine(private val signer: ApkSigner) {
             manifest = ManifestPatcher.merge(appManifest, bundle.bytes("manifest-additions.xml")),
             modules = bundle.meta.dexOrder.map(bundle::bytes),
             jsonAssets = mapOf(
-                "assets/patcher/artifactory.json" to artifactory(record),
-                "assets/paywall.json" to bytes(buildJsonObject { put("token", request.paywallToken) }),
-                "assets/patcher/patch-info.json" to bytes(
+                JsonAssets.ARTIFACTORY to JsonAssets.artifactory(record.artifacts),
+                JsonAssets.PAYWALL to JsonAssets.paywall(request.paywallToken),
+                "assets/patcher/patch-info.json" to JsonAssets.bytes(
                     buildJsonObject {
                         put("patcher_version", bundle.meta.patcherVersion)
                         put("revision", request.revision)
@@ -122,16 +120,6 @@ class PatchEngine(private val signer: ApkSigner) {
         return PatchResult(request.output, featuresOff, features.visibleTitles(featuresOff))
     }
 
-    private fun artifactory(record: VersionRecord): ByteArray =
-        bytes(
-            JsonObject(
-                record.artifacts.toSortedMap().mapValues { JsonPrimitive(it.value) },
-            ),
-        )
-
-    private fun bytes(element: JsonElement): ByteArray =
-        json.encodeToString(JsonElement.serializer(), element).toByteArray()
-
     private fun readManifest(apk: File): ByteArray = try {
         ZipFile.builder().setFile(apk).get().use { z ->
             val e = z.getEntry("AndroidManifest.xml") ?: throw PatchException.BadApk("APK has no AndroidManifest.xml")
@@ -140,4 +128,18 @@ class PatchEngine(private val signer: ApkSigner) {
     } catch (e: IOException) {
         throw PatchException.BadApk("Cannot read the APK: ${e.message}", e)
     }
+}
+
+/** The JSON assets both engines write, encoded alike. */
+internal object JsonAssets {
+    const val ARTIFACTORY = "assets/patcher/artifactory.json"
+    const val PAYWALL = "assets/paywall.json"
+
+    /** A flat object, keys sorted. */
+    fun artifactory(artifacts: Map<String, String>): ByteArray =
+        bytes(JsonObject(artifacts.toSortedMap().mapValues { JsonPrimitive(it.value) }))
+
+    fun paywall(token: String): ByteArray = bytes(buildJsonObject { put("token", token) })
+
+    fun bytes(element: JsonElement): ByteArray = Json.encodeToString(JsonElement.serializer(), element).toByteArray()
 }
