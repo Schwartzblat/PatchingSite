@@ -93,4 +93,39 @@ class ManifestPatcherTest {
     @Test(expected = PatchException.BadApk::class) fun notAManifestIsBadApk() {
         ManifestPatcher.merge(byteArrayOf(1, 2, 3), additions)
     }
+
+    @Test fun factsReadSplitTargetAndSharedUser() {
+        val f = ManifestPatcher.facts(manifestWith(
+            "com.x", versionCode = 7, versionName = "1.2", split = "config.arm64_v8a", sharedUserId = "com.x.shared",
+            minSdk = 21, targetSdk = 33,
+            components = listOf("activity" to "com.x.Main", "service" to ".Svc", "provider" to "com.x.P",
+                "receiver" to "com.x.R", "activity-alias" to "com.x.Alias"),
+        ))
+        assertEquals(ManifestFacts("com.x", 7L, "1.2", "config.arm64_v8a", 21, 33, "com.x.shared",
+            listOf("com.x.Main", ".Svc", "com.x.P", "com.x.R", "com.x.Alias").sorted()), f.copy(componentNames = f.componentNames.sorted()))
+        val bare = ManifestPatcher.facts(manifestWith("com.y", versionCode = null))
+        assertEquals(ManifestFacts("com.y", null, null, null, null, null, null, emptyList()), bare)
+    }
+
+    @Test fun authoritiesRewrittenForTheApp() {
+        val additions = ManifestPatcherTest::class.java.getResource("/generic/manifest-additions.xml")!!.readBytes()
+        val rewritten = ManifestPatcher.rewriteAuthorities(additions, "generic.", "com.example.app.")
+        val app = manifestWith("com.example.app")
+        val once = ManifestPatcher.merge(app, rewritten)
+        val auths = load(once).applicationElement.kids("provider").mapNotNull { it.attr("authorities") }
+        assertTrue(auths.toString(), auths.containsAll(listOf(
+            "com.example.app.com.smali_generator.InitProviderGeneric",
+            "com.example.app.com.paywall.InitProviderPaywallGeneric",
+        )))
+        assertTrue(auths.none { it!!.startsWith("generic.") })
+        assertEquals(auths.sorted(), load(ManifestPatcher.merge(once, rewritten)).applicationElement.kids("provider").mapNotNull { it.attr("authorities") }.sorted())
+
+        val mixed = manifest("mod") { a ->
+            a.provider("mod.A", "generic.one;other.two;generic.three")
+            a.provider("mod.B", "other.auth")
+        }
+        val out = load(ManifestPatcher.rewriteAuthorities(mixed, "generic.", "com.app."))
+        assertEquals(listOf("com.app.one;other.two;com.app.three", "other.auth"),
+            out.applicationElement.kids("provider").mapNotNull { it.attr("authorities") })
+    }
 }

@@ -35,3 +35,32 @@ fun zip(file: File, entries: List<Pair<String, ByteArray>>, stored: Boolean = fa
     }
     return file
 }
+
+/** A binary manifest with the given facts; [components] are (tag, android:name) pairs under `<application>`. */
+fun manifestWith(
+    pkg: String,
+    versionCode: Int? = 1,
+    versionName: String? = null,
+    split: String? = null,
+    sharedUserId: String? = null,
+    minSdk: Int? = null,
+    targetSdk: Int? = null,
+    components: List<Pair<String, String>> = emptyList(),
+): ByteArray {
+    val am = com.reandroid.arsc.chunk.xml.AndroidManifestBlock.empty()
+    am.packageName = pkg
+    if (versionCode != null) am.versionCode = versionCode
+    if (versionName != null) am.versionName = versionName
+    if (split != null) am.manifestElement.getOrCreateAttribute("split", 0).setValueAsString(split)
+    if (sharedUserId != null) {
+        am.manifestElement.getOrCreateAndroidAttribute("sharedUserId", 0x0101000b).setValueAsString(sharedUserId)
+    }
+    if (minSdk != null) am.minSdkVersion = minSdk
+    if (targetSdk != null) am.targetSdkVersion = targetSdk
+    val app = am.getOrCreateApplicationElement()
+    for ((tag, name) in components) {
+        app.newElement(tag).getOrCreateAndroidAttribute("name", 0x01010003).setValueAsString(name)
+    }
+    am.refreshFull()
+    return am.bytes
+}

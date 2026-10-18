@@ -9,6 +9,10 @@ sealed class PatchException(message: String, cause: Throwable? = null) : Excepti
     class NotOfficial(message: String, cause: Throwable? = null) : PatchException(message, cause)
     class SignFailed(message: String, cause: Throwable? = null) : PatchException(message, cause)
 
+    /** The app can't be patched, for the listed reasons. */
+    class Unpatchable(val reasons: List<CantPatch>) :
+        PatchException("cannot patch: " + reasons.joinToString(", ") { it.name })
+
     /** Writing to the work directory or the output location failed (disk full, unwritable, ...). */
     class Storage(message: String, cause: Throwable? = null) : PatchException(message, cause)
 }
