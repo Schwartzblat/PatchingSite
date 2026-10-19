@@ -1,6 +1,7 @@
 """The generic ad-remover bundle: upload, newest-usable lookup, download and its paywall token."""
 import hashlib
 import json
+import logging
 import zipfile
 from datetime import datetime, timezone
 
@@ -106,6 +107,35 @@ def test_generic_latest_404_without_bundle(env):
     assert r.status_code == 404 and r.json()["detail"] == "No generic bundle yet"
 
 
+def test_generic_latest_503_when_stored_file_missing(env, caplog):
+    client, key_pem, work, _, paid = env
+    _, data, _ = upload(client, key_pem, work)
+    patch_store.bundle_path("generic", "1.0.0", hashlib.sha256(data).hexdigest()).unlink()
+    patch_store._bundle_ids.clear()
+    with caplog.at_level(logging.ERROR):
+        r = latest(client, paid)
+    assert r.status_code == 503 and r.json()["detail"] == "Generic bundle unavailable"
+    assert any("Generic bundle 1.0.0 unreadable" in rec.getMessage() and rec.levelno == logging.ERROR
+               for rec in caplog.records)
+
+
+def test_generic_latest_503_when_stored_file_corrupt(env, caplog):
+    client, key_pem, work, _, paid = env
+    _, data, _ = upload(client, key_pem, work)
+    patch_store.bundle_path("generic", "1.0.0", hashlib.sha256(data).hexdigest()).write_bytes(b"not a zip")
+    patch_store._bundle_ids.clear()
+    with caplog.at_level(logging.ERROR):
+        r = latest(client, paid)
+    assert r.status_code == 503 and r.json()["detail"] == "Generic bundle unavailable"
+    assert any("Generic bundle 1.0.0 unreadable" in rec.getMessage() for rec in caplog.records)
+
+
+def test_generic_artifacts_route_still_rejects_generic(env):
+    client, _, _, _, paid = env
+    r = client.get("/api/patch/generic/artifacts?patcher_version=1.0.0&apk_sha256=" + "a" * 64, headers=paid)
+    assert r.status_code == 404 and r.json()["detail"] == "Unknown package"
+
+
 def test_generic_bundle_download_has_etag(env):
     client, key_pem, work, _, paid = env
     _, data, _ = upload(client, key_pem, work)
@@ -156,7 +186,9 @@ def test_generic_patching_env_on(monkeypatch, reload_config, raw):  # noqa: F811
 @pytest.mark.parametrize("raw", [None, "", "  ", "0", "false", "No", "OFF"])
 def test_generic_patching_env_off(monkeypatch, reload_config, raw):  # noqa: F811
     if raw is None:
+        # Truly unset: also keep a .env from filling it back in on reload.
         monkeypatch.delenv("GENERIC_PATCHING", raising=False)
+        monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
     else:
         monkeypatch.setenv("GENERIC_PATCHING", raw)
     assert reload_config().GENERIC_PATCHING is False

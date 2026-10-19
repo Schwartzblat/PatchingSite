@@ -29,6 +29,10 @@ os.environ["CRAWLER_SECRET"] = "test-crawler"
 os.environ["BUNDLE_UPLOAD_SECRET"] = "test-bundles"
 os.environ["BUNDLES_DIR"] = str(_TMP / "data" / "bundles")
 os.environ.pop("ON_DEVICE_PACKAGES", None)
+# Same for the generic switch and its Works-with path: empty means the default for
+# both, so a developer's .env cannot turn the feature on under test.
+os.environ["GENERIC_PATCHING"] = ""
+os.environ["GENERIC_WORKS_WITH_PATH"] = ""
 # A developer's .env may hold real SMTP credentials. Set (even empty) here, they
 # win over the file, so mail is unconfigured unless a test configures it itself.
 os.environ["SMTP_USERNAME"] = ""

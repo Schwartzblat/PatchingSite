@@ -8,14 +8,14 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StringConstraints, field_validator
-from starlette.exceptions import HTTPException
 
 import config
 import database
+from api.patching import _generic_enabled
 from utils import works_with
 from utils.jwt_utils import UserInDB, get_current_user
 from utils.logging_config import logger
-from utils.ratelimit import generic_report_ip_rate_limit, generic_report_rate_limit
+from utils.ratelimit import client_ip, generic_report_ip_rate_limit, generic_report_rate_limit, rate_limit_key
 from utils.stripe_utils import RequiredSubscription
 
 router = APIRouter(prefix="/generic")
@@ -37,10 +37,10 @@ class GenericReport(BaseModel):
     package: Annotated[str, Field(max_length=255)]
     app_name: Name
     version_name: Name
-    version_code: Annotated[StrictInt, Field(ge=0)]
+    version_code: Annotated[StrictInt, Field(ge=0, le=2**63 - 1)]
     worked: StrictBool
     note: Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)]] = None
-    store_version_code: Annotated[StrictInt, Field(ge=0)]
+    store_version_code: Annotated[StrictInt, Field(ge=0, le=2**63 - 1)]
     android_sdk: Annotated[StrictInt, Field(ge=1, le=1000)]
 
     @field_validator("package")
@@ -57,25 +57,28 @@ class GenericReport(BaseModel):
         return value or None
 
 
-def _reporter(request: Request, subscription: RequiredSubscription,
-              user: UserInDB = Depends(get_current_user)) -> None:
-    """Signed in and subscribed, then the per-IP and per-account limits.
+def _ip_guard(request: Request) -> None:
+    """Per-IP flood guard, ahead of the auth dependencies. The warning never names the address."""
+    generic_report_ip_rate_limit.check(rate_limit_key(client_ip(request)), logged_as="an IP")
+
+
+def _reporter(subscription: RequiredSubscription, user: UserInDB = Depends(get_current_user)) -> None:
+    """Signed in and subscribed, then the per-account limit.
 
     The account key lives only in the limiter's memory and is never logged.
     """
-    generic_report_ip_rate_limit(request)
     generic_report_rate_limit.check(f"user:{user.id}", logged_as="an account")
 
 
-@router.post("/reports", status_code=201, dependencies=[Depends(_reporter)])
+# Order matters: the switch first, then the per-IP guard, then auth and the account limit.
+@router.post("/reports", status_code=201,
+             dependencies=[Depends(_generic_enabled), Depends(_ip_guard), Depends(_reporter)])
 def create_report(report: GenericReport) -> dict:
-    if not config.GENERIC_PATCHING:
-        raise HTTPException(status_code=404, detail="Generic patching is off")
     report_id = database.add_generic_report(
         package=report.package, app_name=report.app_name, version_name=report.version_name,
         version_code=report.version_code, worked=report.worked, note=report.note,
         store_version_code=report.store_version_code, android_sdk=report.android_sdk,
         created_on=datetime.now(timezone.utc).date(),
     )
-    logger.info('Generic report stored (#%s)', report_id)
+    logger.info('Generic report stored')
     return {"message": THANKS_MESSAGE}

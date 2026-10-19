@@ -37,6 +37,23 @@ class RedactFilter(logging.Filter):
         return True
 
 
+class SkipReportAccessLog(logging.Filter):
+    """Drop uvicorn access records for the generic report POST.
+
+    The report is stored without the account or IP; an access-log line for it
+    would put them back next to a timestamp. uvicorn's access records carry
+    args = (client_addr, method, full_path, http_version, status_code).
+    """
+
+    PATH_SUFFIX = "/api/generic/reports"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            return not args[2].split("?", 1)[0].endswith(self.PATH_SUFFIX)
+        return True
+
+
 def configure_logging() -> logging.Logger:
     root = logging.getLogger()
     if getattr(root, "_patchingsite_configured", False):
@@ -63,6 +80,8 @@ def configure_logging() -> logging.Logger:
         root.addHandler(handler)
 
     root.setLevel(LOG_LEVEL)
+    # uvicorn's own dictConfig leaves filters already on a logger alone.
+    logging.getLogger("uvicorn.access").addFilter(SkipReportAccessLog())
     # The stripe library logs a line per API request at INFO, request path and
     # all, which put Stripe customer ids into the journal and app.log on every
     # subscription check. Its warnings and errors still come through.

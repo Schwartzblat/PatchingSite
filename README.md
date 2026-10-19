@@ -295,10 +295,11 @@ is off until `GENERIC_PATCHING` is on (see below).
   needs `catalog.json` and has no `features.json`. Uploading is allowed even
   while the switch is off, so a bundle can be staged first.
 - `GET /api/patch/generic/latest` (subscriber): the newest generic bundle, as
-  `bundle_id, patcher_version, sha256, min_sdk, min_store_version_code,
-  revision`. The optional `X-Store-Version-Code` header works as for other apps:
+  `package, patcher_version, bundle_id, sha256, size, min_sdk,
+  min_store_version_code, revision`. The optional `X-Store-Version-Code` header works as for other apps:
   **200**, **426** `Store update required` (with `min_store_version_code`) or
-  **404** (no bundle).
+  **404** (no bundle) or **503** `Generic bundle unavailable` (the stored file is
+  missing or damaged).
 - `GET /api/patch/generic/bundle/{patcher_version}` (subscriber): the bundle zip.
 - `POST /api/app-token {"package": "generic"}` returns `{"token", "expires_at"}`.
   The token names `generic`, never the app it is used on. Every package's
@@ -314,11 +315,12 @@ is off until `GENERIC_PATCHING` is on (see below).
   when the switch is off. Limits, in memory: 60/hour per IP and 10 per account
   per 24 hours (429 with `Retry-After`).
 
-**Privacy rule for reports:** a stored row has no account, username, customer id
-or IP, and its date is only the day (`created_on`), so it cannot be matched with
-an access log by time. The endpoint logs only `Generic report stored (#id)`,
-never the package, the account or the IP. The per-account limit is keyed by id
-in memory and never written down.
+**Privacy rule for reports:** a stored report has no account, username,
+customer id or IP column, and only the UTC day (`created_on`). The report
+request is kept out of the app's and nginx's access logs. The only log line is
+`Generic report stored`, with no id, package or account, and the rate-limit
+warnings name no IP or account. The per-account limit is keyed by id in memory
+and never written down.
 
 Reading reports: `GET /api/admin/generic-reports?limit=N` (admin; N 1-500,
 default 100) returns `{"reports": [...], "total": T}` newest first, and
@@ -333,7 +335,9 @@ deploy, only after it has passed with the phone-built patch on a real phone.
 **Switch.** `GENERIC_PATCHING` turns the three generic reads and the report
 endpoint on. On: `1`, `true`, `yes`, `on`. Off: unset, blank, `0`, `false`,
 `no`, `off` (any case). Anything else stops startup with a `ConfigError` naming
-the variable. While off, they answer 404 `Generic patching is off`.
+the variable. While off, they answer 404 `Generic patching is off` (the three reads to
+signed-in subscribers, the others get the usual 401 or 402 first; the report
+endpoint answers it to everyone).
 
 ### Settings
 
@@ -345,6 +349,8 @@ the variable. While off, they answer 404 `Generic patching is off`.
 | `BUNDLE_PUBLIC_KEY_PATH` | public key the bundles are verified against (default `DATA_DIR/bundle-signing.pub.pem`) |
 | `BUNDLES_DIR` | where bundles are stored (default `DATA_DIR/bundles`) |
 | `ON_DEVICE_PACKAGES` | comma-separated packages switched to on-device patching (default empty) |
+| `GENERIC_PATCHING` | `1`/`true`/`yes`/`on` enables the generic ad remover (default off) |
+| `GENERIC_WORKS_WITH_PATH` | the Works-with list (default `server/generic_works_with.json`) |
 
 None is needed to start; an endpoint whose setting is missing answers 503.
 `manage.py doctor` warns about each unset one (and about a missing public key),

@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 import config
 from utils import patch_store, signing_keys
+from utils.logging_config import logger
 from utils.jwt_utils import RequiredToken, UserInDB, create_app_jwt, get_current_user
 from utils.ratelimit import (RateLimiter, app_token_ip_rate_limit, app_token_rate_limit,
                              patch_ip_rate_limit, patch_rate_limit, signing_key_ip_rate_limit,
@@ -210,8 +212,10 @@ async def get_generic_latest(x_store_version_code: str | None = Header(default=N
         raise HTTPException(status_code=404, detail="No generic bundle yet")
     try:
         bundle_id = await run_in_threadpool(patch_store.bundle_id, row)
-    except (OSError, KeyError, ValueError):  # ValueError covers zipfile.BadZipFile
-        raise HTTPException(status_code=404, detail="No generic bundle yet")
+    except (OSError, KeyError, zipfile.BadZipFile) as e:  # BadZipFile is not a ValueError
+        # The row says a bundle exists, so a missing or damaged file is a server fault, not "none yet".
+        logger.error('Generic bundle %s unreadable: %s', row["patcher_version"], e)
+        raise HTTPException(status_code=503, detail="Generic bundle unavailable")
     return {
         "package": package,
         "patcher_version": row["patcher_version"],

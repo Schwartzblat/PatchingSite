@@ -118,7 +118,7 @@ def cmd_check(_args) -> int:
         else:
             print(f"[{OK}] bug_reports missing; migrate creates it")
 
-        for table in ("patch_records", "patch_bundles", "signing_keys"):
+        for table in ("patch_records", "patch_bundles", "signing_keys", "generic_reports"):
             if table in tables:
                 rows = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 print(f"[{OK}] {table} present ({rows} row(s))")
@@ -610,7 +610,9 @@ def cmd_doctor(_args) -> int:
     warnings += _doctor_signing_keys()
     warnings += _doctor_on_device()
     problems += _doctor_works_with()
-    warnings += _doctor_generic()
+    generic_warnings, generic_problems = _doctor_generic()
+    warnings += generic_warnings
+    problems += generic_problems
 
     cutoff = config.LEGACY_APP_TOKEN_CUTOFF
     if cutoff is None:
@@ -667,21 +669,31 @@ def _doctor_works_with() -> int:
     return 0
 
 
-def _doctor_generic() -> int:
-    """Warn when GENERIC_PATCHING is on but no generic bundle has been uploaded."""
+def _doctor_generic() -> tuple[int, int]:
+    """Warn when GENERIC_PATCHING is on but no generic bundle is uploaded, or its file is gone.
+
+    Returns (warnings, problems).
+    """
     if not config.GENERIC_PATCHING:
-        return 0
+        return 0, 0
     from utils import patch_store
-    try:
-        uploaded = patch_store.newest_bundle(config.GENERIC_PACKAGE) is not None
-    except sqlite3.Error:
-        uploaded = False
-    if uploaded:
-        print(f"[{OK}] GENERIC_PATCHING is on and a generic bundle is uploaded")
-        return 0
-    print(f"[{WARN}] GENERIC_PATCHING is on but no generic bundle is uploaded: the store app")
-    print(f"         would find nothing to apply (upload the bundle first)")
-    return 1
+    newest = None
+    if Path(config.DB_PATH).exists():  # never create an empty users.db just to look
+        try:
+            newest = patch_store.newest_bundle(config.GENERIC_PACKAGE)
+        except sqlite3.Error:
+            newest = None
+    if newest is None:
+        print(f"[{WARN}] GENERIC_PATCHING is on but no generic bundle is uploaded: the store app")
+        print(f"         would find nothing to apply (upload the bundle first)")
+        return 1, 0
+    path = patch_store.bundle_path(config.GENERIC_PACKAGE, newest["patcher_version"], newest["sha256"])
+    if not path.is_file():
+        print(f"[{BAD}] GENERIC_PATCHING is on but the newest generic bundle's file is missing: {path}")
+        print(f"         GET /api/patch/generic/latest answers 503 until it is restored or re-uploaded")
+        return 0, 1
+    print(f"[{OK}] GENERIC_PATCHING is on and a generic bundle is uploaded")
+    return 0, 0
 
 
 def _doctor_on_device() -> int:

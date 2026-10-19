@@ -79,6 +79,8 @@ def test_report_logs_name_no_package_or_account(client, paid, caplog):
     with caplog.at_level(logging.DEBUG):
         caplog.clear()
         assert send(client, paid).status_code == 201
+    assert [r.getMessage() for r in caplog.records if "Generic report stored" in r.getMessage()] == [
+        "Generic report stored"]
     text = "\n".join(record.getMessage() for record in caplog.records).lower()
     for secret in (PACKAGE, "alice", "alice@example.com", "testclient", "127.0.0.1"):
         assert secret not in text
@@ -103,6 +105,8 @@ def test_note_is_stripped_and_blank_becomes_null(client, paid, tmp_db):
     {"app_name": ""},
     {"android_sdk": 0},
     {"version_code": -1},
+    {"version_code": 2**63},
+    {"store_version_code": 2**63},
     {"version_name": "  "},
 ])
 def test_bad_reports_rejected_and_not_stored(client, paid, tmp_db, overrides):
@@ -197,3 +201,50 @@ def test_table_added_without_touching_others(tmp_db):
     after = layout()
     assert "generic_reports" in after
     assert after == before
+
+
+def test_ip_limit_warning_does_not_log_the_ip(client, paid, tmp_db, caplog, monkeypatch):
+    from utils import ratelimit
+    monkeypatch.setattr(ratelimit.generic_report_ip_rate_limit, "limit", 2)
+    with caplog.at_level(logging.WARNING):
+        statuses = [send(client, paid).status_code for _ in range(3)]
+    assert statuses == [201, 201, 429]
+    warnings = [r.getMessage() for r in caplog.records if "Rate limit reached" in r.getMessage()]
+    assert warnings == ["Rate limit reached on generic-report-ip from an IP"]
+    assert "testclient" not in warnings[0] and "127.0.0.1" not in warnings[0]
+
+
+def test_switch_off_answers_before_auth_and_body_checks(client, tmp_db, monkeypatch):
+    monkeypatch.setattr(config, "GENERIC_PATCHING", False)
+    r = client.post("/api/generic/reports", json={"bogus": 1})
+    assert r.status_code == 404 and r.json()["detail"] == "Generic patching is off"
+
+
+def test_ip_guard_runs_before_auth(client, tmp_db, monkeypatch):
+    from utils import ratelimit
+    monkeypatch.setattr(ratelimit.generic_report_ip_rate_limit, "limit", 1)
+    assert client.post("/api/generic/reports", json=body()).status_code == 401
+    assert client.post("/api/generic/reports", json=body()).status_code == 429
+
+
+def _access_record(path):
+    return logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1,
+                             '%s - "%s %s HTTP/%s" %d', ("1.2.3.4:5", "POST", path, "1.1", 201), None)
+
+
+@pytest.mark.parametrize("path, kept", [
+    ("/api/generic/reports", False),
+    ("/v2/api/generic/reports", False),
+    ("/v2/api/generic/reports?x=1", False),
+    ("/api/generic", True),
+    ("/api/generic/reports/extra", True),
+    ("/api/health", True),
+])
+def test_access_log_filter_drops_only_the_report_post(path, kept):
+    from utils.logging_config import SkipReportAccessLog
+    assert SkipReportAccessLog().filter(_access_record(path)) is kept
+
+
+def test_access_log_filter_is_installed_on_uvicorn_access():
+    from utils.logging_config import SkipReportAccessLog
+    assert any(isinstance(f, SkipReportAccessLog) for f in logging.getLogger("uvicorn.access").filters)

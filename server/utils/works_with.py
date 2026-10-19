@@ -39,7 +39,7 @@ def parse(text: str) -> list[dict]:
         for key, value in entry.items():
             if not isinstance(value, str) or not value:
                 raise WorksWithError(f"{where}: {key} must be a non-empty string")
-        if not PACKAGE_RE.match(entry["package"]):
+        if not PACKAGE_RE.fullmatch(entry["package"]):
             raise WorksWithError(f"{where}: bad package name")
         if entry["package"] in seen:
             raise WorksWithError(f"{where}: duplicate package")

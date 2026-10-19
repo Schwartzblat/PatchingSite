@@ -6,6 +6,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import config
+import database
 from utils import works_with
 from utils.works_with import WorksWithError
 
@@ -34,8 +35,9 @@ def test_parse_accepts_a_valid_list():
     text(ENTRY, dict(ENTRY, package="com.other.app", tested_on="18/10/2026")),
     text(ENTRY, dict(ENTRY, package="com.other.app", note="x" * 201)),
     text(ENTRY, dict(ENTRY)),
+    text(ENTRY, dict(ENTRY, package="com.a.b\n")),
 ], ids=["not-a-list", "missing-key", "extra-key", "empty-value", "bad-package",
-        "bad-date", "long-note", "duplicate"])
+        "bad-date", "long-note", "duplicate", "trailing-newline"])
 def test_parse_rejects(raw):
     with pytest.raises(WorksWithError) as err:
         works_with.parse(raw)
@@ -105,3 +107,48 @@ def test_doctor_warns_switch_on_without_bundle(tmp_db, monkeypatch, capsys, tmp_
     assert len(warn_lines(out, "GENERIC_PATCHING")) == 1
     assert not warn_lines(off, "GENERIC_PATCHING")
     assert code == code_off  # advisory only
+
+
+def test_doctor_generic_never_creates_the_database(monkeypatch, capsys, tmp_path):
+    db = tmp_path / "nope" / "users.db"
+    code, out = doctor(monkeypatch, capsys, **configured(tmp_path, GENERIC_PATCHING=True, DB_PATH=db))
+    assert len(warn_lines(out, "GENERIC_PATCHING")) == 1
+    assert not db.exists() and not db.parent.exists()
+
+
+def _stored_bundle():
+    """A generic bundle row (file content is irrelevant to doctor); returns (path, data)."""
+    import hashlib
+    from utils import patch_store
+    data = b"bundle bytes"
+    sha = hashlib.sha256(data).hexdigest()
+    conn = database._connect()
+    try:
+        conn.execute(
+            "INSERT INTO patch_bundles (package, patcher_version, min_store_version_code, min_sdk, sha256, "
+            "size, seq, uploaded_at) VALUES ('generic', '1.0.0', 0, 26, ?, ?, 1, '2026-10-18T00:00:00Z')",
+            (sha, len(data)))
+        conn.commit()
+    finally:
+        conn.close()
+    return patch_store.bundle_path("generic", "1.0.0", sha), data
+
+
+def test_doctor_generic_ok_when_bundle_file_present(tmp_db, monkeypatch, capsys, tmp_path):
+    bundles = tmp_path / "bundles"
+    monkeypatch.setattr(config, "BUNDLES_DIR", bundles)
+    stored, data = _stored_bundle()
+    stored.parent.mkdir(parents=True)
+    stored.write_bytes(data)
+    code, out = doctor(monkeypatch, capsys, **configured(tmp_path, GENERIC_PATCHING=True, BUNDLES_DIR=bundles))
+    assert not warn_lines(out, "GENERIC_PATCHING")
+    assert any("GENERIC_PATCHING" in line and "ok" in line for line in out.splitlines())
+
+
+def test_doctor_generic_fails_when_bundle_file_missing(tmp_db, monkeypatch, capsys, tmp_path):
+    bundles = tmp_path / "bundles"
+    monkeypatch.setattr(config, "BUNDLES_DIR", bundles)
+    _stored_bundle()
+    code, out = doctor(monkeypatch, capsys, **configured(tmp_path, GENERIC_PATCHING=True, BUNDLES_DIR=bundles))
+    assert code == 1
+    assert any("GENERIC_PATCHING" in line and "FAIL" in line and "missing" in line for line in out.splitlines())

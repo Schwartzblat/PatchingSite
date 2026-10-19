@@ -3,6 +3,7 @@ import threading
 import time
 import weakref
 from collections import defaultdict, deque
+from typing import Optional
 
 from starlette import status
 from starlette.exceptions import HTTPException
@@ -110,7 +111,7 @@ class RateLimiter:
         for key in stale:
             del self._hits[key]
 
-    def check(self, key: str, logged_as: str = None) -> None:
+    def check(self, key: str, logged_as: Optional[str] = None) -> None:
         """Count an attempt on `key`; raise 429 with Retry-After when it is over the limit.
 
         `logged_as` is what the warning names instead of `key`, for keys that must
