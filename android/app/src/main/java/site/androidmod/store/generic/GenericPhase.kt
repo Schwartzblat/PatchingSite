@@ -45,6 +45,8 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
             else -> changed
         }
         GenericIntent.RESTORE -> when {
+            record.original.isEmpty() ->
+                GenericPhase.Attention("${record.label}'s saved original is missing, so it can't be put back.")
             ours -> GenericPhase.RemovePatched(asked)
             installed == null -> GenericPhase.InstallOriginal
             original -> GenericPhase.Restored

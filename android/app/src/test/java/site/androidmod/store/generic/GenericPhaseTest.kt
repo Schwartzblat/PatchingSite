@@ -75,6 +75,22 @@ class GenericPhaseTest {
     @Test fun restore_other_state_needs_attention() =
         assertTrue(phase(record(GenericIntent.RESTORE), InstalledState(setOf("zz"), 5L, "x")) is GenericPhase.Attention)
 
+    @Test fun restore_without_saved_original_needs_attention() {
+        val r = record(GenericIntent.RESTORE, original = emptyList())
+        val expected = GenericPhase.Attention("Example's saved original is missing, so it can't be put back.")
+        assertEquals(expected, phase(r, ourBuild))
+        assertEquals(expected, phase(r, null))
+    }
+
+    @Test fun restore_ours_with_different_base_still_removes_patched() =
+        assertEquals(GenericPhase.RemovePatched(false), phase(record(GenericIntent.RESTORE), ourOther))
+
+    @Test fun patch_removed_before_saved_wins_even_with_built() =
+        assertEquals(GenericPhase.Attention("Example was removed before its original was saved."), phase(record(original = emptyList()), null))
+
+    @Test fun refresh_original_installed_needs_attention() =
+        assertTrue(phase(record(GenericIntent.REFRESH), originalInstalled) is GenericPhase.Attention)
+
     // REFRESH
     @Test fun refresh_without_built_saves_and_builds() =
         assertEquals(GenericPhase.SaveAndBuild, phase(record(GenericIntent.REFRESH, built = emptyList()), ourBuild))
