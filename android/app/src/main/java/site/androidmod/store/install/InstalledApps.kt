@@ -2,9 +2,15 @@ package site.androidmod.store.install
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import java.io.File
 import java.security.MessageDigest
+import site.androidmod.store.generic.InstalledPackage
 
 data class InstalledApp(
     val packageName: String,
@@ -33,6 +39,71 @@ class InstalledApps(private val context: Context) {
     } catch (error: PackageManager.NameNotFoundException) {
         null
     }
+
+    /** Apps the customer installed and can open: no system apps, no store itself. */
+    fun listUserApps(): List<InstalledPackage> {
+        val pm = context.packageManager
+        return installedPackageInfos().mapNotNull { info ->
+            val app = info.applicationInfo ?: return@mapNotNull null
+            val system = ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+            if (app.flags and system != 0) return@mapNotNull null
+            if (info.packageName == context.packageName) return@mapNotNull null
+            if (pm.getLaunchIntentForPackage(info.packageName) == null) return@mapNotNull null
+            toInstalledPackage(info, app)
+        }
+    }
+
+    fun packageInfo(packageName: String): InstalledPackage? = try {
+        val info = packageInfoWithSigners(packageName)
+        info.applicationInfo?.let { toInstalledPackage(info, it) }
+    } catch (error: PackageManager.NameNotFoundException) {
+        null
+    }
+
+    fun signersOf(packageName: String): Set<String> = try {
+        signersOf(packageInfoWithSigners(packageName))
+    } catch (error: PackageManager.NameNotFoundException) {
+        emptySet()
+    }
+
+    /** Whether the app keeps files in Android/obb; null when that can't be read. */
+    fun hasObbFiles(packageName: String): Boolean? = try {
+        File(Environment.getExternalStorageDirectory(), "Android/obb/$packageName").listFiles()?.isNotEmpty()
+    } catch (error: Exception) {
+        null
+    }
+
+    private fun toInstalledPackage(info: PackageInfo, app: ApplicationInfo) = InstalledPackage(
+        packageName = info.packageName,
+        label = app.loadLabel(context.packageManager).toString(),
+        versionName = info.versionName.orEmpty(),
+        versionCode = info.longVersionCode,
+        apks = listOf(File(app.sourceDir)) + app.splitSourceDirs.orEmpty().map(::File),
+        signerSha256s = signersOf(info),
+    )
+
+    private fun signersOf(info: PackageInfo): Set<String> =
+        info.signingInfo?.apkContentsSigners.orEmpty().map { sha256Hex(it.toByteArray()) }.toSet()
+
+    @Suppress("DEPRECATION")
+    private fun packageInfoWithSigners(packageName: String): PackageInfo =
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.packageManager.getPackageInfo(
+                packageName, PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+            )
+        } else {
+            context.packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+        }
+
+    @Suppress("DEPRECATION")
+    private fun installedPackageInfos(): List<PackageInfo> =
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.packageManager.getInstalledPackages(
+                PackageManager.PackageInfoFlags.of(PackageManager.GET_SIGNING_CERTIFICATES.toLong()),
+            )
+        } else {
+            context.packageManager.getInstalledPackages(PackageManager.GET_SIGNING_CERTIFICATES)
+        }
 
     /**
      * Opens the system uninstall dialog; there is no silent unrooted uninstall.
