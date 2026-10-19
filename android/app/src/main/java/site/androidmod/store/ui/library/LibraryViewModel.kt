@@ -23,9 +23,7 @@ import site.androidmod.store.download.DownloadRegistry
 import site.androidmod.patch.GenericPatchInfo
 import site.androidmod.store.generic.GenericEntry
 import site.androidmod.store.generic.GenericLibrarySource
-import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.generic.GenericRecord
-import site.androidmod.store.generic.RefreshHint
 import site.androidmod.store.install.InstallErrors
 import site.androidmod.store.install.InstallFailure
 import site.androidmod.store.install.InstallOutcome
@@ -47,7 +45,6 @@ import site.androidmod.store.patch.readPatchInfo
 import site.androidmod.store.patch.updateOffer
 import site.androidmod.store.ui.NavRequest
 import site.androidmod.store.ui.NavigationRequests
-import site.androidmod.store.ui.formatBytes
 import site.androidmod.store.update.StoreSelfUpdate
 import kotlinx.coroutines.CancellationException
 import java.io.File
@@ -108,69 +105,6 @@ internal fun libraryActionEnabled(action: LibraryAction, moveInProgress: Boolean
     action != LibraryAction.UPDATE || !moveInProgress
 
 private const val SUBSCRIPTION_NEEDED = "You need a subscription to update."
-
-/** What a generic entry's card offers. */
-enum class GenericAction { CONTINUE, REFRESH, PUT_BACK, REPORT, DELETE_ORIGINAL }
-
-/**
- * A flow under way only continues (on the run screen). A finished patch is refreshed, put back,
- * reported on, and its saved original deleted when there is one. An app removed by hand can have
- * its saved original put back. Nothing else is offered: putting back while another copy is
- * installed would stop at "changed outside the store".
- */
-internal fun genericActions(entry: GenericEntry): List<GenericAction> {
-    val saved = entry.record.original.isNotEmpty()
-    return when {
-        entry.record.intent != null -> listOf(GenericAction.CONTINUE)
-        entry.phase == GenericPhase.Patched -> listOfNotNull(
-            GenericAction.REFRESH,
-            GenericAction.PUT_BACK,
-            GenericAction.REPORT,
-            GenericAction.DELETE_ORIGINAL.takeIf { saved },
-        )
-        entry.phase == GenericPhase.Removed && saved -> listOf(GenericAction.PUT_BACK)
-        else -> emptyList()
-    }
-}
-
-internal fun genericActionLabel(action: GenericAction, entry: GenericEntry): String = when (action) {
-    GenericAction.CONTINUE -> "Continue"
-    GenericAction.REFRESH -> "Refresh"
-    GenericAction.PUT_BACK -> "Put the original back"
-    GenericAction.REPORT -> "Report how it works"
-    GenericAction.DELETE_ORIGINAL -> "Delete the saved original (${formatBytes(entry.savedOriginalBytes)})"
-}
-
-internal const val GENERIC_UNCHECKED = "Can't be checked right now. Check your connection, then open the Library again."
-
-fun genericStatusLine(entry: GenericEntry): String {
-    val phase = entry.phase
-    return when {
-        phase == null -> GENERIC_UNCHECKED
-        phase is GenericPhase.Attention -> phase.message
-        entry.record.intent != null -> "Not finished — open to continue"
-        phase == GenericPhase.Patched -> "Patched on this phone · ${entry.record.versionName}"
-        phase == GenericPhase.Removed -> "Removed from this phone"
-        phase == GenericPhase.Unpatched -> "Original installed"
-        // The other steps only come with an intent.
-        else -> "Not finished — open to continue"
-    }
-}
-
-fun refreshHintText(label: String, hint: RefreshHint): String = when (hint) {
-    RefreshHint.NewerRules -> "Newer ad rules are out. Refresh to get them."
-    is RefreshHint.TokenExpiring ->
-        "Refresh within ${hint.daysLeft} ${if (hint.daysLeft == 1) "day" else "days"} to keep $label working."
-    RefreshHint.TokenExpired -> "$label has stopped working. Refresh to start it again."
-    RefreshHint.TokenUnknown -> "Refresh $label to keep it working."
-}
-
-internal fun genericUpdateHint(label: String) =
-    "To update $label, put the original back, update it in Play, and patch it again."
-
-/** The refresh hint and the update hint go under a finished patch only. */
-internal fun showsGenericHints(entry: GenericEntry): Boolean =
-    entry.phase == GenericPhase.Patched && entry.record.intent == null
 
 /** A Library action on a generic patch threw (a record write on a full disk, say). */
 private const val GENERIC_ACTION_FAILED = "That didn't work. Try again."
@@ -276,8 +210,9 @@ class LibraryViewModel(
             api = container.genericApi,
             listApps = container.installedApps::listUserApps,
             readInfo = GenericPatchInfo::read,
-            // Fetched when not cached, so the flow (which reads the cached key) can tell our copies apart.
-            userCert = { userCertSha256()?.lowercase() },
+            // Lowercase, as the installed signers are. A fetched key is cached, which the flow reads.
+            cachedCert = { container.signingKeys.cached()?.certSha256?.lowercase() },
+            fetchCert = { userCertSha256()?.lowercase() },
             now = System::currentTimeMillis,
         )
     }
@@ -309,9 +244,10 @@ class LibraryViewModel(
     fun refresh() {
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true, loadError = null)
+            // A generic action's refusal is about the entries as they were.
+            _state.value = _state.value.copy(loading = true, loadError = null, genericError = null)
             // Beside the catalogue, not after it: they hash APKs, and need none of it.
-            val generic = async { genericEntries() }
+            val genericLoad = async { genericEntries() }
             try {
                 val apps = container.catalog.apps()
                 // Fetched at most once per refresh, and only when an on-device app is installed.
@@ -348,9 +284,9 @@ class LibraryViewModel(
                     )
                 }
                 val conflict = conflictAfterRefresh(_state.value.conflictWith, entries)
+                // Still loading until the generic entries land too (below).
                 _state.value = _state.value.copy(
                     entries = entries,
-                    loading = false,
                     loadError = null,
                     conflictWith = conflict,
                     // The message that went with a resolved conflict told the user to
@@ -363,9 +299,11 @@ class LibraryViewModel(
                 // A 401 here is an expired session, not a broken screen: hand it to
                 // the one place that can put the app back on the login form.
                 if (error.isAuth) container.auth.expireSession()
-                _state.value = _state.value.copy(loading = false, loadError = error.message)
+                _state.value = _state.value.copy(loadError = error.message)
             }
-            generic.await()?.let { entries -> _state.update { it.copy(generic = entries) } }
+            // Only now: with the catalogue failed or empty, "Nothing here yet" must not flash before them.
+            val generic = genericLoad.await()
+            _state.update { it.copy(loading = false, generic = generic ?: it.generic) }
         }
     }
 
@@ -400,8 +338,20 @@ class LibraryViewModel(
     /** "Delete the saved original", once the customer has confirmed. */
     fun deleteGenericOriginal(record: GenericRecord) = genericAction {
         val deleted = withContext(Dispatchers.IO) { container.genericFlow.deleteSavedOriginal(record.packageName) }
+        // Before the refusal is shown: a refresh clears it.
         refresh()
         if (deleted) null else "The saved original of ${record.label} can't be deleted right now."
+    }
+
+    /** "Remove from the Library", once the customer has confirmed: GenericFlow.forget. */
+    fun forgetGeneric(record: GenericRecord) = genericAction {
+        val forgotten = withContext(Dispatchers.IO) { container.genericFlow.forget(record.packageName) }
+        refresh()
+        if (forgotten) null else "${record.label} can't be removed from the Library right now."
+    }
+
+    fun dismissGenericError() {
+        _state.update { it.copy(genericError = null) }
     }
 
     /**

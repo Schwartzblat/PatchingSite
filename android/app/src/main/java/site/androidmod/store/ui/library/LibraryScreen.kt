@@ -45,7 +45,6 @@ import site.androidmod.store.ui.AppIcon
 import site.androidmod.store.ui.EmptyState
 import site.androidmod.store.ui.ErrorBanner
 import site.androidmod.store.ui.LoadingState
-import site.androidmod.store.ui.formatBytes
 import site.androidmod.store.ui.generic.InstalledAppIcon
 import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.store.patch.PatchRegistry
@@ -77,6 +76,8 @@ fun LibraryScreen(
     var removeWarning by remember { mutableStateOf<RemoveWarning?>(null) }
     // The finished patch whose saved original the customer asked to delete; null when none is.
     var confirmDelete by remember { mutableStateOf<GenericEntry?>(null) }
+    // The entry the customer asked to remove from the Library; null when none is.
+    var confirmForget by remember { mutableStateOf<GenericEntry?>(null) }
     val downloads by DownloadRegistry.downloads.collectAsStateWithLifecycle()
     val patchStates by PatchRegistry.states.collectAsStateWithLifecycle()
     // Hoisted: every system-intent call from this screen needs the Activity
@@ -113,7 +114,10 @@ fun LibraryScreen(
         // catalogue read is cleared by the next refresh, a failed install is not.
         ErrorBanner(state.loadError)
         ErrorBanner(state.error)
-        ErrorBanner(state.genericError)
+        state.genericError?.let { message ->
+            ErrorBanner(message)
+            OutlinedButton(onClick = viewModel::dismissGenericError) { Text("Dismiss") }
+        }
 
         if (state.needsInstallPermission) {
             InstallPermissionBanner(onOpenSettings = { viewModel.openInstallPermissionSettings(context) })
@@ -188,6 +192,7 @@ fun LibraryScreen(
                             GenericAction.PUT_BACK -> viewModel.putBackGeneric(entry.record)
                             GenericAction.REPORT -> onReport(pkg)
                             GenericAction.DELETE_ORIGINAL -> confirmDelete = entry
+                            GenericAction.FORGET -> confirmForget = entry
                         }
                     }
                 }
@@ -196,13 +201,27 @@ fun LibraryScreen(
     }
 
     confirmDelete?.let { entry ->
-        DeleteOriginalDialog(
-            entry = entry,
-            onDelete = {
+        ConfirmDialog(
+            title = "Delete the saved original?",
+            text = deleteOriginalDialogText(entry),
+            confirmLabel = "Delete",
+            onConfirm = {
                 confirmDelete = null
                 viewModel.deleteGenericOriginal(entry.record)
             },
             onDismiss = { confirmDelete = null },
+        )
+    }
+    confirmForget?.let { entry ->
+        ConfirmDialog(
+            title = forgetDialogTitle(entry.record.label),
+            text = forgetDialogText(entry),
+            confirmLabel = "Remove",
+            onConfirm = {
+                confirmForget = null
+                viewModel.forgetGeneric(entry.record)
+            },
+            onDismiss = { confirmForget = null },
         )
     }
 
@@ -402,20 +421,14 @@ private fun GenericLibraryCard(entry: GenericEntry, busy: Boolean, onAction: (Ge
     }
 }
 
-/** Asked before the saved original of a finished patch goes: without it, the Library can't put the original back. */
+/** Asked before a generic entry loses something: its saved original, or its place in the Library. */
 @Composable
-private fun DeleteOriginalDialog(entry: GenericEntry, onDelete: () -> Unit, onDismiss: () -> Unit) {
-    val label = entry.record.label
+private fun ConfirmDialog(title: String, text: String, confirmLabel: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete the saved original?") },
-        text = {
-            Text(
-                "This frees ${formatBytes(entry.savedOriginalBytes)}. Without it, the original of $label can't be put " +
-                    "back from the Library. You can still remove $label and install it again from Google Play.",
-            )
-        },
-        confirmButton = { TextButton(onClick = onDelete) { Text("Delete") } },
+        title = { Text(title) },
+        text = { Text(text) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

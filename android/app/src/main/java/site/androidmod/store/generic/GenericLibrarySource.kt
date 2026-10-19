@@ -27,12 +27,17 @@ data class GenericEntry(
 /**
  * The Library's generic entries, from the records on this phone. Each call first adopts our own
  * patches that have no record (the store's data was cleared, say): installed apps signed with the
- * user's key whose base carries a generic patch-info. That much is local. The one network call is
- * [GenericApi.latest], once per call and only when a record exists; it names no app.
+ * user's key whose base carries a generic patch-info. That much is local.
  *
- * [userCert] is the user's certificate as lowercase SHA-256, cached or else fetched; null when it
- * can't be had. [listApps] and [readInfo] read PackageManager and the apps' files, and deriving each
- * phase hashes an installed base, so all of that runs on [io].
+ * Network calls, neither naming an app: [GenericApi.latest], once per call and only when a record
+ * exists; and [fetchCert] (the signing key from the server) only when no key is cached and the
+ * Library needs one, for a record or for a patch of ours found on the phone. Otherwise the cached
+ * key, or none.
+ *
+ * [cachedCert] and [fetchCert] give the user's certificate as lowercase SHA-256, null when there is
+ * none; a fetched key is cached, which is what the flow reads. [listApps] and [readInfo] read
+ * PackageManager and the apps' files, and deriving each phase hashes an installed base, so all of
+ * that runs on [io].
  */
 class GenericLibrarySource(
     private val records: GenericRecords,
@@ -40,16 +45,22 @@ class GenericLibrarySource(
     private val api: GenericApi,
     private val listApps: () -> List<InstalledPackage>,
     private val readInfo: (File) -> GenericPatchInfo?,
-    private val userCert: suspend () -> String?,
+    private val cachedCert: () -> String?,
+    private val fetchCert: suspend () -> String?,
     private val now: () -> Long,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     suspend fun entries(): List<GenericEntry> {
         val (listed, keyKnown) = withContext(io) {
-            // First, so the phases below can tell our copies apart (the flow reads the cached key).
-            val cert = userCert()
-            if (cert != null) adoptOrphans(cert)
+            val apps = installedApps()
+            // First, so the phases below can tell our copies apart.
+            val cert = cachedCert() ?: if (records.all().isNotEmpty() || apps.any { genericInfo(it) != null }) {
+                fetchCert()
+            } else {
+                null
+            }
+            if (cert != null) adoptOrphans(cert, apps)
             records.all() to (cert != null)
         }
         if (listed.isEmpty()) return emptyList()
@@ -60,27 +71,38 @@ class GenericLibrarySource(
         }
     }
 
-    private fun adoptOrphans(cert: String) {
-        val recorded = records.all().mapTo(HashSet()) { it.packageName }
-        val apps = try {
-            listApps()
-        } catch (error: RuntimeException) {
-            // PackageManager failed: adopt on the next refresh, and still show the records.
-            return
+    /** Empty when PackageManager fails: nothing is adopted this time, and the records still show. */
+    private fun installedApps(): List<InstalledPackage> = try {
+        listApps()
+    } catch (error: RuntimeException) {
+        emptyList()
+    }
+
+    /** The generic patch-info of [app]'s base; null when it has none or it can't be read. */
+    private fun genericInfo(app: InstalledPackage): GenericPatchInfo? {
+        val base = app.apks.firstOrNull() ?: return null
+        return try {
+            readInfo(base)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // An unreadable base, or a malformed patch-info: not one we can adopt.
+            null
         }
+    }
+
+    private fun adoptOrphans(cert: String, apps: List<InstalledPackage>) {
+        val recorded = records.all().mapTo(HashSet()) { it.packageName }
         for (app in apps) {
             if (cert !in app.signerSha256s || app.packageName in recorded) continue
-            val base = app.apks.firstOrNull() ?: continue
-            val info = try {
-                readInfo(base)
-            } catch (error: Exception) {
-                // An unreadable base, or a malformed patch-info: not one we can adopt.
-                null
-            } ?: continue
+            val info = genericInfo(app) ?: continue
+            // One at a time: a record that can't be written, or one written meanwhile, skips only this app.
             try {
                 flow.adopt(app, info)
-            } catch (raced: IllegalStateException) {
-                // Recorded meanwhile.
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // Tried again on the next refresh.
             }
         }
     }

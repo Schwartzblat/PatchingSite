@@ -665,6 +665,118 @@ class GenericFlowTest {
     }
 
     @Test
+    fun forget_an_unpatched_app_and_its_saved_original() {
+        val f = fixture()
+        f.patched()
+        // The original is back on the phone (from Play), and the record still lists its saved copy.
+        f.installed = ORIGINAL_INSTALLED
+        assertEquals(GenericPhase.Unpatched, f.flow.phase(PKG))
+
+        assertTrue(f.flow.forget(PKG))
+
+        assertNull(f.records.get(PKG))
+        assertFalse(f.packageDir.exists())
+        assertNull(f.flow.phase(PKG))
+        assertFalse("nothing left to forget", f.flow.forget(PKG))
+    }
+
+    @Test
+    fun forget_an_unpatched_app_with_nothing_saved() {
+        val f = fixture()
+        f.records.put(f.patched().copy(original = emptyList()))
+        f.originalDir.deleteRecursively()
+        f.installed = ORIGINAL_INSTALLED
+        assertEquals(GenericPhase.Unpatched, f.flow.phase(PKG))
+
+        assertTrue(f.flow.forget(PKG))
+
+        assertNull(f.records.get(PKG))
+        assertFalse(f.packageDir.exists())
+    }
+
+    @Test
+    fun forget_a_removed_app_only_without_a_saved_original() {
+        val f = fixture()
+        val patched = f.patched()
+        f.installed = null
+        assertEquals(GenericPhase.Removed, f.flow.phase(PKG))
+        // Its saved original is the only way back: kept, with the record.
+        assertFalse(f.flow.forget(PKG))
+        assertEquals(patched, f.record())
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+
+        // Adopted (nothing saved), then removed by hand.
+        val g = fixture()
+        g.installed = PATCHED_INSTALLED
+        g.flow.adopt(g.app(setOf(USER_CERT)), INFO)
+        g.installed = null
+        assertEquals(GenericPhase.Removed, g.flow.phase(PKG))
+
+        assertTrue(g.flow.forget(PKG))
+
+        assertNull(g.records.get(PKG))
+        assertFalse(g.packageDir.exists())
+    }
+
+    @Test
+    fun forget_refuses_every_other_phase() {
+        fun stays(f: Fixture, why: String) {
+            val before = f.records.get(PKG)
+            val files = f.files(f.packageDir)
+            assertFalse(why, f.flow.forget(PKG))
+            assertEquals(why, before, f.records.get(PKG))
+            assertEquals(why, files, f.files(f.packageDir))
+        }
+
+        stays(fixture(), "no record")
+
+        fixture().let { f ->
+            f.patched()
+            stays(f, "Patched")
+            f.installed = InstalledState(setOf("e".repeat(64)), VERSION_CODE, "f".repeat(64))
+            assertTrue(f.flow.phase(PKG) is GenericPhase.Attention)
+            stays(f, "Attention")
+        }
+
+        fixture().let { f ->
+            f.flow.begin(f.app())
+            assertEquals(GenericPhase.SaveAndBuild, f.flow.phase(PKG))
+            stays(f, "PATCH, nothing saved yet")
+        }
+
+        fixture().let { f ->
+            f.built()
+            assertEquals(GenericPhase.RemoveOriginal(askedBefore = false), f.flow.phase(PKG))
+            stays(f, "PATCH, the original still installed")
+            f.installed = null
+            assertEquals(GenericPhase.InstallPatched, f.flow.phase(PKG))
+            stays(f, "PATCH, the original removed")
+        }
+
+        fixture().let { f ->
+            f.patched()
+            assertNull(f.flow.startRestore(PKG))
+            stays(f, "RESTORE")
+            f.installed = ORIGINAL_INSTALLED
+            assertEquals(GenericPhase.Restored, f.flow.phase(PKG))
+            stays(f, "RESTORE, the original back but not finished")
+        }
+
+        fixture().let { f ->
+            f.patched()
+            assertNull(f.flow.startRefresh(PKG))
+            stays(f, "REFRESH")
+        }
+
+        fixture().let { f ->
+            f.patched()
+            f.installed = ORIGINAL_INSTALLED
+            f.busy = true
+            stays(f, "Unpatched, but its job is running")
+        }
+    }
+
+    @Test
     fun a_running_job_or_install_blocks_every_change() = runTest {
         val busy = "Wait for the current step to finish, then try again."
         val f = fixture()

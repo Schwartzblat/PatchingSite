@@ -47,7 +47,7 @@ class GenericPhaseTest {
         assertEquals(GenericPhase.Patched, phase(record(), ourBuild))
 
     @Test fun patch_other_state_needs_attention() =
-        assertEquals(GenericPhase.Attention("Example was changed outside the store. Put the original back, or contact us."), phase(record(), ourOther))
+        assertEquals(GenericPhase.Attention("Example was changed outside the store. Uninstall it, then put the original back from the Library."), phase(record(), ourOther))
 
     @Test fun phase_resumes_at_install_after_original_removed() =
         assertEquals(GenericPhase.InstallPatched, phase(record(), null))

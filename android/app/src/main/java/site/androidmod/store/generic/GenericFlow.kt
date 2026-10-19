@@ -247,6 +247,23 @@ class GenericFlow(
         allowed
     }
 
+    /**
+     * Forgets an app the Library has nothing left to do for, with its record and every file of it,
+     * and says whether it did. Only with no flow under way and the package idle, and only where
+     * nothing still needed goes: at Unpatched (the original is installed, so a saved copy of it is
+     * spare), or at Removed with no saved original. Otherwise nothing changes.
+     */
+    fun forget(packageName: String): Boolean = synchronized(lock) {
+        val record = records.get(packageName) ?: return@synchronized false
+        val allowed = !busy(packageName) && record.intent == null && when (phaseOf(record)) {
+            GenericPhase.Unpatched -> true
+            GenericPhase.Removed -> record.original.isEmpty()
+            else -> false
+        }
+        if (allowed) records.remove(packageName)
+        allowed
+    }
+
     /** The saved original's size as recorded: what [deleteSavedOriginal] frees. */
     fun savedOriginalBytes(packageName: String): Long = records.get(packageName)?.original?.sumOf { it.size } ?: 0L
 

@@ -1,6 +1,7 @@
 package site.androidmod.store.ui.library
 
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
@@ -50,19 +51,36 @@ class GenericLibraryTest {
     /** Real record files and a real GenericFlow; the phone (installed apps, their state, patch-info) is faked. */
     private inner class Fixture {
         val root = folder.newFolder()
-        val records = GenericRecords(File(root, "generic"))
+
+        /** Packages whose record can't be written (a full disk, say). */
+        val failingPuts = HashSet<String>()
+        val records = object : GenericRecords(File(root, "generic")) {
+            override fun put(record: GenericRecord) {
+                if (record.packageName in failingPuts) throw IOException("No space left on device")
+                super.put(record)
+            }
+        }
 
         /** What the phone has installed, by package. */
         val installed = HashMap<String, InstalledState>()
-        var cert: String? = USER_CERT
+
+        /** The signing key on the phone; the flow reads only this. */
+        var cachedCert: String? = USER_CERT
+
+        /** What fetching the key gives, then cached as SigningKeyStore.get caches it; null when it can't be had. */
+        var serverCert: String? = USER_CERT
+        var fetches = 0
         var apps: List<InstalledPackage> = emptyList()
         val infos = HashMap<String, GenericPatchInfo>()
+
+        /** Bases whose patch-info can't be read. */
+        val unreadable = HashSet<String>()
         val infoReads = mutableListOf<String>()
 
         val flow = GenericFlow(
             records = records,
             installedState = { installed[it] },
-            userCert = { cert },
+            userCert = { cachedCert },
             install = { _, _ -> InstallOutcome.Success },
             sha256 = { sha256(it.readBytes()) },
             now = { NOW },
@@ -83,11 +101,22 @@ class GenericLibraryTest {
             listApps = { apps },
             readInfo = { apk ->
                 infoReads += apk.name
+                if (apk.name in unreadable) throw IOException("Not a zip")
                 infos[apk.name]
             },
-            userCert = { cert },
+            cachedCert = { cachedCert },
+            fetchCert = {
+                fetches++
+                serverCert?.also { cachedCert = it }
+            },
             now = { NOW },
         )
+
+        /** No key cached, and none to be had. */
+        fun noKey() {
+            cachedCert = null
+            serverCert = null
+        }
 
         /** A finished patch of [PKG]: our copy installed, its original saved, no intent. */
         fun patched(
@@ -148,31 +177,96 @@ class GenericLibraryTest {
     @Test
     fun nothing_is_adopted_without_the_users_key() = runTest {
         val f = Fixture()
-        f.cert = null
+        f.noKey()
         f.apps = listOf(app(PKG, setOf(USER_CERT), base = "ours-base.apk"))
         f.infos["ours-base.apk"] = INFO
 
         assertTrue(f.source.entries().isEmpty())
+        assertEquals("a candidate is worth asking for the key", 1, f.fetches)
         assertTrue(f.records.all().isEmpty())
-        assertTrue(f.infoReads.isEmpty())
+    }
+
+    @Test
+    fun no_fetch_without_records_or_a_candidate() = runTest {
+        val f = Fixture()
+        f.cachedCert = null
+        f.apps = listOf(app("com.other.app", setOf(DEV_CERT)), app("com.plain.app", setOf(DEV_CERT)))
+
+        assertTrue(f.source.entries().isEmpty())
+
+        assertEquals(0, f.fetches)
+        assertEquals("every base is checked for our patch-info", 2, f.infoReads.size)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun a_candidate_fetches_the_key_and_is_adopted() = runTest {
+        val f = Fixture()
+        f.cachedCert = null
+        f.apps = listOf(app("com.other.app", setOf(DEV_CERT)), app(PKG, setOf(USER_CERT), base = "ours-base.apk"))
+        f.infos["ours-base.apk"] = INFO
+        f.installed[PKG] = InstalledState(setOf(USER_CERT), 7L, "ours-sha")
+        server.enqueue(latest(NEW_BUNDLE))
+
+        val entry = f.source.entries().single()
+
+        assertEquals(1, f.fetches)
+        assertEquals(INFO.bundleId, f.records.get(PKG)!!.patchedBundleId)
+        assertEquals(GenericPhase.Patched, entry.phase)
+    }
+
+    @Test
+    fun records_fetch_the_key() = runTest {
+        val f = Fixture()
+        f.patched()
+        f.cachedCert = null
+        server.enqueue(latest(NEW_BUNDLE))
+
+        val entry = f.source.entries().single()
+
+        assertEquals(1, f.fetches)
+        assertEquals("the fetched key tells our copy apart", GenericPhase.Patched, entry.phase)
+        assertTrue("records need no scan for candidates", f.infoReads.isEmpty())
+    }
+
+    @Test
+    fun a_cached_key_is_never_fetched() = runTest {
+        val f = Fixture()
+        f.patched()
+        server.enqueue(latest(NEW_BUNDLE))
+
+        f.source.entries()
+
+        assertEquals(0, f.fetches)
     }
 
     @Test
     fun unreadable_patch_info_is_skipped() = runTest {
         val f = Fixture()
         f.apps = listOf(app(PKG, setOf(USER_CERT), base = "ours-base.apk"))
-        val source = GenericLibrarySource(
-            records = f.records,
-            flow = f.flow,
-            api = GenericApi(ApiClient(OkHttpClient(), baseUrl = { server.url("/").toString().trimEnd('/') }, token = { "tok" })),
-            listApps = { f.apps },
-            readInfo = { throw java.io.IOException("not a zip") },
-            userCert = { USER_CERT },
-            now = { NOW },
-        )
+        f.unreadable += "ours-base.apk"
 
-        assertTrue(source.entries().isEmpty())
+        assertTrue(f.source.entries().isEmpty())
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun one_failed_adoption_does_not_stop_the_others() = runTest {
+        val f = Fixture()
+        f.apps = listOf(
+            app("com.first.app", setOf(USER_CERT), base = "first-base.apk"),
+            app("com.second.app", setOf(USER_CERT), base = "second-base.apk"),
+        )
+        f.infos["first-base.apk"] = INFO
+        f.infos["second-base.apk"] = INFO
+        f.failingPuts += "com.first.app"
+        f.installed["com.second.app"] = InstalledState(setOf(USER_CERT), 1L, "second-sha")
+        server.enqueue(latest(NEW_BUNDLE))
+
+        val entries = f.source.entries()
+
+        assertEquals(listOf("com.second.app"), entries.map { it.record.packageName })
+        assertNull(f.records.get("com.first.app"))
     }
 
     @Test
@@ -260,7 +354,7 @@ class GenericLibraryTest {
     fun missing_key_shows_a_note_instead_of_attention() = runTest {
         val f = Fixture()
         f.patched()
-        f.cert = null
+        f.noKey()
         server.enqueue(latest(NEW_BUNDLE))
 
         val entry = f.source.entries().single()
@@ -275,7 +369,7 @@ class GenericLibraryTest {
     fun missing_key_keeps_phases_that_dont_need_it() = runTest {
         val f = Fixture()
         f.patched()
-        f.cert = null
+        f.noKey()
         f.installed.remove(PKG)
         server.enqueue(latest(NEW_BUNDLE))
 
@@ -368,13 +462,36 @@ class GenericLibraryTest {
     }
 
     @Test
-    fun other_finished_phases_offer_only_putting_a_saved_original_back() {
+    fun every_finished_entry_has_a_way_out() {
         val saved = record().copy(original = listOf(SavedApk("base.apk", 3L, "ab")))
+        // Removed by hand: put its saved original back, or with nothing saved, forget it.
         assertEquals(listOf(GenericAction.PUT_BACK), genericActions(GenericEntry(saved, GenericPhase.Removed, 3L, null)))
-        assertTrue(genericActions(GenericEntry(record(), GenericPhase.Removed, 0L, null)).isEmpty())
-        assertTrue(genericActions(GenericEntry(saved, GenericPhase.Unpatched, 3L, null)).isEmpty())
-        // Putting back would leave it stuck at Attention: the installed copy is neither ours nor the original.
+        assertEquals(listOf(GenericAction.FORGET), genericActions(GenericEntry(record(), GenericPhase.Removed, 0L, null)))
+        // The original is installed again: forget it, saved copy and all.
+        assertEquals(listOf(GenericAction.FORGET), genericActions(GenericEntry(saved, GenericPhase.Unpatched, 3L, null)))
+        assertEquals(listOf(GenericAction.FORGET), genericActions(GenericEntry(record(), GenericPhase.Unpatched, 0L, null)))
+        // Attention says to uninstall it first, which makes it Removed.
         assertTrue(genericActions(GenericEntry(saved, GenericPhase.Attention("changed"), 3L, null)).isEmpty())
+        assertEquals("Remove from the Library", genericActionLabel(GenericAction.FORGET, GenericEntry(record(), GenericPhase.Unpatched, 0L, null)))
+    }
+
+    @Test
+    fun forget_dialog_says_a_saved_original_goes_too() {
+        val saved = record().copy(original = listOf(SavedApk("base.apk", 1_572_864L, "ab")))
+
+        assertEquals("Remove Example from the Library?", forgetDialogTitle("Example"))
+        assertEquals(
+            "Example stays on your phone as it is. Its saved original (1.5 MB) is deleted too.",
+            forgetDialogText(GenericEntry(saved, GenericPhase.Unpatched, 1_572_864L, null)),
+        )
+        assertEquals(
+            "Example stays on your phone as it is.",
+            forgetDialogText(GenericEntry(record(), GenericPhase.Unpatched, 0L, null)),
+        )
+        assertEquals(
+            "Example is no longer on this phone, and nothing of it is saved.",
+            forgetDialogText(GenericEntry(record(), GenericPhase.Removed, 0L, null)),
+        )
     }
 
     @Test

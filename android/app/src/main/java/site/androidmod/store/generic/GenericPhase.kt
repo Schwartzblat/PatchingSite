@@ -32,7 +32,7 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
     val original = installed != null && installed.signers == record.originalSigners
     val ourBuild = installed != null && record.built.isNotEmpty() && installed.baseSha256 == record.built.first().sha256
     val asked = record.uninstallAskedAt != null
-    val changed = GenericPhase.Attention("${record.label} was changed outside the store. Put the original back, or contact us.")
+    val changed = GenericPhase.Attention("${record.label} was changed outside the store. Uninstall it, then put the original back from the Library.")
 
     return when (record.intent) {
         GenericIntent.PATCH -> when {
