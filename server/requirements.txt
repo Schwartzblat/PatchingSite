@@ -19,6 +19,7 @@ cryptography==50.0.2
 #     git clone <internal stitch repo> /path/to/Stitch
 #     pip install -e /path/to/Stitch
 # 1.5.0 is the minimum: it adds stitch.bundle (on-device patching bundle uploads;
-# without it those uploads answer 503). 1.4.0 replaced uber-apk-signer with the
-# fastsigner binary utils/apps_utils.py signs with.
+# without it those uploads answer 503). 1.6.0 is needed to build generic bundles
+# (build_bundle's extra_files, which carry catalog.json). 1.4.0 replaced
+# uber-apk-signer with the fastsigner binary utils/apps_utils.py signs with.
 # It pulls in androguard, pyaxml and PyYAML itself, so they are not listed here.

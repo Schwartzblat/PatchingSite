@@ -3,8 +3,10 @@ import hashlib
 import os
 import re
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
+import jwt
 from fastapi import Depends, Header, HTTPException, Path as PathParam, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
@@ -68,8 +70,15 @@ def _finalize_bundle(tmp: Path, public_key: bytes, digest: str, size: int) -> di
 
     package = meta.get("package")
     patcher_version = meta.get("patcher_version")
-    if package not in config.APPS_BY_PACKAGE:
+    if package != config.GENERIC_PACKAGE and package not in config.APPS_BY_PACKAGE:
         raise HTTPException(status_code=404, detail="Unknown package")
+    if package == config.GENERIC_PACKAGE:
+        # A generic bundle carries the ad catalog and no per-app features.
+        files = meta.get("files")
+        if not isinstance(files, dict) or "catalog.json" not in files:
+            raise HTTPException(status_code=400, detail="A generic bundle needs catalog.json")
+        if "features.json" in files:
+            raise HTTPException(status_code=400, detail="A generic bundle must not contain features.json")
     if not isinstance(patcher_version, str) or not re.fullmatch(PATCHER_VERSION, patcher_version):
         raise HTTPException(status_code=422, detail="Invalid patcher_version")
     for key in ("min_store_version_code", "min_sdk"):
@@ -162,6 +171,19 @@ def _known_package(package: str) -> str:
     return package
 
 
+def _generic_enabled() -> None:
+    if not config.GENERIC_PATCHING:
+        raise HTTPException(status_code=404, detail="Generic patching is off")
+
+
+def _bundle_package(package: str) -> str:
+    """Like _known_package, but `generic` is also allowed (when its switch is on)."""
+    if package == config.GENERIC_PACKAGE:
+        _generic_enabled()
+        return package
+    return _known_package(package)
+
+
 def _store_version_code(raw: str | None) -> int:
     try:
         return max(int(raw), 0) if raw is not None else 0
@@ -170,6 +192,36 @@ def _store_version_code(raw: str | None) -> int:
 
 
 read_deps = [Depends(patch_ip_rate_limit), Depends(patch_reader)]
+
+
+@router.get("/patch/generic/latest", dependencies=read_deps)
+async def get_generic_latest(x_store_version_code: str | None = Header(default=None)):
+    _generic_enabled()
+    package = config.GENERIC_PACKAGE
+    row = await run_in_threadpool(patch_store.latest_bundle, package,
+                                  _store_version_code(x_store_version_code))
+    newest = await run_in_threadpool(patch_store.newest_bundle, package)
+    if newest is not None and (row is None or newest["seq"] > row["seq"]):
+        # The newest bundle needs a newer store app: tell this one to update itself.
+        return JSONResponse({"detail": "Store update required",
+                             "min_store_version_code": newest["min_store_version_code"]},
+                            status_code=426)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No generic bundle yet")
+    try:
+        bundle_id = await run_in_threadpool(patch_store.bundle_id, row)
+    except (OSError, KeyError, ValueError):  # ValueError covers zipfile.BadZipFile
+        raise HTTPException(status_code=404, detail="No generic bundle yet")
+    return {
+        "package": package,
+        "patcher_version": row["patcher_version"],
+        "bundle_id": bundle_id,
+        "sha256": row["sha256"],
+        "size": row["size"],
+        "min_sdk": row["min_sdk"],
+        "min_store_version_code": row["min_store_version_code"],
+        "revision": row["seq"],
+    }
 
 
 @router.get("/patch/{package}/latest", dependencies=read_deps)
@@ -216,7 +268,7 @@ async def get_artifacts(package: str,
 
 @router.get("/patch/{package}/bundle/{patcher_version}", dependencies=read_deps)
 async def get_bundle(package: str, patcher_version: str = PathParam(pattern=PATCHER_VERSION)):
-    _known_package(package)
+    _bundle_package(package)
     row = await run_in_threadpool(patch_store.get_bundle, package, patcher_version)
     path = patch_store.bundle_path(package, patcher_version, row["sha256"]) if row else None
     if path is None or not path.is_file():
@@ -234,5 +286,8 @@ class AppTokenRequest(BaseModel):
                                          Depends(_account_reader(app_token_rate_limit))])
 def post_app_token(body: AppTokenRequest, token: RequiredToken, subscription: RequiredSubscription):
     """The same paywall token POST /downloads bakes into a server-patched APK."""
-    _known_package(body.package)
-    return {"token": create_app_jwt(token, body.package, customer_id=subscription.client_id)}
+    _bundle_package(body.package)
+    app_token = create_app_jwt(token, body.package, customer_id=subscription.client_id)
+    exp = jwt.decode(app_token, options={"verify_signature": False})["exp"]
+    return {"token": app_token,
+            "expires_at": datetime.fromtimestamp(exp, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}

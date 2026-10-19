@@ -52,6 +52,23 @@ def _int_env(name: str, default: int) -> int:
         raise ConfigError(f"{name} must be a whole number, not {raw!r}.")
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    """An optional on/off switch: 1/true/yes/on or 0/false/no/off in any case.
+
+    Blank counts as unset. Anything else is a ConfigError naming the variable,
+    so a typo cannot leave a feature in a state the owner did not choose.
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(f"{name} must be one of 1/true/yes/on or 0/false/no/off, not {raw!r}.")
+
+
 def _parse_cutoff(name: str, raw: str | None) -> datetime | None:
     """An optional ISO 8601 date or datetime, as an aware UTC datetime.
 
@@ -337,6 +354,11 @@ BUNDLES_DIR = Path(os.getenv("BUNDLES_DIR") or DATA_DIR / "bundles")
 # Packages switched to on-device patching. Empty by default: turning one on is a
 # launch-day operations step, so deploying changes nothing for current subscribers.
 ON_DEVICE_PACKAGES = _package_set(os.getenv("ON_DEVICE_PACKAGES"))
+# The generic ad remover: a bundle (package `generic`) the store app applies to any
+# installed app. Off by default; the three generic reads answer 404 until it is on.
+# Uploading a generic bundle is allowed either way, so it can be staged first.
+GENERIC_PACKAGE = "generic"
+GENERIC_PATCHING = _bool_env("GENERIC_PATCHING", False)
 OFFICIAL_SOURCES = {"com.whatsapp": "whatsapp.com"}
 OFFICIAL_APK_URLS = {"com.whatsapp": "https://www.whatsapp.com/android/current/WhatsApp.apk"}
 

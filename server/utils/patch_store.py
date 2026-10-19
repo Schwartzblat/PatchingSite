@@ -4,8 +4,10 @@ Every function opens its own connection. `seq` is one counter shared by records
 and bundles; it is allocated inside the same BEGIN IMMEDIATE as the write, so
 two writers can never hand out the same value.
 """
+import hashlib
 import json
 import sqlite3
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -134,6 +136,43 @@ def get_bundle(package: str, patcher_version: str) -> Optional[dict]:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def latest_bundle(package: str, store_version_code: int) -> Optional[dict]:
+    """The most recently uploaded bundle (highest seq) this store version can use."""
+    conn = database._connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM patch_bundles WHERE package = ? AND min_store_version_code <= ? "
+            "ORDER BY seq DESC LIMIT 1", (package, store_version_code)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def newest_bundle(package: str) -> Optional[dict]:
+    """The most recently uploaded bundle, whatever store version asks."""
+    conn = database._connect()
+    try:
+        row = conn.execute("SELECT * FROM patch_bundles WHERE package = ? ORDER BY seq DESC LIMIT 1",
+                           (package,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+_bundle_ids: dict[str, str] = {}
+
+
+def bundle_id(row: dict) -> str:
+    """sha256 of the bundle.json inside the stored zip; cached by the zip's own sha256."""
+    cached = _bundle_ids.get(row["sha256"])
+    if cached is None:
+        path = bundle_path(row["package"], row["patcher_version"], row["sha256"])
+        with zipfile.ZipFile(path) as zf:
+            cached = hashlib.sha256(zf.read("bundle.json")).hexdigest()
+        _bundle_ids[row["sha256"]] = cached
+    return cached
 
 
 def latest_record(package: str, store_version_code: int, source: Optional[str]) -> Optional[dict]:

@@ -52,6 +52,27 @@ def make_bundle(tmp_path, key_pem, package="com.whatsapp", patcher_version="3.0.
     return out, meta
 
 
+GENERIC_CATALOG = json.dumps({"version": 1, "ad_networks": []}).encode()
+
+
+def make_generic_bundle(tmp_path, key_pem, patcher_version="1.0.0", min_store_version_code=0,
+                        name="g.zip", with_features=False, with_catalog=True):
+    """Build a signed generic ad-remover bundle (package `generic`); return (path, meta)."""
+    hook = build_module_apk(
+        tmp_path / "generic-hook.apk",
+        '<uses-sdk android:minSdkVersion="33"/><application/>', package="com.smali_generator")
+    features = None
+    if with_features:
+        features = tmp_path / "features.json"
+        features.write_text(FEATURES_JSON)
+    extra = {"catalog.json": GENERIC_CATALOG} if with_catalog else None
+    out = tmp_path / name
+    meta = build_bundle(out, "generic", patcher_version, [BundleModule("module.apk", hook)],
+                        ["generic.com.smali_generator.InitProviderGeneric"], features, key_pem,
+                        min_store_version_code=min_store_version_code, extra_files=extra)
+    return out, meta
+
+
 def resign_bundle(src, dest, key_pem, mutate):
     """Copy a bundle with bundle.json altered by `mutate(meta)` and re-signed with key_pem."""
     with zipfile.ZipFile(src) as zf:
