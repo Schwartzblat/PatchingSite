@@ -21,7 +21,7 @@ import site.androidmod.store.generic.GenericRecords
 import site.androidmod.store.generic.GenericRepository
 import site.androidmod.store.generic.GenericServer
 import site.androidmod.store.generic.GenericToken
-import site.androidmod.store.generic.splitArchiveInfo
+import site.androidmod.store.generic.refusedPackagesOf
 import site.androidmod.store.install.Installer
 import site.androidmod.store.install.InstalledApps
 import site.androidmod.store.install.RootInstaller
@@ -46,6 +46,7 @@ import site.androidmod.store.patch.PatchJob
 import site.androidmod.store.patch.PatchServer
 import site.androidmod.store.patch.SigningKey
 import site.androidmod.store.patch.SigningKeyStore
+import site.androidmod.store.patch.splitArchiveInfo
 import site.androidmod.store.ui.settings.bugReportContext
 import site.androidmod.store.update.InstalledBuild
 import site.androidmod.store.update.PackageSelfInstaller
@@ -88,7 +89,12 @@ class Container(private val context: Context) {
     val catalog by lazy { CatalogRepository(api) { apps ->
         appNames = apps.filter { it.name.isNotBlank() }.associate { it.packageName to it.name }
         settings.onDevicePackages = apps.filter { it.onDevice }.map { it.packageName }.toSet()
+        settings.storePackages = apps.map { it.packageName }.toSet()
     } }
+
+    /** Our store's own apps, for the generic job and the picker; empty until a catalogue has loaded (see [refusedPackagesOf]). */
+    fun refusedPackages(): Set<String> = refusedPackagesOf(saved = settings.storePackages, loaded = appNames.keys)
+
     val patchApi by lazy { PatchApi(api) }
     val genericApi by lazy { GenericApi(api) }
     val generic by lazy { GenericRepository(genericApi) }
@@ -166,7 +172,7 @@ class Container(private val context: Context) {
         // PackageManager reads a base only; a split output is read from its own manifest and signature.
         inspector = { file -> inspectArchive(file) ?: splitArchiveInfo(file) },
         installed = { installedApps.packageInfo(it) },
-        storePackages = { appNames.keys },
+        storePackages = ::refusedPackages,
         signedIn = { tokens.token != null },
         sdkInt = Build.VERSION.SDK_INT,
         deviceAbis = Build.SUPPORTED_ABIS.toList(),

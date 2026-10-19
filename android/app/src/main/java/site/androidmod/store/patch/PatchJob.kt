@@ -1,5 +1,6 @@
 package site.androidmod.store.patch
 
+import com.android.apksig.ApkVerifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import site.androidmod.patch.ApkSigner
+import site.androidmod.patch.ManifestPatcher
 import site.androidmod.patch.PatchBundle
 import site.androidmod.patch.PatchException
 import site.androidmod.patch.PatchRequest
@@ -29,6 +31,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 
 /** Why a build runs: the guide's DOWNLOAD step, an update of the installed app, or a generic patch of any installed app. */
 enum class PatchMode { GUIDE, UPDATE, GENERIC }
@@ -95,6 +98,39 @@ sealed interface PatchOutcome {
 
 /** What an APK file says about itself (production: PackageManager.getPackageArchiveInfo). */
 data class ArchiveInfo(val packageName: String, val versionCode: Long, val signerSha256s: Set<String>)
+
+/**
+ * What a split APK says about itself: PackageManager's archive parser refuses a split on its own
+ * ("Expected base APK, but found split"), so the generic job's inspector reads a split output
+ * here: its manifest's package and versionCode, and the signers apksig verified (from Android 13,
+ * where patching starts). Null for a base, a split that doesn't verify, or a file that isn't an APK.
+ */
+fun splitArchiveInfo(file: File): ArchiveInfo? = try {
+    val manifest = ZipFile(file).use { zip ->
+        zip.getEntry(MANIFEST)?.let { entry -> zip.getInputStream(entry).use { it.readBytes() } }
+    }
+    val facts = manifest?.let(ManifestPatcher::facts)
+    val versionCode = facts?.versionCode
+    if (facts?.split == null || versionCode == null) {
+        null
+    } else {
+        val result = ApkVerifier.Builder(file).setMinCheckedPlatformVersion(PATCH_MIN_SDK).build().verify()
+        if (result.isVerified) ArchiveInfo(facts.packageName, versionCode, signerSha256s(result)) else null
+    }
+} catch (error: Exception) {
+    null
+}
+
+private const val MANIFEST = "AndroidManifest.xml"
+
+private fun signerSha256s(result: ApkVerifier.Result): Set<String> =
+    // A malformed signing block can yield null certificates despite the platform types.
+    (result.signerCertificates + result.v2SchemeSigners.map { it.certificate } +
+        result.v3SchemeSigners.map { it.certificate } + result.v31SchemeSigners.map { it.certificate })
+        .filterNotNull()
+        .mapTo(HashSet()) { cert ->
+            MessageDigest.getInstance("SHA-256").digest(cert.encoded).joinToString("") { "%02x".format(it) }
+        }
 
 /** Our server's part of a build (production: PatchApi, BundleCache and SigningKeyStore). */
 interface PatchServer {

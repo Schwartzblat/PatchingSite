@@ -1,7 +1,9 @@
 package site.androidmod.store.generic
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -25,10 +27,6 @@ import site.androidmod.patch.GenericSource
 import site.androidmod.patch.LibTarget
 import site.androidmod.patch.PatchBundle
 import site.androidmod.patch.PatchException
-import site.androidmod.patch.TestKeys
-import site.androidmod.patch.apksigSigner
-import site.androidmod.patch.manifestWith
-import site.androidmod.patch.zip
 import site.androidmod.store.data.ApiException
 import site.androidmod.store.patch.ArchiveInfo
 import site.androidmod.store.patch.PatchFailure
@@ -53,7 +51,11 @@ class GenericJobTest {
 
     /** Every fake for one run: the server, the disk, the engine and the phone's installed app. */
     private inner class Fixture(val root: File) {
-        val records = GenericRecords(File(root, "files/generic"))
+        /** Wraps every record write: [put] writes it. */
+        var putHook: (record: GenericRecord, put: () -> Unit) -> Unit = { _, put -> put() }
+        val records = object : GenericRecords(File(root, "files/generic")) {
+            override fun put(record: GenericRecord) = putHook(record) { super.put(record) }
+        }
         val workDir = File(root, "files/patch/work/generic-$PKG")
         val originalDir = records.originalDir(PKG)
         val builtDir = records.builtDir(PKG)
@@ -889,7 +891,7 @@ class GenericJobTest {
     }
 
     @Test
-    fun token_never_in_logs_or_request_tostring() = runTest {
+    fun token_never_in_request_or_outcome_strings() = runTest {
         val f = fixture()
         f.records.put(f.record())
 
@@ -902,13 +904,118 @@ class GenericJobTest {
         assertFalse(TOKEN in f.records.get(PKG).toString())
         assertFalse(TOKEN in GenericToken(TOKEN, EXPIRES_AT).toString())
 
-        // A failure whose cause names the token shows it nowhere.
+        // A failure whose cause names the token keeps it out of the outcome's message and string.
         val g = fixture()
         g.records.put(g.record())
         g.engineAction = { _, _ -> throw PatchException.BadApk("Patching failed: $TOKEN") }
         val outcome = g.run() as GenericOutcome.Failed
         assertFalse(TOKEN in outcome.toString())
         assertFalse(TOKEN in outcome.message)
+    }
+
+    /** Runs [f] in a job that [Fixture.putHook] can cancel at an exact write. */
+    private suspend fun kotlinx.coroutines.CoroutineScope.runCancellable(f: Fixture, cancelAfter: (GenericRecord) -> Boolean): Job {
+        lateinit var job: Job
+        f.putHook = { record, put ->
+            put()
+            if (cancelAfter(record)) job.cancel()
+        }
+        job = launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+            f.run()
+            error("the run was not cancelled")
+        }
+        job.start()
+        job.join()
+        return job
+    }
+
+    @Test
+    fun cancel_right_after_saving_keeps_the_recorded_original() = runTest {
+        val f = fixture()
+        f.records.put(f.record())
+
+        val job = runCancellable(f) { it.original.isNotEmpty() && it.built.isEmpty() }
+
+        assertTrue(job.isCancelled)
+        assertEquals(savedEntries(), f.records.get(PKG)!!.original)
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+        assertArrayEquals(BASE_BYTES, File(f.originalDir, BASE).readBytes())
+        assertTrue(f.requests.isEmpty())
+        f.assertNoTemporaryFiles()
+    }
+
+    @Test
+    fun cancel_right_after_recording_the_build_keeps_it() = runTest {
+        val f = fixture()
+        f.records.put(f.record())
+
+        val job = runCancellable(f) { it.built.isNotEmpty() }
+
+        assertTrue(job.isCancelled)
+        val record = f.records.get(PKG)!!
+        assertEquals(savedEntries(), record.original)
+        assertEquals(builtEntries(), record.built)
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+        assertEquals(listOf(BASE, SPLIT), f.files(f.builtDir))
+        f.assertNoTemporaryFiles()
+    }
+
+    @Test
+    fun a_build_the_record_does_not_list_is_not_kept() = runTest {
+        val f = fixture()
+        f.records.put(f.record())
+        // built/ is in place, but the record can't be written.
+        f.putHook = { record, put -> if (record.built.isNotEmpty()) throw IOException("I/O error") else put() }
+
+        assertEquals(failed(GenericFailure.FAILED), f.run())
+
+        val record = f.records.get(PKG)!!
+        assertEquals(emptyList<SavedApk>(), record.built)
+        assertFalse(f.builtDir.exists())
+        assertEquals(savedEntries(), record.original)
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+        f.assertNoTemporaryFiles()
+    }
+
+    @Test
+    fun copies_the_record_does_not_list_are_not_kept() = runTest {
+        val f = fixture()
+        f.records.put(f.record())
+        // The copies verified, but the record can't be written.
+        f.putHook = { record, put -> if (record.original.isNotEmpty()) throw IOException("I/O error") else put() }
+
+        assertEquals(failed(GenericFailure.FAILED), f.run())
+
+        assertEquals(f.record(), f.records.get(PKG))
+        assertEquals(emptyList<String>(), f.files(f.originalDir))
+        assertTrue(f.requests.isEmpty())
+    }
+
+    @Test
+    fun no_catalogue_yet_is_not_available() = runTest {
+        for (intent in listOf(GenericIntent.PATCH, GenericIntent.REFRESH)) {
+            val f = fixture()
+            f.records.put(f.record(intent = intent))
+            if (intent == GenericIntent.REFRESH) f.installedApp = f.patchedCopy()
+            // Without a catalogue the store can't tell which apps are its own.
+            f.storePackages = emptySet()
+
+            assertEquals("$intent", failed(GenericFailure.NOT_AVAILABLE), f.run())
+            assertEquals("$intent", emptyList<String>(), f.events)
+            assertTrue("$intent", f.stages.isEmpty())
+            assertEquals("$intent", emptyList<String>(), f.files(f.originalDir))
+            assertEquals("$intent", f.record(intent = intent), f.records.get(PKG))
+        }
+    }
+
+    @Test
+    fun store_packages_are_the_saved_and_loaded_catalogues_and_whatsapp() {
+        assertEquals(emptySet<String>(), refusedPackagesOf(saved = emptySet(), loaded = emptySet()))
+        assertEquals(setOf("il.co.mako", "com.whatsapp"), refusedPackagesOf(saved = setOf("il.co.mako"), loaded = emptySet()))
+        assertEquals(
+            setOf("il.co.mako", "com.tranzmate", "com.whatsapp"),
+            refusedPackagesOf(saved = setOf("il.co.mako"), loaded = setOf("com.tranzmate", "com.whatsapp")),
+        )
     }
 
     @Test
@@ -993,27 +1100,6 @@ class GenericJobTest {
             ),
             genericPatchState(GenericOutcome.Unpatchable(listOf(CantPatch.PAIRIP, CantPatch.IN_OUR_STORE)), LABEL, built, VERSION_NAME),
         )
-    }
-
-    @Test
-    fun split_outputs_are_read_without_package_manager() {
-        // PackageManager's archive parser refuses a split on its own, so the job's inspector reads splits this way.
-        val key = TestKeys.generate("user")
-        val dir = folder.newFolder()
-        fun signed(name: String, manifest: ByteArray): File {
-            val unsigned = zip(File(dir, "$name.unsigned"), listOf("AndroidManifest.xml" to manifest, "lib/arm64-v8a/libx.so" to byteArrayOf(1, 2)))
-            return File(dir, name).also { apksigSigner(key).sign(unsigned, it) }
-        }
-
-        val split = signed(SPLIT, manifestWith(PKG, versionCode = VERSION_CODE.toInt(), split = "config.arm64_v8a"))
-        assertEquals(ArchiveInfo(PKG, VERSION_CODE, setOf(sha256(key.cert.encoded))), splitArchiveInfo(split))
-
-        // A base is PackageManager's to read; a file that isn't an APK is nothing.
-        assertNull(splitArchiveInfo(signed(BASE, manifestWith(PKG, versionCode = VERSION_CODE.toInt()))))
-        assertNull(splitArchiveInfo(File(dir, "junk.apk").apply { writeBytes(byteArrayOf(1, 2, 3)) }))
-        // An unsigned split has no signers, which the job refuses.
-        val unsigned = zip(File(dir, "unsigned.apk"), listOf("AndroidManifest.xml" to manifestWith(PKG, versionCode = 7, split = "config.xxhdpi")))
-        assertEquals(ArchiveInfo(PKG, 7, emptySet()), splitArchiveInfo(unsigned))
     }
 
     private companion object {

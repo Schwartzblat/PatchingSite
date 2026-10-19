@@ -123,7 +123,9 @@ class PatchService : Service() {
             PatchRegistry.clear(pkg)
             throw error
         } catch (error: Throwable) {
-            Log.e(TAG, "Patch job crashed for $pkg", error)
+            // A generic job's errors are logged by class only (see runGeneric).
+            if (mode == PatchMode.GENERIC) Log.e(TAG, "Generic patch job crashed for $pkg: ${error.javaClass.name}")
+            else Log.e(TAG, "Patch job crashed for $pkg", error)
             val reason = PatchFailure.FAILED
             val message = if (mode == PatchMode.GENERIC) GenericFailure.FAILED.message(name) else reason.message()
             PatchRegistry.update(pkg, PatchState.Failed(reason, message))
@@ -173,8 +175,9 @@ class PatchService : Service() {
         return when (outcome) {
             GenericOutcome.Built -> NotificationText("$name is ready to install", "Tap to open Patched Store and continue.")
             is GenericOutcome.Failed -> {
-                // The engine's and the server's messages carry no secrets; the token, password and key are never in a cause.
-                Log.w(TAG, "Generic patch failed for $pkg: ${outcome.reason}", outcome.cause)
+                // The cause's class, never its message: nothing a generic failure says goes to the log.
+                val from = outcome.cause?.let { ", from ${it.javaClass.name}" }.orEmpty()
+                Log.w(TAG, "Generic patch failed for $pkg: ${outcome.reason}$from")
                 afterFailure(outcome.reason.patchFailure, outcome.cause)
                 NotificationText("$name could not be patched", outcome.message)
             }
@@ -182,12 +185,13 @@ class PatchService : Service() {
         }
     }
 
-    /** From the generic record, the intent, else the last catalogue that loaded; never the network. */
-    private fun displayName(pkg: String, given: String?, mode: PatchMode): String {
-        if (mode == PatchMode.GENERIC) {
-            runCatching { container.genericRecords.get(pkg)?.label }.getOrNull()?.let { return it }
-        }
-        return given ?: container.appNames[pkg] ?: if (pkg == WHATSAPP) "WhatsApp" else pkg
+    /**
+     * From the intent, else the last catalogue that loaded; never the network nor the disk (this
+     * runs on the main thread too). A generic build's caller passes the app's label.
+     */
+    private fun displayName(pkg: String, given: String?, mode: PatchMode): String = when (mode) {
+        PatchMode.GENERIC -> given ?: pkg
+        PatchMode.GUIDE, PatchMode.UPDATE -> given ?: container.appNames[pkg] ?: if (pkg == WHATSAPP) "WhatsApp" else pkg
     }
 
     private fun finalFile(pkg: String, versionName: String, mode: PatchMode): File {
@@ -448,8 +452,8 @@ class PatchService : Service() {
 
         /**
          * [name] is the catalogue's display name for the notifications; null uses the last
-         * catalogue's name, then WhatsApp/the package. A generic build is named by its record's
-         * label. False when Android refused the start
+         * catalogue's name, then WhatsApp/the package; a generic build passes its record's label
+         * (null shows the package). False when Android refused the start
          * because the app is not in the foreground (see [foregroundStartAllowed]): nothing
          * runs, and the caller says so.
          */

@@ -11,8 +11,6 @@ import site.androidmod.patch.GenericPatchEngine
 import site.androidmod.patch.GenericPatchRequest
 import site.androidmod.patch.GenericPatchResult
 import site.androidmod.patch.GenericSource
-import site.androidmod.patch.ManifestPatcher
-import site.androidmod.patch.OfficialApk
 import site.androidmod.patch.PatchBundle
 import site.androidmod.patch.PatchException
 import site.androidmod.store.data.ApiException
@@ -21,6 +19,7 @@ import site.androidmod.store.data.isAuth
 import site.androidmod.store.data.isOutOfSpace
 import site.androidmod.store.data.isTransient
 import site.androidmod.store.data.needsSubscription
+import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.store.patch.ArchiveInfo
 import site.androidmod.store.patch.PATCH_MIN_SDK
 import site.androidmod.store.patch.PatchFailure
@@ -35,7 +34,6 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
-import java.util.zip.ZipFile
 
 /** Our server's part of a generic build (production: GenericApi, BundleCache and SigningKeyStore). */
 interface GenericServer {
@@ -113,29 +111,19 @@ sealed interface GenericOutcome {
     data class Unpatchable(val reasons: List<CantPatch>) : GenericOutcome
 }
 
+/**
+ * Our store's own apps, which generic patching refuses: the [saved] catalogue (the last one that
+ * loaded, kept across launches) and the one [loaded] in this process, and WhatsApp. Empty only when
+ * neither knows any app, which means no catalogue has loaded yet.
+ */
+fun refusedPackagesOf(saved: Set<String>, loaded: Set<String>): Set<String> {
+    val known = saved + loaded
+    return if (known.isEmpty()) emptySet() else known + WHATSAPP_PACKAGE
+}
+
 /** The words for an app the engine refused. */
 fun unpatchableMessage(label: String, reasons: List<CantPatch>): String =
     "$label can't be patched: ${reasons.joinToString(" ") { cantPatchText(it) }} Nothing was removed."
-
-/**
- * What a split APK says about itself: PackageManager's archive parser refuses a split on its own
- * ("Expected base APK, but found split"), so the job's inspector reads a split output here. Its
- * manifest's package and versionCode, and apksig's signers (the engine has verified each output's
- * signature already). Null for a base or a file that isn't an APK.
- */
-fun splitArchiveInfo(file: File): ArchiveInfo? = try {
-    val manifest = ZipFile(file).use { zip ->
-        zip.getEntry(MANIFEST)?.let { entry -> zip.getInputStream(entry).use { it.readBytes() } }
-    }
-    val facts = manifest?.let(ManifestPatcher::facts)
-    val versionCode = facts?.versionCode
-    if (facts?.split == null || versionCode == null) null
-    else ArchiveInfo(facts.packageName, versionCode, OfficialApk.signerCertSha256s(file))
-} catch (error: Exception) {
-    null
-}
-
-private const val MANIFEST = "AndroidManifest.xml"
 
 /** What PatchService publishes for [outcome]: a build is Ready at [builtDir]. */
 fun genericPatchState(outcome: GenericOutcome, label: String, builtDir: File, versionName: String): PatchState = when (outcome) {
@@ -176,8 +164,10 @@ class GenericJob(
         val originalDir = records.originalDir(packageName)
         val builtTmpDir = records.builtTmpDir(packageName)
         var label = packageName
-        // While true, original/ holds copies the record does not list: they are deleted, never kept.
-        var unrecordedCopies = false
+        // Set once this run writes into original/ or built/: at the end, whatever there the record
+        // on disk doesn't list is deleted, and whatever it lists stays, however the run ended.
+        var wroteOriginal = false
+        var wroteBuilt = false
         try {
             clearTemporary(builtTmpDir)
             if (!signedIn()) return failed(GenericFailure.SIGNED_OUT, label)
@@ -186,6 +176,9 @@ class GenericJob(
             label = record.label
             val intent = record.intent
             if (intent != GenericIntent.PATCH && intent != GenericIntent.REFRESH) return failed(GenericFailure.FAILED, label)
+            // Our store's own apps are refused; before any catalogue has loaded, which they are isn't known.
+            val refused = storePackages()
+            if (refused.isEmpty()) return failed(GenericFailure.NOT_AVAILABLE, label)
 
             // Still the app the record describes? No network until this holds for a PATCH.
             val app = blocking { installed(packageName) }
@@ -237,10 +230,9 @@ class GenericJob(
             if (shortfall > 0) return failed(GenericFailure.NOT_ENOUGH_SPACE, label, bytesNeeded = shortfall)
 
             if (saveFirst) {
-                unrecordedCopies = true
+                wroteOriginal = true
                 val saved = saveOriginal(installedApks, originalDir, onStage) ?: return failed(GenericFailure.FAILED, label)
                 record = blocking { update(packageName, intent) { it.copy(original = saved) } }
-                unrecordedCopies = false
             }
 
             // Fresh for every run.
@@ -264,7 +256,7 @@ class GenericJob(
                 deviceAbis = deviceAbis,
                 workDir = workDir,
                 outputDir = builtTmpDir,
-                refusedPackages = storePackages(),
+                refusedPackages = refused,
             )
             val result = try {
                 blocking { engine(request, announcing) }
@@ -285,6 +277,7 @@ class GenericJob(
                 if (!checksOut) return failed(GenericFailure.FAILED, label)
             }
 
+            wroteBuilt = true
             blocking {
                 val built = outputs.map { output ->
                     sync(output)
@@ -308,7 +301,23 @@ class GenericJob(
             return failureFor(error, label)
         } finally {
             clearTemporary(builtTmpDir)
-            if (unrecordedCopies) originalDir.deleteRecursively()
+            if (wroteOriginal || wroteBuilt) discardUnrecorded(packageName, wroteOriginal, wroteBuilt)
+        }
+    }
+
+    /** Deletes the copies and outputs this run wrote that the record on disk doesn't list. */
+    private fun discardUnrecorded(packageName: String, original: Boolean, built: Boolean) {
+        val onDisk = records.get(packageName)
+        if (original) keepOnly(records.originalDir(packageName), onDisk?.original.orEmpty())
+        if (built) keepOnly(records.builtDir(packageName), onDisk?.built.orEmpty())
+    }
+
+    private fun keepOnly(dir: File, listed: List<SavedApk>) {
+        val names = listed.mapTo(HashSet()) { it.name }
+        if (names.isEmpty()) {
+            dir.deleteRecursively()
+        } else {
+            dir.listFiles().orEmpty().filter { it.name !in names }.forEach { it.deleteRecursively() }
         }
     }
 

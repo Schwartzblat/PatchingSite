@@ -192,6 +192,8 @@ androidComponents {
 dependencies {
     implementation(project(":migrate"))
     implementation(project(":patch-engine"))
+    // Already in the APK through :patch-engine; the store reads split outputs' signatures with it too.
+    implementation(libs.apksig)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)

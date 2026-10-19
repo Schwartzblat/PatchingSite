@@ -41,8 +41,8 @@ data class GenericRecord(
 
 private val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
-/** One directory per package under [root] (filesDir/generic), holding record.json, original/ and built/. */
-class GenericRecords(private val root: File) {
+/** One directory per package under [root] (filesDir/generic), holding record.json, original/ and built/. Open for tests' put hooks. */
+open class GenericRecords(private val root: File) {
     private val json = Json { ignoreUnknownKeys = true }
 
     /** Unreadable record files are skipped, never deleted. */
@@ -52,7 +52,7 @@ class GenericRecords(private val root: File) {
     fun get(packageName: String): GenericRecord? = read(File(packageDir(packageName), RECORD))
 
     /** Atomic and synced to disk before it returns. */
-    fun put(record: GenericRecord) {
+    open fun put(record: GenericRecord) {
         writeAtomically(File(packageDir(record.packageName), RECORD), json.encodeToString(record).toByteArray())
     }
 
