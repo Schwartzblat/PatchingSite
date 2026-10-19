@@ -102,6 +102,7 @@ class GenericFixtures(private val tmp: TemporaryFolder) {
         classes: List<TinyClass> = appClasses,
         baseExtra: List<Pair<String, ByteArray>> = emptyList(),
         manifest: ByteArray = baseManifest,
+        pkg: String = PKG,
     ): List<File> {
         val dir = tmp.newFolder()
         val base = devSigned(
@@ -113,7 +114,7 @@ class GenericFixtures(private val tmp: TemporaryFolder) {
                 "assets/app.txt" to "app asset".toByteArray(),
             ) + baseExtra,
         )
-        fun split(name: String) = manifestWith(PKG, versionCode = 5, split = name)
+        fun split(name: String) = manifestWith(pkg, versionCode = 5, split = name)
         val abi = devSigned(
             dir, "split_config.arm64_v8a.apk",
             listOf("AndroidManifest.xml" to split("config.arm64_v8a"), "lib/arm64-v8a/libapp.so" to ByteArray(64) { 1 }),

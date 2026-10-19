@@ -65,7 +65,8 @@ class GenericPatchEngineTest {
         cert: String = sha(user.cert.encoded),
         sdk: Int = 36,
         abis: List<String> = listOf("arm64-v8a", "armeabi-v7a"),
-    ) = GenericPatchRequest(apks, source, bundle, token, cert, sdk, abis, work, out)
+        refused: Set<String> = emptySet(),
+    ) = GenericPatchRequest(apks, source, bundle, token, cert, sdk, abis, work, out, refused)
 
     private fun <T> open(f: File, block: (ZipFile) -> T): T = ZipFile.builder().setFile(f).get().use(block)
     private fun read(f: File, name: String): ByteArray? =
@@ -315,14 +316,41 @@ class GenericPatchEngineTest {
         )
     }
 
-    @Test fun leftoverGenericAuthorityRefusedBeforeAnyOutput() {
-        // The app itself declares a provider that still starts with "generic.": rewriting never touches the app's manifest.
+    @Test fun leftoverPlaceholderAuthorityRefusedBeforeAnyOutput() {
+        // The app already declares the bundle's provider under its placeholder authority, so the merge keeps it as it is.
+        val b = fx.bundle(additions = additionsWith("a.P" to "generic.one"))
         val appManifest = manifestWith(
-            PKG, versionCode = 5, versionName = "1.0", targetSdk = 34, providers = listOf("$PKG.Left" to "generic.leftover"),
+            PKG, versionCode = 5, versionName = "1.0", targetSdk = 34, providers = listOf("a.P" to "generic.one"),
         )
         val out = tmp.newFolder()
-        val e = refused<PatchException.BadBundle>(request(fx.app(manifest = appManifest), out))
-        assertTrue(e.message, "generic.leftover" in e.message!!)
+        val e = refused<PatchException.BadBundle>(request(fx.app(manifest = appManifest), out, bundle = b))
+        assertTrue(e.message, "generic.one" in e.message!!)
+        assertNothingLeft(out)
+    }
+
+    @Test fun patchesAnAppWithItsOwnGenericProvider() {
+        val appManifest = manifestWith(
+            PKG, versionCode = 5, versionName = "1.0", targetSdk = 34,
+            providers = listOf("generic.thirdparty.Provider" to "generic.thirdparty"),
+        )
+        val result = engine.patch(request(fx.app(manifest = appManifest)))
+        val found = ManifestPatcher.providerAuthorities(read(result.apks[0], "AndroidManifest.xml")!!)
+        assertTrue(found.toString(), "generic.thirdparty" in found)
+        assertTrue(found.toString(), "$PKG.com.smali_generator.InitProviderGeneric" in found)
+    }
+
+    @Test fun patchesAnAppNamedGenericDotSomething() {
+        val name = "generic.example.app"
+        val manifest = manifestWith(name, versionCode = 5, versionName = "1.0", targetSdk = 34)
+        val result = engine.patch(request(fx.app(manifest = manifest, pkg = name)))
+        val found = ManifestPatcher.providerAuthorities(read(result.apks[0], "AndroidManifest.xml")!!)
+        assertTrue(found.toString(), found.isNotEmpty() && found.all { it.startsWith("$name.") })
+    }
+
+    @Test fun refusesAPackageInRefusedPackages() {
+        val out = tmp.newFolder()
+        val e = refused<PatchException.Unpatchable>(request(app(), out, refused = setOf("other.app", PKG)))
+        assertEquals(listOf(CantPatch.IN_OUR_STORE), e.reasons)
         assertNothingLeft(out)
     }
 

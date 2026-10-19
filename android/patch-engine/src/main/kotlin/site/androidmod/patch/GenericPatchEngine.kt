@@ -10,7 +10,7 @@ import org.apache.commons.compress.archivers.zip.ZipFile
  * One generic patch run. [apks] are the base, then its splits; [source] says whether they are the app as
  * installed from elsewhere or our own patched copy (a Refresh). Every output must be signed by the cert whose
  * SHA-256 is [signerCertSha256] and verify on [deviceSdk]. Intermediates go in [workDir]; the outputs go in
- * [outputDir], each named as its input. [paywallToken] is a secret: [toString] leaves it out.
+ * [outputDir], each named as its input. An app in [refusedPackages] (our own store's apps) is refused. [paywallToken] is a secret: [toString] leaves it out.
  */
 data class GenericPatchRequest(
     val apks: List<File>,
@@ -22,6 +22,7 @@ data class GenericPatchRequest(
     val deviceAbis: List<String>,
     val workDir: File,
     val outputDir: File,
+    val refusedPackages: Set<String> = emptySet(),
 ) {
     override fun toString() =
         "GenericPatchRequest(apks=$apks, source=$source, bundle=$bundle, signerCertSha256=$signerCertSha256, " +
@@ -74,17 +75,22 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         val facts = GenericChecks.inspect(r.apks, r.deviceSdk, r.deviceAbis, r.source, drop)
         val scan = AdScan.scan(r.apks, catalog, drop)
         val fromScan = listOfNotNull(CantPatch.PAIRIP.takeIf { scan.pairip }, CantPatch.ALREADY_PATCHED.takeIf { scan.patchedBefore })
-        val reasons = (facts.cantPatch + fromScan).distinct().sorted()
+        val ours = listOfNotNull(CantPatch.IN_OUR_STORE.takeIf { facts.packageName in r.refusedPackages })
+        val reasons = (facts.cantPatch + fromScan + ours).distinct().sorted()
         if (reasons.isNotEmpty()) throw PatchException.Unpatchable(reasons)
         val libs = checkNotNull(facts.libTarget) { "no hook ABI without a reason" }
 
-        val manifest = ManifestPatcher.merge(
-            appManifest,
-            ManifestPatcher.rewriteAuthorities(bundle.bytes(ADDITIONS), AUTHORITY_PREFIX, "${facts.packageName}."),
-        )
+        val additions = bundle.bytes(ADDITIONS)
+        val newPrefix = "${facts.packageName}."
+        val manifest = ManifestPatcher.merge(appManifest, ManifestPatcher.rewriteAuthorities(additions, AUTHORITY_PREFIX, newPrefix))
         // A leftover placeholder authority would fail the install (INSTALL_FAILED_CONFLICTING_PROVIDER) after the original is gone.
-        ManifestPatcher.providerAuthorities(manifest).firstOrNull { it.startsWith(AUTHORITY_PREFIX) }?.let {
-            throw PatchException.BadBundle("provider authority $it was not rewritten to ${facts.packageName}")
+        // Only the bundle's own placeholders count: the app may declare "generic." authorities, and an app named
+        // "generic" is rewritten onto the same prefix.
+        if (newPrefix != AUTHORITY_PREFIX) {
+            val placeholders = ManifestPatcher.providerAuthorities(additions).filter { it.startsWith(AUTHORITY_PREFIX) }.toSet()
+            ManifestPatcher.providerAuthorities(manifest).firstOrNull { it in placeholders }?.let {
+                throw PatchException.BadBundle("provider authority $it was not rewritten to ${facts.packageName}")
+            }
         }
         val inputs = BuildInputs(
             manifest = manifest,

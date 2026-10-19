@@ -4,7 +4,7 @@ import java.io.File
 import java.util.zip.ZipFile
 
 /** Why an app can't be patched. Declaration order is the order reasons are listed in. */
-enum class CantPatch { PAIRIP, SHARED_USER_ID, TARGET_SDK_TOO_OLD, ALREADY_PATCHED, NEEDS_TRANSLATION, UNSUPPORTED_ABI }
+enum class CantPatch { PAIRIP, SHARED_USER_ID, TARGET_SDK_TOO_OLD, ALREADY_PATCHED, NEEDS_TRANSLATION, UNSUPPORTED_ABI, IN_OUR_STORE }
 
 /** Whether the APKs being inspected are the app as installed from elsewhere, or our own patched copy. */
 enum class GenericSource { ORIGINAL, PATCHED }
