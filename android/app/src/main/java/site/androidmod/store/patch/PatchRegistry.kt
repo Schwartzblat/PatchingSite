@@ -20,7 +20,12 @@ sealed interface PatchState {
     data class Ready(val file: File, val versionName: String) : PatchState
     data object Installing : PatchState
     data object Installed : PatchState
-    data class Failed(val reason: PatchFailure, val message: String) : PatchState
+
+    /**
+     * [retryHelps] is false when running the job again would meet the same refusal until the
+     * customer changes something first: a generic swap's app, or its saved original.
+     */
+    data class Failed(val reason: PatchFailure, val message: String, val retryHelps: Boolean = true) : PatchState
 }
 
 /**

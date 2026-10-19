@@ -53,7 +53,6 @@ import site.androidmod.store.ui.library.InstallPermissionBanner
 import site.androidmod.store.ui.move.MainButton
 import site.androidmod.store.ui.move.Progress
 import site.androidmod.store.ui.move.WarningBox
-import site.androidmod.store.ui.patch.patchFailureOffersRetry
 import site.androidmod.store.ui.patch.patchProgress
 import site.androidmod.store.ui.theme.PapAccentSoft
 import site.androidmod.store.ui.theme.PapDanger
@@ -161,7 +160,7 @@ private fun StepActions(state: RunState, phase: GenericPhase, viewModel: RunView
             is PatchState.Failed -> {
                 ErrorBanner(job.message)
                 if (job.reason == PatchFailure.NEEDS_SUBSCRIPTION) MainButton("See plans", onClick = onSubscribe)
-                if (patchFailureOffersRetry(job.reason)) MainButton("Try again", enabled = idle, onClick = viewModel::onRetry)
+                if (jobOffersRetry(job)) MainButton("Try again", enabled = idle, onClick = viewModel::onRetry)
                 SecondaryButton("Stop", enabled = idle, onClick = viewModel::onStop)
             }
             // Not running: the store was closed meanwhile, or Android didn't let the job start.
@@ -183,9 +182,8 @@ private fun StepActions(state: RunState, phase: GenericPhase, viewModel: RunView
         }
         GenericPhase.InstallPatched -> {
             MainButton(installing ?: "Install the patched copy", enabled = idle, onClick = viewModel::onInstallPatched)
-            if (state.installFailed) {
-                SecondaryButton("Put the original back", enabled = idle, onClick = viewModel::onPutBack)
-            }
+            // Always valid here: the original is saved, and nothing is installed.
+            SecondaryButton("Put the original back", enabled = idle, onClick = viewModel::onPutBack)
         }
         GenericPhase.InstallUpdate -> {
             MainButton(installing ?: "Install the update", enabled = idle, onClick = viewModel::onInstallPatched)

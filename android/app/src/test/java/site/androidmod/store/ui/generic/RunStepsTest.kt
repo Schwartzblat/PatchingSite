@@ -2,6 +2,8 @@ package site.androidmod.store.ui.generic
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
@@ -118,6 +120,21 @@ class RunStepsTest {
             statuses(GenericIntent.PATCH, GenericPhase.SaveAndBuild, failed, originalSaved = true),
         )
         assertEquals(listOf(FAILED, TODO), statuses(GenericIntent.REFRESH, GenericPhase.SaveAndBuild, failed))
+    }
+
+    @Test
+    fun try_again_is_offered_only_where_it_can_help() {
+        assertTrue(jobOffersRetry(PatchState.Failed(PatchFailure.NETWORK, "Network error. Check your connection and try again.")))
+        assertTrue(jobOffersRetry(PatchState.Failed(PatchFailure.NEEDS_SUBSCRIPTION, "You need an active plan to patch apps.")))
+        assertTrue(jobOffersRetry(PatchState.Failed(PatchFailure.FAILED, "Patching failed. Nothing was removed.")))
+        // The phone can't patch at all.
+        assertFalse(jobOffersRetry(PatchState.Failed(PatchFailure.ANDROID_TOO_OLD, "Patching apps needs Android 13 or newer.")))
+        // The same refusal again, until the customer changes something.
+        assertFalse(
+            jobOffersRetry(
+                PatchState.Failed(PatchFailure.FAILED, "The saved original of Example is damaged. Stop, then pick Example again.", retryHelps = false),
+            ),
+        )
     }
 
     @Test

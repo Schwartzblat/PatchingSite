@@ -95,12 +95,21 @@ class PickerViewModel(
         filterRows(all.value, "").filter { it.badge == PickerBadge.Checking }.forEach { row ->
             viewModelScope.launch {
                 val resolved = gate.withPermit {
-                    withContext(io) { badge(row.app, inspectSafely { inspect(row.app.apks) }, obb(row.app.packageName)) }
+                    withContext(io) { badge(row.app, inspectSafely { inspect(row.app.apks) }, obbSafely(row.app.packageName)) }
                 }
                 all.update { rows -> rows.map { if (it.app.packageName == row.app.packageName) it.copy(badge = resolved) else it } }
                 publish()
             }
         }
+    }
+
+    /** Whether the app keeps files in Android/obb; null (unknown, which doesn't block) when that can't be read. */
+    private fun obbSafely(packageName: String): Boolean? = try {
+        obb(packageName)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        null
     }
 
     /** Rows land from several coroutines; each publish reads the latest rows. */

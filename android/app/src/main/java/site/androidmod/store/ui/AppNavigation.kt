@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +29,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import site.androidmod.store.R
 import site.androidmod.store.StoreApp
 import site.androidmod.store.download.DownloadService
@@ -267,9 +270,12 @@ fun AppNavigation() {
         Routes.GENERIC_PICK -> "Choose an app"
         Routes.GENERIC_CONFIRM -> "Patch an app"
         Routes.GENERIC_RUN -> {
-            // The record's label, once per app: the app itself may be uninstalled mid-swap.
+            // The record's label (the app itself may be uninstalled mid-swap), read off the main thread.
             val pkg = backStackEntry?.arguments?.getString("package").orEmpty()
-            remember(pkg) { runCatching { container.genericRecords.get(pkg)?.label }.getOrNull() } ?: pkg
+            val label by produceState("", pkg) {
+                value = withContext(Dispatchers.IO) { runCatching { container.genericRecords.get(pkg)?.label }.getOrNull() } ?: pkg
+            }
+            label
         }
         Routes.APP_DETAIL -> {
             val pkg = backStackEntry?.arguments?.getString("package").orEmpty()

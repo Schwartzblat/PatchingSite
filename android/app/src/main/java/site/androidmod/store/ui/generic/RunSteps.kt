@@ -4,8 +4,12 @@ import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.patch.PatchStage
 import site.androidmod.store.patch.PatchState
+import site.androidmod.store.ui.patch.patchFailureOffersRetry
 
 enum class StepStatus { TODO, ACTIVE, DONE, FAILED }
+
+/** Whether a failed job shows "Try again": not where the same run would only fail the same way. */
+fun jobOffersRetry(job: PatchState.Failed): Boolean = job.retryHelps && patchFailureOffersRetry(job.reason)
 
 data class RunStep(val title: String, val status: StepStatus)
 

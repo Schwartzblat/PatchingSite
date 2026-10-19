@@ -18,6 +18,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -43,6 +44,26 @@ suspend fun confirmPatch(
 ): Boolean {
     val record = withContext(io) { begin(app) }
     return start(record.packageName, record.label)
+}
+
+/** When the job couldn't be started, or recording the app failed. */
+internal const val PATCHING_NOT_STARTED = "Patching couldn't start. Try again."
+
+/**
+ * Runs [confirm] for [app]: null when the run screen should open (the record is there, the job
+ * started or not); otherwise what to show. A refusal (begin's IllegalStateException)
+ * shows its own words; anything else, such as a record that couldn't be written, says to try again.
+ * Cancellation still propagates.
+ */
+suspend fun confirmMessage(app: InstalledPackage, confirm: suspend (InstalledPackage) -> Boolean): String? = try {
+    confirm(app)
+    null
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (refused: IllegalStateException) {
+    refused.message ?: PATCHING_NOT_STARTED
+} catch (error: Exception) {
+    PATCHING_NOT_STARTED
 }
 
 /**
@@ -95,18 +116,17 @@ fun ConfirmScreen(
         }
         ErrorBanner(error, modifier = Modifier.padding(top = 8.dp))
         MainButton("Patch ${app.label}", enabled = !working) {
+            // A second tap before the button redraws disabled.
+            if (working) return@MainButton
             working = true
             error = null
             scope.launch {
-                try {
-                    confirm(app)
-                    // Started or not, the record is there: the run screen shows the job, or offers Continue.
-                    onStarted(app.packageName)
-                } catch (refused: IllegalStateException) {
-                    error = refused.message
+                val message = try {
+                    confirmMessage(app, confirm)
                 } finally {
                     working = false
                 }
+                if (message == null) onStarted(app.packageName) else error = message
             }
         }
     }

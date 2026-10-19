@@ -52,14 +52,17 @@ enum class GenericFailure {
     SIGNED_OUT, ANDROID_TOO_OLD, NEEDS_SUBSCRIPTION, NOT_AVAILABLE, STORE_UPDATE_REQUIRED,
     NOT_ENOUGH_SPACE, NETWORK, CHANGED, NOT_OUR_COPY,
 
-    /** A resumed patch found its saved original no longer matching its recorded hashes. */
+    /** The saved original no longer matches its recorded hashes, and the app is installed: a resumed patch, or a Refresh. */
     DAMAGED_ORIGINAL,
+
+    /** A resumed patch's saved original is damaged and the app is gone: only Play can bring it back. */
+    DAMAGED_ORIGINAL_APP_REMOVED,
     FAILED,
 }
 
 /**
  * What the user is told. [label] is the app's name; [bytesNeeded] is NOT_ENOUGH_SPACE's shortfall, -1 when
- * unknown; [intent] words CHANGED for a Refresh, where the app changed after it was patched.
+ * unknown; [intent] words CHANGED and DAMAGED_ORIGINAL for a Refresh, which runs on an app already patched.
  */
 fun GenericFailure.message(label: String, bytesNeeded: Long = -1, intent: GenericIntent? = null): String = when (this) {
     GenericFailure.SIGNED_OUT -> "Sign in again to continue."
@@ -76,7 +79,13 @@ fun GenericFailure.message(label: String, bytesNeeded: Long = -1, intent: Generi
         "$label changed since you picked it. Go back and pick it again."
     }
     GenericFailure.NOT_OUR_COPY -> "The installed $label isn't our patched copy, so it can't be refreshed."
-    GenericFailure.DAMAGED_ORIGINAL -> "The saved original of $label is damaged. Stop, then pick $label again."
+    GenericFailure.DAMAGED_ORIGINAL -> if (intent == GenericIntent.REFRESH) {
+        "The saved original of $label is damaged. Delete it from the Library, then Refresh again."
+    } else {
+        "The saved original of $label is damaged. Stop, then pick $label again."
+    }
+    GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED ->
+        "The saved original of $label is damaged. Reinstall $label from Google Play, then Stop."
     GenericFailure.FAILED -> "Patching failed. Nothing was removed. Try again, or send us a report."
 }
 
@@ -90,8 +99,19 @@ val GenericFailure.patchFailure: PatchFailure
         GenericFailure.STORE_UPDATE_REQUIRED -> PatchFailure.STORE_UPDATE_REQUIRED
         GenericFailure.NOT_ENOUGH_SPACE -> PatchFailure.NOT_ENOUGH_SPACE
         GenericFailure.NETWORK -> PatchFailure.NETWORK
-        GenericFailure.CHANGED, GenericFailure.NOT_OUR_COPY, GenericFailure.DAMAGED_ORIGINAL, GenericFailure.FAILED ->
-            PatchFailure.FAILED
+        GenericFailure.CHANGED, GenericFailure.NOT_OUR_COPY, GenericFailure.DAMAGED_ORIGINAL,
+        GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED, GenericFailure.FAILED -> PatchFailure.FAILED
+    }
+
+/**
+ * Whether running the job again can succeed before the customer changes something. Not for the
+ * app or its saved copy failing the job's checks: the next run checks the same facts.
+ */
+val GenericFailure.retryHelps: Boolean
+    get() = when (this) {
+        GenericFailure.CHANGED, GenericFailure.NOT_OUR_COPY, GenericFailure.DAMAGED_ORIGINAL,
+        GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED -> false
+        else -> true
     }
 
 sealed interface GenericOutcome {
@@ -140,8 +160,10 @@ fun unpatchableMessage(label: String, reasons: List<CantPatch>): String =
 /** What PatchService publishes for [outcome]: a build is Ready at [builtDir]. */
 fun genericPatchState(outcome: GenericOutcome, label: String, builtDir: File, versionName: String): PatchState = when (outcome) {
     GenericOutcome.Built -> PatchState.Ready(builtDir, versionName)
-    is GenericOutcome.Failed -> PatchState.Failed(outcome.reason.patchFailure, outcome.message)
-    is GenericOutcome.Unpatchable -> PatchState.Failed(PatchFailure.FAILED, unpatchableMessage(label, outcome.reasons))
+    is GenericOutcome.Failed -> PatchState.Failed(outcome.reason.patchFailure, outcome.message, outcome.reason.retryHelps)
+    // The engine refuses the same app the same way every time.
+    is GenericOutcome.Unpatchable ->
+        PatchState.Failed(PatchFailure.FAILED, unpatchableMessage(label, outcome.reasons), retryHelps = false)
 }
 
 /**
@@ -210,8 +232,12 @@ class GenericJob(
                 }
             }
             if (fromSaved && !blocking { savedCopiesIntact(originalDir, record.original) }) {
-                // A patch resuming from its copy: Stop deletes it while the original is still installed.
-                return failed(if (intent == GenericIntent.PATCH) GenericFailure.DAMAGED_ORIGINAL else GenericFailure.FAILED, label)
+                return when {
+                    intent == GenericIntent.REFRESH -> failed(GenericFailure.DAMAGED_ORIGINAL, label, intent = intent)
+                    // Stop keeps the copy until the original is installed again.
+                    app == null -> failed(GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED, label)
+                    else -> failed(GenericFailure.DAMAGED_ORIGINAL, label)
+                }
             }
 
             // The engine reads the saved original, or for a Refresh without one, the installed patched copy.

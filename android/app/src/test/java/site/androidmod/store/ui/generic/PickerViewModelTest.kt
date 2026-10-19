@@ -67,13 +67,14 @@ class PickerViewModelTest {
     private fun viewModel(
         listApps: () -> List<InstalledPackage> = { apps },
         inspect: (List<File>) -> ApkFacts = ::inspectFake,
+        obb: (String) -> Boolean? = { false },
         storePackages: () -> Set<String> = { setOf("com.whatsapp", "com.keshet.mako.VOD") },
         tested: () -> Set<String>? = { setOf("com.example.tested") },
         io: CoroutineDispatcher = pool,
     ) = PickerViewModel(
         listApps = listApps,
         inspect = inspect,
-        obb = { false },
+        obb = obb,
         storePackages = storePackages,
         tested = tested,
         sharedCerts = { setOf("shared") },
@@ -194,6 +195,21 @@ class PickerViewModelTest {
         val state = model.state.first { !it.loading && it.rows.none { row -> row.badge == PickerBadge.Checking } }
         assertNull(state.error)
         assertEquals(PickerBadge.NotTested, state.badgeOf("com.example.tested"))
+    }
+
+    @Test
+    fun an_unreadable_obb_folder_is_unknown() = runTest {
+        val model = viewModel(
+            obb = { pkg -> if (pkg == "com.example.other") throw SecurityException("no access") else true },
+            io = UnconfinedTestDispatcher(testScheduler),
+        )
+        val state = model.state.first { !it.loading && it.rows.none { row -> row.badge == PickerBadge.Checking } }
+        // Unknown does not block; a known obb folder does.
+        assertEquals(PickerBadge.NotTested, state.badgeOf("com.example.other"))
+        assertEquals(
+            PickerBadge.CantPatch(listOf("It keeps extra data in Android/obb, which Android deletes with the app.")),
+            state.badgeOf("com.example.tested"),
+        )
     }
 
     @Test

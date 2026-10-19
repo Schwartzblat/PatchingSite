@@ -2,6 +2,7 @@ package site.androidmod.store.ui.generic
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -79,8 +80,6 @@ data class RunState(
     val stillInstalled: Boolean = false,
     /** One of the screen's steps is running: a flow call or an install. */
     val busy: Boolean = false,
-    /** The last install of the patched copy failed: Put the original back is offered beside it. */
-    val installFailed: Boolean = false,
     val needsInstallPermission: Boolean = false,
     /** Why the last step didn't happen. */
     val message: String? = null,
@@ -165,7 +164,7 @@ class RunViewModel(
 
     /** "Try again" after a failed job, or "Continue" when none is running. */
     fun onRetry() = act {
-        if (startJob(packageName, _state.value.label)) null else JOB_NOT_STARTED
+        if (startJob(packageName, _state.value.label)) null else PATCHING_NOT_STARTED
     }
 
     /** "Install the patched copy", or for a Refresh "Install the update". */
@@ -174,7 +173,7 @@ class RunViewModel(
     /** "Put the original back" while putting it back. */
     fun onInstallOriginal() = act { install(original = true) }
 
-    /** "Put the original back" after the patched copy didn't install: the original is saved, so it goes back in. */
+    /** "Put the original back" while the patched copy waits to install: the original is saved, so it goes back in. */
     fun onPutBack() = act {
         withContext(io) { flow.startRestore(packageName) } ?: run {
             read()
@@ -184,7 +183,8 @@ class RunViewModel(
 
     /**
      * Runs one of the customer's steps, unless one is running or Android's uninstall dialog is up.
-     * [step] returns why it didn't happen, or null; the phone is read again after it.
+     * [step] returns why it didn't happen, or null; the phone is read again after it. A step that
+     * throws (a record write on a full disk, say) says so instead of crashing; the read after it shows where the swap is.
      */
     private fun act(step: suspend () -> String?) {
         val current = _state.value
@@ -193,6 +193,10 @@ class RunViewModel(
         viewModelScope.launch {
             val message = try {
                 step()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                STEP_FAILED
             } finally {
                 _state.update { it.copy(busy = false) }
             }
@@ -207,7 +211,6 @@ class RunViewModel(
             return null
         }
         val outcome = if (original) flow.installOriginal(packageName) else flow.installPatched(packageName)
-        _state.update { it.copy(installFailed = !original && outcome is InstallOutcome.Failure) }
         return (outcome as? InstallOutcome.Failure)?.message
     }
 
@@ -215,8 +218,16 @@ class RunViewModel(
         val (record, phase) = withContext(io) {
             val record = flow.record(packageName)
             val phase = record?.let { flow.phase(packageName) }
-            // Refused while an install of the app still reports; the read after it ends finishes it.
-            if (phase == GenericPhase.Patched || phase == GenericPhase.Restored) flow.finish(packageName)
+            // Refused while an install of the app still reports, or failing to write: the next read finishes it.
+            if (phase == GenericPhase.Patched || phase == GenericPhase.Restored) {
+                try {
+                    flow.finish(packageName)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    // The phone already shows the swap done.
+                }
+            }
             record to phase
         }
         _state.update { current ->
@@ -238,6 +249,6 @@ class RunViewModel(
     }
 
     private companion object {
-        const val JOB_NOT_STARTED = "Patching couldn't start. Try again."
+        const val STEP_FAILED = "That step didn't work. Try again."
     }
 }

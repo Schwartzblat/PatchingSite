@@ -486,6 +486,45 @@ class GenericJobTest {
             assertEquals(name, f.record(original = saved), f.records.get(PKG))
             f.assertNoTemporaryFiles()
         }
+
+        // Removed since: Stop needs the original installed again, so the way on is Play.
+        for ((name, damage) in cases) {
+            val f = fixture()
+            val saved = f.savedByEarlierRun()
+            f.records.put(f.record(original = saved))
+            f.installedApp = null
+            damage(f)
+
+            val outcome = f.run()
+            assertEquals(name, failed(GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED), outcome)
+            assertEquals(
+                name,
+                "The saved original of Example is damaged. Reinstall Example from Google Play, then Stop.",
+                (outcome as GenericOutcome.Failed).message,
+            )
+            assertTrue(name, f.requests.isEmpty())
+            assertFalse(name, "token" in f.events)
+            assertEquals(name, f.record(original = saved), f.records.get(PKG))
+            f.assertNoTemporaryFiles()
+        }
+    }
+
+    @Test
+    fun refresh_refuses_a_damaged_saved_original() = runTest {
+        val f = fixture()
+        val saved = f.savedByEarlierRun()
+        val before = f.record(intent = GenericIntent.REFRESH, original = saved, patchedBundleId = "old-bundle")
+        f.records.put(before)
+        f.installedApp = f.patchedCopy()
+        RandomAccessFile(File(f.originalDir, SPLIT), "rw").use { file -> file.write('X'.code) }
+
+        val outcome = f.run()
+        assertEquals(GenericFailure.DAMAGED_ORIGINAL, (outcome as GenericOutcome.Failed).reason)
+        assertEquals("The saved original of Example is damaged. Delete it from the Library, then Refresh again.", outcome.message)
+        assertTrue(f.requests.isEmpty())
+        assertFalse("token" in f.events)
+        assertEquals(before, f.records.get(PKG))
+        f.assertNoTemporaryFiles()
     }
 
     @Test
@@ -1087,6 +1126,14 @@ class GenericJobTest {
             GenericFailure.DAMAGED_ORIGINAL.message(LABEL),
         )
         assertEquals(
+            "The saved original of Example is damaged. Delete it from the Library, then Refresh again.",
+            GenericFailure.DAMAGED_ORIGINAL.message(LABEL, intent = GenericIntent.REFRESH),
+        )
+        assertEquals(
+            "The saved original of Example is damaged. Reinstall Example from Google Play, then Stop.",
+            GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED.message(LABEL),
+        )
+        assertEquals(
             "The installed Example isn't our patched copy, so it can't be refreshed.",
             GenericFailure.NOT_OUR_COPY.message(LABEL),
         )
@@ -1098,30 +1145,39 @@ class GenericJobTest {
         val built = File("/files/generic/$PKG/built")
         assertEquals(PatchState.Ready(built, VERSION_NAME), genericPatchState(GenericOutcome.Built, LABEL, built, VERSION_NAME))
 
+        // The failure, and whether running the job again can help before the customer changes something.
         val expected = mapOf(
-            GenericFailure.SIGNED_OUT to PatchFailure.SIGNED_OUT,
-            GenericFailure.ANDROID_TOO_OLD to PatchFailure.ANDROID_TOO_OLD,
-            GenericFailure.NEEDS_SUBSCRIPTION to PatchFailure.NEEDS_SUBSCRIPTION,
-            GenericFailure.NOT_AVAILABLE to PatchFailure.NOT_SUPPORTED_YET,
-            GenericFailure.STORE_UPDATE_REQUIRED to PatchFailure.STORE_UPDATE_REQUIRED,
-            GenericFailure.NOT_ENOUGH_SPACE to PatchFailure.NOT_ENOUGH_SPACE,
-            GenericFailure.NETWORK to PatchFailure.NETWORK,
-            GenericFailure.CHANGED to PatchFailure.FAILED,
-            GenericFailure.NOT_OUR_COPY to PatchFailure.FAILED,
-            GenericFailure.DAMAGED_ORIGINAL to PatchFailure.FAILED,
-            GenericFailure.FAILED to PatchFailure.FAILED,
+            GenericFailure.SIGNED_OUT to (PatchFailure.SIGNED_OUT to true),
+            GenericFailure.ANDROID_TOO_OLD to (PatchFailure.ANDROID_TOO_OLD to true),
+            GenericFailure.NEEDS_SUBSCRIPTION to (PatchFailure.NEEDS_SUBSCRIPTION to true),
+            GenericFailure.NOT_AVAILABLE to (PatchFailure.NOT_SUPPORTED_YET to true),
+            GenericFailure.STORE_UPDATE_REQUIRED to (PatchFailure.STORE_UPDATE_REQUIRED to true),
+            GenericFailure.NOT_ENOUGH_SPACE to (PatchFailure.NOT_ENOUGH_SPACE to true),
+            GenericFailure.NETWORK to (PatchFailure.NETWORK to true),
+            GenericFailure.CHANGED to (PatchFailure.FAILED to false),
+            GenericFailure.NOT_OUR_COPY to (PatchFailure.FAILED to false),
+            GenericFailure.DAMAGED_ORIGINAL to (PatchFailure.FAILED to false),
+            GenericFailure.DAMAGED_ORIGINAL_APP_REMOVED to (PatchFailure.FAILED to false),
+            GenericFailure.FAILED to (PatchFailure.FAILED to true),
         )
         assertEquals(GenericFailure.entries.toSet(), expected.keys)
-        for ((failure, patchFailure) in expected) {
+        for ((failure, mapped) in expected) {
+            val (patchFailure, retryHelps) = mapped
             val outcome = GenericOutcome.Failed(failure, failure.message(LABEL, 1L shl 20), bytesNeeded = 1L shl 20)
-            assertEquals("$failure", PatchState.Failed(patchFailure, outcome.message), genericPatchState(outcome, LABEL, built, VERSION_NAME))
+            assertEquals(
+                "$failure",
+                PatchState.Failed(patchFailure, outcome.message, retryHelps),
+                genericPatchState(outcome, LABEL, built, VERSION_NAME),
+            )
         }
 
+        // The engine's refusal is the app's, every time.
         assertEquals(
             PatchState.Failed(
                 PatchFailure.FAILED,
                 "Example can't be patched: It uses Google's anti-tamper check (PairIP), so a patched copy won't start. " +
                     "It's in our store. Nothing was removed.",
+                retryHelps = false,
             ),
             genericPatchState(GenericOutcome.Unpatchable(listOf(CantPatch.PAIRIP, CantPatch.IN_OUR_STORE)), LABEL, built, VERSION_NAME),
         )

@@ -1,6 +1,13 @@
 package site.androidmod.store.ui.generic
 
 import java.io.File
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,6 +62,12 @@ class RunViewModelTest {
         var installOriginalOutcome: InstallOutcome = InstallOutcome.Success
         var afterRestore: () -> Unit = {}
 
+        /** Thrown by every record write (askedToUninstall, finish, stop, startRestore), as a full disk would. */
+        var writeError: Exception? = null
+
+        /** Runs inside askedToUninstall, on the flow's thread. */
+        var whileAsking: () -> Unit = {}
+
         /** Every call that could change something, in order; reads are not listed. */
         val calls = mutableListOf<String>()
         var reads = 0
@@ -64,6 +77,8 @@ class RunViewModelTest {
 
         override fun askedToUninstall(packageName: String): String? {
             calls += "askedToUninstall"
+            whileAsking()
+            writeError?.let { throw it }
             return uninstallAnswer
         }
 
@@ -79,15 +94,18 @@ class RunViewModelTest {
 
         override fun finish(packageName: String) {
             calls += "finish"
+            writeError?.let { throw it }
         }
 
         override fun stop(packageName: String): Boolean {
             calls += "stop"
+            writeError?.let { throw it }
             return stopAnswer
         }
 
         override fun startRestore(packageName: String): String? {
             calls += "startRestore"
+            writeError?.let { throw it }
             if (restoreAnswer == null) afterRestore()
             return restoreAnswer
         }
@@ -98,14 +116,14 @@ class RunViewModelTest {
     private val forgotten = mutableListOf<String>()
     private var installAllowed = true
 
-    private fun TestScope.model(flow: FakeFlow) = RunViewModel(
+    private fun TestScope.model(flow: FakeFlow, io: CoroutineDispatcher = UnconfinedTestDispatcher(testScheduler)) = RunViewModel(
         packageName = PKG,
         flow = flow,
         jobs = jobs,
         startJob = { pkg, label -> started += pkg to label; true },
         forgetJob = { forgotten += it },
         canInstall = { installAllowed },
-        io = UnconfinedTestDispatcher(testScheduler),
+        io = io,
     )
 
     private fun TestScope.eventsOf(model: RunViewModel): List<RunEvent> {
@@ -138,6 +156,68 @@ class RunViewModelTest {
         model.onRemove()
         assertEquals(listOf("askedToUninstall", "askedToUninstall"), flow.calls)
         assertEquals(1, events.size)
+    }
+
+    @Test
+    fun a_second_remove_while_the_first_is_asked_sends_nothing() = runTest {
+        val flow = FakeFlow(GenericPhase.RemoveOriginal(askedBefore = false))
+        val asking = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        flow.whileAsking = {
+            asking.countDown()
+            release.await(5, TimeUnit.SECONDS)
+        }
+        val pool = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        try {
+            val model = model(flow, io = pool)
+            val events = eventsOf(model)
+
+            model.onRemove()
+            assertTrue(asking.await(5, TimeUnit.SECONDS))
+            // The second tap lands while the first is still being asked.
+            model.onRemove()
+            model.onStop()
+            release.countDown()
+
+            model.state.first { !it.busy && it.awaitingUninstall }
+            assertEquals(listOf("askedToUninstall"), flow.calls)
+            assertEquals(listOf(RunEvent.LaunchUninstall(PKG)), events)
+        } finally {
+            pool.close()
+        }
+    }
+
+    @Test
+    fun a_failed_write_shows_a_message_instead_of_crashing() = runTest {
+        val failure = "That step didn't work. Try again."
+        val removing = FakeFlow(GenericPhase.RemoveOriginal(askedBefore = false))
+        val model = model(removing)
+        val events = eventsOf(model)
+        removing.writeError = IOException("No space left on device")
+
+        model.onRemove()
+        assertEquals(failure, model.state.value.message)
+        assertFalse(model.state.value.busy)
+        assertFalse(model.state.value.awaitingUninstall)
+        model.onStop()
+        assertEquals(failure, model.state.value.message)
+        assertTrue(events.isEmpty())
+        assertTrue(forgotten.isEmpty())
+
+        val installing = FakeFlow(GenericPhase.InstallPatched)
+        val putBack = model(installing)
+        installing.writeError = IOException("No space left on device")
+        putBack.onPutBack()
+        assertEquals(failure, putBack.state.value.message)
+        assertEquals(listOf("startRestore"), installing.calls)
+
+        // Finishing is tried again on the next read; the phone already shows the swap done.
+        val patched = FakeFlow(GenericPhase.Patched)
+        patched.writeError = IOException("No space left on device")
+        val done = model(patched)
+        assertTrue(done.state.value.done)
+        done.refresh()
+        assertEquals(listOf("finish", "finish"), patched.calls)
     }
 
     @Test
@@ -251,7 +331,13 @@ class RunViewModelTest {
     }
 
     @Test
-    fun put_back_after_a_failed_install_restores_then_installs_the_original() = runTest {
+    fun put_back_at_install_patched_restores_then_installs_the_original() = runTest {
+        // Offered at this step whatever this screen saw: the original is saved, and nothing is installed.
+        val fresh = FakeFlow(GenericPhase.InstallPatched)
+        fresh.afterRestore = { fresh.phase = GenericPhase.InstallOriginal }
+        model(fresh).onPutBack()
+        assertEquals(listOf("startRestore", "installOriginal"), fresh.calls)
+
         val flow = FakeFlow(GenericPhase.InstallPatched)
         flow.installPatchedOutcome = InstallOutcome.Failure("The install was cancelled.", InstallFailure.ABORTED)
         val model = model(flow)
@@ -259,7 +345,6 @@ class RunViewModelTest {
         model.onInstallPatched()
         assertEquals(listOf("installPatched"), flow.calls)
         assertEquals("The install was cancelled.", model.state.value.message)
-        assertTrue(model.state.value.installFailed)
         assertFalse(model.state.value.busy)
 
         flow.restoreAnswer = "The saved original is damaged, so it can't be put back."
