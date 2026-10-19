@@ -48,6 +48,8 @@ import site.androidmod.store.ui.catalog.CatalogScreen
 import site.androidmod.store.ui.catalog.CatalogViewModel
 import site.androidmod.store.ui.generic.ConfirmScreen
 import site.androidmod.store.ui.generic.PickerScreen
+import site.androidmod.store.ui.generic.ReportRoute
+import site.androidmod.store.ui.generic.ReportViewModel
 import site.androidmod.store.ui.generic.RunScreen
 import site.androidmod.store.ui.generic.RunViewModel
 import site.androidmod.store.ui.generic.WorksWithScreen
@@ -80,17 +82,20 @@ object Routes {
     const val GENERIC_PICK = "generic/pick"
     const val GENERIC_CONFIRM = "generic/confirm/{package}"
     const val GENERIC_RUN = "generic/run/{package}"
+    const val GENERIC_REPORT = "generic/report/{package}"
 
     fun appDetail(packageName: String) = "app/$packageName"
     fun genericConfirm(packageName: String) = "generic/confirm/$packageName"
     fun genericRun(packageName: String) = "generic/run/$packageName"
+    fun genericReport(packageName: String) = "generic/report/$packageName"
 }
 
 /** The generic ad remover's screens, all pushed on top of Apps. */
 private val GENERIC_ROUTES = setOf(Routes.GENERIC_WORKS_WITH, Routes.GENERIC_PICK, Routes.GENERIC_CONFIRM, Routes.GENERIC_RUN)
 
 /** Screens pushed on top of a tab: they get a back arrow instead of a tab of their own. */
-private val PUSHED_ROUTES = setOf(Routes.APP_DETAIL, Routes.BUG_REPORT, Routes.CHANGE_PASSWORD, Routes.MOVE_CHATS) + GENERIC_ROUTES
+private val PUSHED_ROUTES =
+    setOf(Routes.APP_DETAIL, Routes.BUG_REPORT, Routes.CHANGE_PASSWORD, Routes.MOVE_CHATS, Routes.GENERIC_REPORT) + GENERIC_ROUTES
 
 /** The bottom bar's contents, in order. */
 private val Tabs = listOf(
@@ -251,6 +256,8 @@ fun AppNavigation() {
     val selectedRoute = when (currentRoute) {
         Routes.APP_DETAIL, Routes.MOVE_CHATS, in GENERIC_ROUTES -> Routes.CATALOG
         Routes.BUG_REPORT, Routes.CHANGE_PASSWORD -> Routes.SETTINGS
+        // Reached from a Library entry.
+        Routes.GENERIC_REPORT -> Routes.LIBRARY
         else -> currentRoute
     }
 
@@ -269,6 +276,7 @@ fun AppNavigation() {
         Routes.GENERIC_WORKS_WITH -> "Works with"
         Routes.GENERIC_PICK -> "Choose an app"
         Routes.GENERIC_CONFIRM -> "Patch an app"
+        Routes.GENERIC_REPORT -> "Report how it works"
         Routes.GENERIC_RUN -> {
             // The record's label (the app itself may be uninstalled mid-swap), read off the main thread.
             val pkg = backStackEntry?.arguments?.getString("package").orEmpty()
@@ -411,7 +419,21 @@ fun AppNavigation() {
                     libraryViewModel, moveViewModel,
                     onOpenMoveGuide = openMoveGuide,
                     onSubscribe = { openTab(Routes.SUBSCRIPTION) },
+                    onOpenGenericRun = { pkg -> navController.navigate(Routes.genericRun(pkg)) { launchSingleTop = true } },
+                    onReport = { pkg -> navController.navigate(Routes.genericReport(pkg)) { launchSingleTop = true } },
                 ) }
+            composable(Routes.GENERIC_REPORT) { entry ->
+                // Scoped to this entry, so leaving the form discards it. Send is its only network call.
+                val pkg = entry.arguments?.getString("package").orEmpty()
+                ReportRoute(
+                    packageName = pkg,
+                    lookup = container.genericRecords::get,
+                    create = { record ->
+                        ReportViewModel(record, container.genericApi, container.installedBuild().versionCode, Build.VERSION.SDK_INT)
+                    },
+                    onDone = { navController.popBackStack() },
+                )
+            }
             composable(Routes.MOVE_CHATS) {
                 MoveChatsScreen(
                     viewModel = moveViewModel,

@@ -520,7 +520,7 @@ class GenericJobTest {
 
         val outcome = f.run()
         assertEquals(GenericFailure.DAMAGED_ORIGINAL, (outcome as GenericOutcome.Failed).reason)
-        assertEquals("The saved original of Example is damaged. Delete it from the Library, then Refresh again.", outcome.message)
+        assertEquals("The saved original of Example is damaged. Stop, then delete it in the Library and Refresh again.", outcome.message)
         assertTrue(f.requests.isEmpty())
         assertFalse("token" in f.events)
         assertEquals(before, f.records.get(PKG))
@@ -1126,7 +1126,7 @@ class GenericJobTest {
             GenericFailure.DAMAGED_ORIGINAL.message(LABEL),
         )
         assertEquals(
-            "The saved original of Example is damaged. Delete it from the Library, then Refresh again.",
+            "The saved original of Example is damaged. Stop, then delete it in the Library and Refresh again.",
             GenericFailure.DAMAGED_ORIGINAL.message(LABEL, intent = GenericIntent.REFRESH),
         )
         assertEquals(

@@ -80,7 +80,7 @@ fun GenericFailure.message(label: String, bytesNeeded: Long = -1, intent: Generi
     }
     GenericFailure.NOT_OUR_COPY -> "The installed $label isn't our patched copy, so it can't be refreshed."
     GenericFailure.DAMAGED_ORIGINAL -> if (intent == GenericIntent.REFRESH) {
-        "The saved original of $label is damaged. Delete it from the Library, then Refresh again."
+        "The saved original of $label is damaged. Stop, then delete it in the Library and Refresh again."
     } else {
         "The saved original of $label is damaged. Stop, then pick $label again."
     }
