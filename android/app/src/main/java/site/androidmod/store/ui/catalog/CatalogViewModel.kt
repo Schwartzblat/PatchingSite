@@ -15,6 +15,8 @@ import site.androidmod.store.data.CatalogApp
 import site.androidmod.store.data.CatalogRepository
 import site.androidmod.store.data.SubscriptionRepository
 import site.androidmod.store.data.isAuth
+import site.androidmod.store.generic.GenericRepository
+import site.androidmod.store.generic.GenericStatus
 import site.androidmod.store.install.InstalledApp
 import site.androidmod.store.install.InstalledApps
 
@@ -42,10 +44,14 @@ class CatalogViewModel(
     private val billing: SubscriptionRepository = StoreApp.instance.container.billing,
     private val auth: AuthRepository = StoreApp.instance.container.auth,
     private val installedApps: InstalledApps = StoreApp.instance.container.installedApps,
+    private val generic: GenericRepository = StoreApp.instance.container.generic,
 ) : ViewModel() {
 
     private val _apps = MutableStateFlow(CatalogState())
     val apps: StateFlow<CatalogState> = _apps.asStateFlow()
+
+    /** Whether, and with which tested apps, the Apps tab offers patching an installed app; null until it loads. */
+    val genericStatus: StateFlow<GenericStatus?> = generic.status
 
     private val _versions = MutableStateFlow(VersionsState())
     val versions: StateFlow<VersionsState> = _versions.asStateFlow()
@@ -65,6 +71,14 @@ class CatalogViewModel(
             } catch (error: ApiException) {
                 if (error.isAuth) auth.expireSession()
                 _apps.value.copy(loading = false, error = error.message)
+            }
+        }
+        // With the apps. A failure only keeps the card as it was: hidden until a status says it's on.
+        viewModelScope.launch {
+            try {
+                generic.refreshStatus()
+            } catch (error: ApiException) {
+                // The catalogue's own load reports the connection or the session.
             }
         }
     }

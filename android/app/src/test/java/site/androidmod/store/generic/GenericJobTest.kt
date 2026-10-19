@@ -473,7 +473,13 @@ class GenericJobTest {
             f.records.put(f.record(original = saved))
             damage(f)
 
-            assertEquals(name, failed(GenericFailure.FAILED), f.run())
+            val outcome = f.run()
+            assertEquals(name, failed(GenericFailure.DAMAGED_ORIGINAL), outcome)
+            assertEquals(
+                name,
+                "The saved original of Example is damaged. Stop, then pick Example again.",
+                (outcome as GenericOutcome.Failed).message,
+            )
             assertTrue(name, f.requests.isEmpty())
             assertFalse(name, "token" in f.events)
             // Kept as it is: the run screen's Stop cleans it up.
@@ -828,7 +834,13 @@ class GenericJobTest {
             f.records.put(f.record(intent = GenericIntent.REFRESH))
             f.installedApp = app(f)
 
-            assertEquals(name, failed(GenericFailure.CHANGED), f.run())
+            val outcome = f.run()
+            assertEquals(name, GenericFailure.CHANGED, (outcome as GenericOutcome.Failed).reason)
+            assertEquals(
+                name,
+                "Example changed since it was patched. Put the original back, update it in Play, and patch it again.",
+                outcome.message,
+            )
             assertEquals(name, emptyList<String>(), f.events)
         }
     }
@@ -1063,6 +1075,18 @@ class GenericJobTest {
         assertEquals("Network error. Check your connection and try again.", GenericFailure.NETWORK.message(LABEL))
         assertEquals("Example changed since you picked it. Go back and pick it again.", GenericFailure.CHANGED.message(LABEL))
         assertEquals(
+            "Example changed since you picked it. Go back and pick it again.",
+            GenericFailure.CHANGED.message(LABEL, intent = GenericIntent.PATCH),
+        )
+        assertEquals(
+            "Example changed since it was patched. Put the original back, update it in Play, and patch it again.",
+            GenericFailure.CHANGED.message(LABEL, intent = GenericIntent.REFRESH),
+        )
+        assertEquals(
+            "The saved original of Example is damaged. Stop, then pick Example again.",
+            GenericFailure.DAMAGED_ORIGINAL.message(LABEL),
+        )
+        assertEquals(
             "The installed Example isn't our patched copy, so it can't be refreshed.",
             GenericFailure.NOT_OUR_COPY.message(LABEL),
         )
@@ -1084,6 +1108,7 @@ class GenericJobTest {
             GenericFailure.NETWORK to PatchFailure.NETWORK,
             GenericFailure.CHANGED to PatchFailure.FAILED,
             GenericFailure.NOT_OUR_COPY to PatchFailure.FAILED,
+            GenericFailure.DAMAGED_ORIGINAL to PatchFailure.FAILED,
             GenericFailure.FAILED to PatchFailure.FAILED,
         )
         assertEquals(GenericFailure.entries.toSet(), expected.keys)

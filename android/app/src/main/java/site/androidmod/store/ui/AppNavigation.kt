@@ -1,5 +1,6 @@
 package site.androidmod.store.ui
 
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,9 @@ import androidx.navigation.compose.rememberNavController
 import site.androidmod.store.R
 import site.androidmod.store.StoreApp
 import site.androidmod.store.download.DownloadService
+import site.androidmod.store.generic.isPackageName
+import site.androidmod.store.patch.PatchMode
+import site.androidmod.store.patch.PatchService
 import site.androidmod.store.ui.auth.AuthViewModel
 import site.androidmod.store.ui.auth.LoginScreen
 import site.androidmod.store.ui.auth.RegisterScreen
@@ -39,6 +43,13 @@ import site.androidmod.store.ui.billing.SubscriptionScreen
 import site.androidmod.store.ui.catalog.AppDetailScreen
 import site.androidmod.store.ui.catalog.CatalogScreen
 import site.androidmod.store.ui.catalog.CatalogViewModel
+import site.androidmod.store.ui.generic.ConfirmScreen
+import site.androidmod.store.ui.generic.PickerScreen
+import site.androidmod.store.ui.generic.RunScreen
+import site.androidmod.store.ui.generic.RunViewModel
+import site.androidmod.store.ui.generic.WorksWithScreen
+import site.androidmod.store.ui.generic.confirmPatch
+import site.androidmod.store.ui.generic.pickerViewModel
 import site.androidmod.store.ui.library.LibraryScreen
 import site.androidmod.store.ui.library.LibraryViewModel
 import site.androidmod.store.ui.move.MoveChatsScreen
@@ -62,12 +73,21 @@ object Routes {
     const val BUG_REPORT = "settings/bug-report"
     const val CHANGE_PASSWORD = "settings/change-password"
     const val MOVE_CHATS = "move-chats"
+    const val GENERIC_WORKS_WITH = "generic/works-with"
+    const val GENERIC_PICK = "generic/pick"
+    const val GENERIC_CONFIRM = "generic/confirm/{package}"
+    const val GENERIC_RUN = "generic/run/{package}"
 
     fun appDetail(packageName: String) = "app/$packageName"
+    fun genericConfirm(packageName: String) = "generic/confirm/$packageName"
+    fun genericRun(packageName: String) = "generic/run/$packageName"
 }
 
+/** The generic ad remover's screens, all pushed on top of Apps. */
+private val GENERIC_ROUTES = setOf(Routes.GENERIC_WORKS_WITH, Routes.GENERIC_PICK, Routes.GENERIC_CONFIRM, Routes.GENERIC_RUN)
+
 /** Screens pushed on top of a tab: they get a back arrow instead of a tab of their own. */
-private val PUSHED_ROUTES = setOf(Routes.APP_DETAIL, Routes.BUG_REPORT, Routes.CHANGE_PASSWORD, Routes.MOVE_CHATS)
+private val PUSHED_ROUTES = setOf(Routes.APP_DETAIL, Routes.BUG_REPORT, Routes.CHANGE_PASSWORD, Routes.MOVE_CHATS) + GENERIC_ROUTES
 
 /** The bottom bar's contents, in order. */
 private val Tabs = listOf(
@@ -151,6 +171,7 @@ fun AppNavigation() {
     // warnings and the guide all show one move, and must never disagree about it.
     val moveViewModel: MoveViewModel = viewModel()
     val catalogState by catalogViewModel.apps.collectAsStateWithLifecycle()
+    val container = StoreApp.instance.container
 
     // Collected here rather than in a screen: an install started from app detail can
     // finish after the user has moved to another tab, and must still be announced.
@@ -201,8 +222,15 @@ fun AppNavigation() {
                 NavigationRequests.consume()
                 openTab(Routes.LIBRARY)
             }
-            // The generic run screen isn't routed yet: opening the store is all a tap does.
-            is NavRequest.Generic -> NavigationRequests.consume()
+            // Shows where the app's swap is, nothing more: any app can send this extra, so every step
+            // there still waits for the customer's tap. A malformed package would crash navigation.
+            is NavRequest.Generic -> {
+                NavigationRequests.consume()
+                if (isPackageName(pending.pkg)) {
+                    openTab(Routes.CATALOG)
+                    navController.navigate(Routes.genericRun(pending.pkg))
+                }
+            }
         }
     }
 
@@ -218,7 +246,7 @@ fun AppNavigation() {
     // chat-move guide - which belongs to the WhatsApp page wherever it was opened
     // from - on top of Apps.
     val selectedRoute = when (currentRoute) {
-        Routes.APP_DETAIL, Routes.MOVE_CHATS -> Routes.CATALOG
+        Routes.APP_DETAIL, Routes.MOVE_CHATS, in GENERIC_ROUTES -> Routes.CATALOG
         Routes.BUG_REPORT, Routes.CHANGE_PASSWORD -> Routes.SETTINGS
         else -> currentRoute
     }
@@ -235,6 +263,14 @@ fun AppNavigation() {
         Routes.BUG_REPORT -> "Report a bug"
         Routes.CHANGE_PASSWORD -> "Change password"
         Routes.MOVE_CHATS -> "Move your chats"
+        Routes.GENERIC_WORKS_WITH -> "Works with"
+        Routes.GENERIC_PICK -> "Choose an app"
+        Routes.GENERIC_CONFIRM -> "Patch an app"
+        Routes.GENERIC_RUN -> {
+            // The record's label, once per app: the app itself may be uninstalled mid-swap.
+            val pkg = backStackEntry?.arguments?.getString("package").orEmpty()
+            remember(pkg) { runCatching { container.genericRecords.get(pkg)?.label }.getOrNull() } ?: pkg
+        }
         Routes.APP_DETAIL -> {
             val pkg = backStackEntry?.arguments?.getString("package").orEmpty()
             catalogState.apps.firstOrNull { it.packageName == pkg }?.name ?: pkg
@@ -286,9 +322,66 @@ fun AppNavigation() {
                     onSubscribe = { openTab(Routes.SUBSCRIPTION) },
                     onOpenInstallSettings = openInstallSettings,
                     onOpenMoveGuide = openMoveGuide,
+                    onChooseApp = { navController.navigate(Routes.GENERIC_PICK) },
+                    onWorksWith = { navController.navigate(Routes.GENERIC_WORKS_WITH) },
                 ) { app ->
                     navController.navigate(Routes.appDetail(app.packageName))
                 }
+            }
+            composable(Routes.GENERIC_WORKS_WITH) {
+                // The status the Apps tab loaded; nothing is fetched here.
+                val status by container.generic.status.collectAsStateWithLifecycle()
+                WorksWithScreen(
+                    entries = status?.worksWith.orEmpty(),
+                    onChoose = { navController.navigate(Routes.GENERIC_PICK) },
+                )
+            }
+            composable(Routes.GENERIC_PICK) {
+                // Scoped to this entry, so each visit lists the phone's apps afresh.
+                val ownPackage = LocalContext.current.packageName
+                PickerScreen(
+                    viewModel = viewModel {
+                        pickerViewModel(
+                            listApps = container.installedApps::listUserApps,
+                            obb = container.installedApps::hasObbFiles,
+                            sharedCerts = { container.installedApps.signersOf(ownPackage) },
+                            generic = container.generic,
+                            storePackages = container::refusedPackages,
+                            signingKeys = container.signingKeys,
+                            deviceSdk = Build.VERSION.SDK_INT,
+                            deviceAbis = Build.SUPPORTED_ABIS.toList(),
+                        )
+                    },
+                    onStorePage = { pkg -> navController.navigate(Routes.appDetail(pkg)) },
+                    onConfirm = { pkg -> navController.navigate(Routes.genericConfirm(pkg)) },
+                )
+            }
+            composable(Routes.GENERIC_CONFIRM) { entry ->
+                val context = LocalContext.current
+                val pkg = entry.arguments?.getString("package").orEmpty()
+                ConfirmScreen(
+                    packageName = pkg,
+                    lookup = container.installedApps::packageInfo,
+                    confirm = { app ->
+                        confirmPatch(app, container.genericFlow::begin) { name, label ->
+                            PatchService.start(context, name, PatchMode.GENERIC, label)
+                        }
+                    },
+                    // The run screen replaces the picker and this one: back from it is where the picker was opened.
+                    onStarted = { name ->
+                        navController.navigate(Routes.genericRun(name)) { popUpTo(Routes.GENERIC_PICK) { inclusive = true } }
+                    },
+                )
+            }
+            composable(Routes.GENERIC_RUN) { entry ->
+                val pkg = entry.arguments?.getString("package").orEmpty()
+                RunScreen(
+                    viewModel = viewModel { RunViewModel(pkg) },
+                    onSubscribe = { openTab(Routes.SUBSCRIPTION) },
+                    onOpenInstallSettings = openInstallSettings,
+                    onLibrary = { openTab(Routes.LIBRARY) },
+                    onClose = { navController.popBackStack() },
+                )
             }
             composable(Routes.APP_DETAIL) { entry ->
                 val context = LocalContext.current

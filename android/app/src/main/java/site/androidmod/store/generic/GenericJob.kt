@@ -50,11 +50,18 @@ interface GenericServer {
 
 enum class GenericFailure {
     SIGNED_OUT, ANDROID_TOO_OLD, NEEDS_SUBSCRIPTION, NOT_AVAILABLE, STORE_UPDATE_REQUIRED,
-    NOT_ENOUGH_SPACE, NETWORK, CHANGED, NOT_OUR_COPY, FAILED,
+    NOT_ENOUGH_SPACE, NETWORK, CHANGED, NOT_OUR_COPY,
+
+    /** A resumed patch found its saved original no longer matching its recorded hashes. */
+    DAMAGED_ORIGINAL,
+    FAILED,
 }
 
-/** What the user is told. [label] is the app's name; [bytesNeeded] is NOT_ENOUGH_SPACE's shortfall, -1 when unknown. */
-fun GenericFailure.message(label: String, bytesNeeded: Long = -1): String = when (this) {
+/**
+ * What the user is told. [label] is the app's name; [bytesNeeded] is NOT_ENOUGH_SPACE's shortfall, -1 when
+ * unknown; [intent] words CHANGED for a Refresh, where the app changed after it was patched.
+ */
+fun GenericFailure.message(label: String, bytesNeeded: Long = -1, intent: GenericIntent? = null): String = when (this) {
     GenericFailure.SIGNED_OUT -> "Sign in again to continue."
     GenericFailure.ANDROID_TOO_OLD -> "Patching apps needs Android 13 or newer."
     GenericFailure.NEEDS_SUBSCRIPTION -> "You need an active plan to patch apps."
@@ -63,8 +70,13 @@ fun GenericFailure.message(label: String, bytesNeeded: Long = -1): String = when
     GenericFailure.NOT_ENOUGH_SPACE ->
         "Free up ${if (bytesNeeded > 0) formatBytes(bytesNeeded) else "some space"} and try again."
     GenericFailure.NETWORK -> "Network error. Check your connection and try again."
-    GenericFailure.CHANGED -> "$label changed since you picked it. Go back and pick it again."
+    GenericFailure.CHANGED -> if (intent == GenericIntent.REFRESH) {
+        "$label changed since it was patched. Put the original back, update it in Play, and patch it again."
+    } else {
+        "$label changed since you picked it. Go back and pick it again."
+    }
     GenericFailure.NOT_OUR_COPY -> "The installed $label isn't our patched copy, so it can't be refreshed."
+    GenericFailure.DAMAGED_ORIGINAL -> "The saved original of $label is damaged. Stop, then pick $label again."
     GenericFailure.FAILED -> "Patching failed. Nothing was removed. Try again, or send us a report."
 }
 
@@ -78,7 +90,8 @@ val GenericFailure.patchFailure: PatchFailure
         GenericFailure.STORE_UPDATE_REQUIRED -> PatchFailure.STORE_UPDATE_REQUIRED
         GenericFailure.NOT_ENOUGH_SPACE -> PatchFailure.NOT_ENOUGH_SPACE
         GenericFailure.NETWORK -> PatchFailure.NETWORK
-        GenericFailure.CHANGED, GenericFailure.NOT_OUR_COPY, GenericFailure.FAILED -> PatchFailure.FAILED
+        GenericFailure.CHANGED, GenericFailure.NOT_OUR_COPY, GenericFailure.DAMAGED_ORIGINAL, GenericFailure.FAILED ->
+            PatchFailure.FAILED
     }
 
 sealed interface GenericOutcome {
@@ -188,14 +201,17 @@ class GenericJob(
                 val gone = fromSaved && app == null
                 if (!gone && (app == null || !isOriginal(app, record))) return failed(GenericFailure.CHANGED, label)
             } else {
-                if (app == null || app.versionCode != record.versionCode) return failed(GenericFailure.CHANGED, label)
+                if (app == null || app.versionCode != record.versionCode) {
+                    return failed(GenericFailure.CHANGED, label, intent = intent)
+                }
                 key = server.signingKey()
                 if (app.signerSha256s.lowercased() != setOf(key.certSha256.lowercase())) {
                     return failed(GenericFailure.NOT_OUR_COPY, label)
                 }
             }
             if (fromSaved && !blocking { savedCopiesIntact(originalDir, record.original) }) {
-                return failed(GenericFailure.FAILED, label)
+                // A patch resuming from its copy: Stop deletes it while the original is still installed.
+                return failed(if (intent == GenericIntent.PATCH) GenericFailure.DAMAGED_ORIGINAL else GenericFailure.FAILED, label)
             }
 
             // The engine reads the saved original, or for a Refresh without one, the installed patched copy.
@@ -388,9 +404,10 @@ class GenericJob(
         bytesNeeded: Long = -1,
         minStoreVersionCode: Long? = null,
         cause: Throwable? = null,
+        intent: GenericIntent? = null,
     ): GenericOutcome.Failed {
         currentCoroutineContext().ensureActive()
-        return GenericOutcome.Failed(reason, reason.message(label, bytesNeeded), bytesNeeded, minStoreVersionCode, cause)
+        return GenericOutcome.Failed(reason, reason.message(label, bytesNeeded, intent), bytesNeeded, minStoreVersionCode, cause)
     }
 
     /** Applies [change] to the record on disk, which must still be this flow's: one stopped meanwhile is not brought back. */

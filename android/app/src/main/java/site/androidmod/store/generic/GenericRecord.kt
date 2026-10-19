@@ -41,6 +41,9 @@ data class GenericRecord(
 
 private val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
+/** Whether [name] is a package name [GenericRecords] accepts; anything else it refuses with IllegalArgumentException. */
+fun isPackageName(name: String): Boolean = PACKAGE_NAME.matches(name)
+
 /** One directory per package under [root] (filesDir/generic), holding record.json, original/ and built/. Open for tests' put hooks. */
 open class GenericRecords(private val root: File) {
     private val json = Json { ignoreUnknownKeys = true }

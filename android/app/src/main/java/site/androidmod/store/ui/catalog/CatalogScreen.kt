@@ -37,6 +37,7 @@ import site.androidmod.store.ui.AppIcon
 import site.androidmod.store.ui.EmptyState
 import site.androidmod.store.ui.ErrorBanner
 import site.androidmod.store.ui.LoadingState
+import site.androidmod.store.ui.generic.GenericCard
 import site.androidmod.store.ui.move.MoveBanner
 import site.androidmod.store.ui.move.MoveViewModel
 import site.androidmod.store.ui.update.UpdateBanner
@@ -50,9 +51,14 @@ fun CatalogScreen(
     onSubscribe: () -> Unit,
     onOpenInstallSettings: () -> Unit,
     onOpenMoveGuide: () -> Unit,
+    onChooseApp: () -> Unit,
+    onWorksWith: () -> Unit,
     onOpen: (CatalogApp) -> Unit,
 ) {
     val state by viewModel.apps.collectAsStateWithLifecycle()
+    val genericStatus by viewModel.genericStatus.collectAsStateWithLifecycle()
+    // Only once a status says it's on; it also shows while the list loads or is empty.
+    val showGeneric = genericStatus?.enabled == true
     val update by updateViewModel.state.collectAsStateWithLifecycle()
     val moveGuide by moveViewModel.guide.collectAsStateWithLifecycle()
 
@@ -88,12 +94,19 @@ fun CatalogScreen(
         if (state.subscribed == false) SubscriptionBanner(onSubscribe)
 
         when {
-            state.loading && state.apps.isEmpty() -> LoadingState()
-            state.apps.isEmpty() && state.error == null -> EmptyState(
-                icon = R.drawable.ic_apps,
-                title = "No apps yet",
-                message = "The catalogue is empty. Check back soon.",
-            )
+            state.loading && state.apps.isEmpty() -> {
+                LoadingState(modifier = Modifier.weight(1f))
+                if (showGeneric) GenericCard(onChooseApp, onWorksWith, Modifier.padding(vertical = 12.dp))
+            }
+            state.apps.isEmpty() && state.error == null -> {
+                EmptyState(
+                    icon = R.drawable.ic_apps,
+                    title = "No apps yet",
+                    message = "The catalogue is empty. Check back soon.",
+                    modifier = Modifier.weight(1f),
+                )
+                if (showGeneric) GenericCard(onChooseApp, onWorksWith, Modifier.padding(vertical = 12.dp))
+            }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -101,6 +114,10 @@ fun CatalogScreen(
             ) {
                 items(state.apps, key = { it.packageName }) { app ->
                     AppCard(app = app, onClick = { onOpen(app) })
+                }
+                // Below the apps we build ourselves.
+                if (showGeneric) {
+                    item(key = "generic") { GenericCard(onChooseApp, onWorksWith) }
                 }
             }
         }
