@@ -15,13 +15,17 @@ import site.androidmod.store.data.SubscriptionRepository
 import site.androidmod.store.data.SubscriptionStore
 import site.androidmod.store.data.TokenStore
 import site.androidmod.store.generic.GenericApi
+import site.androidmod.store.generic.GenericFlow
 import site.androidmod.store.generic.GenericJob
 import site.androidmod.store.generic.GenericLatest
 import site.androidmod.store.generic.GenericRecords
 import site.androidmod.store.generic.GenericRepository
 import site.androidmod.store.generic.GenericServer
 import site.androidmod.store.generic.GenericToken
+import site.androidmod.store.generic.InstalledState
 import site.androidmod.store.generic.refusedPackagesOf
+import site.androidmod.store.generic.sha256Of
+import site.androidmod.store.install.InstallConfirmation
 import site.androidmod.store.install.Installer
 import site.androidmod.store.install.InstalledApps
 import site.androidmod.store.install.RootInstaller
@@ -43,6 +47,7 @@ import site.androidmod.store.patch.LatestPatch
 import site.androidmod.store.patch.OfficialDownloader
 import site.androidmod.store.patch.PatchApi
 import site.androidmod.store.patch.PatchJob
+import site.androidmod.store.patch.PatchRegistry
 import site.androidmod.store.patch.PatchServer
 import site.androidmod.store.patch.SigningKey
 import site.androidmod.store.patch.SigningKeyStore
@@ -179,6 +184,39 @@ class Container(private val context: Context) {
         storeVersionCode = storeVersionCode,
         workDir = File(context.filesDir, "patch/work/generic-$pkg"),
     )
+
+    /**
+     * Removing, installing, stopping, putting back and refreshing a generic patch. Patched copies
+     * are signed with the user's key, which the installer trusts already; a restore trusts the
+     * original's signers for that install only.
+     */
+    val genericFlow by lazy {
+        GenericFlow(
+            records = genericRecords,
+            installedState = ::installedState,
+            userCert = { signingKeys.cached()?.certSha256?.lowercase() },
+            install = { apks, extraTrusted -> installer().installApks(apks, InstallConfirmation.DIALOG, extraTrusted) },
+            sha256 = ::sha256Of,
+            now = System::currentTimeMillis,
+            isBusy = PatchRegistry::isBusy,
+        )
+    }
+
+    /**
+     * What the phone has for [pkg] now, for [genericFlow]; null when it isn't installed. Hashes the
+     * base, so call it off the main thread. A base that can't be read counts as not installed,
+     * which every step of the flow treats as "remove nothing": the stop and remove steps then refuse,
+     * and an install over the unread app fails on its signature.
+     */
+    private fun installedState(pkg: String): InstalledState? {
+        val app = installedApps.packageInfo(pkg) ?: return null
+        val base = app.apks.firstOrNull() ?: return null
+        return try {
+            InstalledState(app.signerSha256s, app.versionCode, sha256Of(base))
+        } catch (error: IOException) {
+            null
+        }
+    }
 
     // The binary ships as libfastsigner.so and is extracted (useLegacyPackaging) so it can be executed.
     private fun fastSigner(key: SigningKey): ApkSigner =

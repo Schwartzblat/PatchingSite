@@ -33,7 +33,6 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 
 /** Our server's part of a generic build (production: GenericApi, BundleCache and SigningKeyStore). */
 interface GenericServer {
@@ -281,7 +280,7 @@ class GenericJob(
             blocking {
                 val built = outputs.map { output ->
                     sync(output)
-                    SavedApk(output.name, output.length(), sha256(output))
+                    SavedApk(output.name, output.length(), sha256Of(output))
                 }
                 // The record never lists a build that isn't in built/: forget the old one before replacing it.
                 if (record.built.isNotEmpty()) {
@@ -349,8 +348,8 @@ class GenericJob(
                     output.fd.sync()
                 }
             }
-            val sha256 = sha256(copy)
-            if (sha256 != sha256(apk)) {
+            val sha256 = sha256Of(copy)
+            if (sha256 != sha256Of(apk)) {
                 dir.deleteRecursively()
                 return@blocking null
             }
@@ -406,7 +405,7 @@ class GenericJob(
 
     private fun savedCopiesIntact(dir: File, saved: List<SavedApk>): Boolean = saved.all { apk ->
         val file = File(dir, apk.name)
-        file.isFile && file.length() == apk.size && sha256(file) == apk.sha256
+        file.isFile && file.length() == apk.size && sha256Of(file) == apk.sha256
     }
 
     /** Runs blocking work off the caller's thread; cancelling the job interrupts it. */
@@ -431,21 +430,7 @@ class GenericJob(
     /** Puts [file]'s bytes on disk before a record points at it. */
     private fun sync(file: File) = FileOutputStream(file, true).use { it.fd.sync() }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(BUFFER_BYTES)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-                checkInterrupted()
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    /** Stops a long copy or hash between chunks; runInterruptible turns the interrupt into the cancellation. */
+    /** Stops a long copy between chunks; runInterruptible turns the interrupt into the cancellation. */
     private fun checkInterrupted() {
         if (Thread.currentThread().isInterrupted) throw InterruptedException()
     }
