@@ -32,6 +32,7 @@ fun patchControlText(state: PatchState?, ready: Boolean): String = when (state) 
         PatchStage.CheckingVersion -> "Checking version…"
         is PatchStage.Downloading ->
             if (stage.total > 0) "Downloading WhatsApp ${percent(stage.bytesRead, stage.total)}%" else "Downloading WhatsApp…"
+        is PatchStage.SavingOriginal -> "Saving the original…"
         PatchStage.Patching -> "Patching…"
         PatchStage.Signing -> "Signing…"
     }
@@ -42,10 +43,14 @@ fun patchControlText(state: PatchState?, ready: Boolean): String = when (state) 
     is PatchState.Ready, null -> if (ready) "Ready ✓" else "Download WhatsApp"
 }
 
-/** The progress bar's fraction while downloading with a known size; null (indeterminate) otherwise. */
+/** The progress bar's fraction while downloading or saving the original with a known size; null (indeterminate) otherwise. */
 fun patchProgress(state: PatchState?): Float? {
-    val stage = (state as? PatchState.Running)?.stage as? PatchStage.Downloading ?: return null
-    return if (stage.total > 0) (stage.bytesRead.toFloat() / stage.total).coerceIn(0f, 1f) else null
+    val (done, total) = when (val stage = (state as? PatchState.Running)?.stage) {
+        is PatchStage.Downloading -> stage.bytesRead to stage.total
+        is PatchStage.SavingOriginal -> stage.bytesDone to stage.total
+        else -> return null
+    }
+    return if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else null
 }
 
 /**

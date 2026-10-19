@@ -222,6 +222,7 @@ class OnDeviceGuideTest {
         )
         assertEquals("Patching…", patchControlText(PatchState.Running(PatchStage.Patching), false))
         assertEquals("Signing…", patchControlText(PatchState.Running(PatchStage.Signing), false))
+        assertEquals("Saving the original…", patchControlText(PatchState.Running(PatchStage.SavingOriginal(42, 100)), false))
         assertEquals("Waiting for your answer…", patchControlText(PatchState.AwaitingConfirmation(listOf("Status")), false))
         assertEquals("Ready ✓", patchControlText(PatchState.Ready(File("a.apk"), "2.26.40.1"), ready = true))
         assertEquals("Ready ✓", patchControlText(null, ready = true))
@@ -244,9 +245,12 @@ class OnDeviceGuideTest {
     }
 
     @Test
-    fun `patch progress is a fraction only while downloading`() {
+    fun `patch progress is a fraction only while downloading or saving the original`() {
         assertEquals(0.25f, patchProgress(PatchState.Running(PatchStage.Downloading(25, 100)))!!, 0.0001f)
         assertNull(patchProgress(PatchState.Running(PatchStage.Downloading(25, 0))))
+        assertEquals(0.5f, patchProgress(PatchState.Running(PatchStage.SavingOriginal(50, 100)))!!, 0.0001f)
+        assertEquals(1f, patchProgress(PatchState.Running(PatchStage.SavingOriginal(150, 100)))!!, 0.0001f)
+        assertNull(patchProgress(PatchState.Running(PatchStage.SavingOriginal(0, 0))))
         assertNull(patchProgress(PatchState.Running(PatchStage.Signing)))
         assertNull(patchProgress(null))
     }

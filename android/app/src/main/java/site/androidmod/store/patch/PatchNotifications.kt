@@ -10,6 +10,7 @@ internal object PatchNotifications {
         is PatchStage.Downloading ->
             if (stage.total > 0) "Downloading $name ${(stage.bytesRead * 100 / stage.total).coerceIn(0, 100)}%"
             else "Downloading $name…"
+        is PatchStage.SavingOriginal -> "Saving the original…"
         PatchStage.Patching -> "Patching…"
         PatchStage.Signing -> "Signing…"
     }

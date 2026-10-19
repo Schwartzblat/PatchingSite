@@ -34,6 +34,12 @@ import site.androidmod.store.download.DownloadService
 import site.androidmod.store.download.DownloadState
 import site.androidmod.store.download.NotificationText
 import site.androidmod.store.download.ProgressThrottle
+import site.androidmod.store.generic.GenericFailure
+import site.androidmod.store.generic.GenericOutcome
+import site.androidmod.store.generic.genericPatchState
+import site.androidmod.store.generic.message
+import site.androidmod.store.generic.patchFailure
+import site.androidmod.store.generic.unpatchableMessage
 import site.androidmod.store.move.InstallGate
 import site.androidmod.store.update.StoreSelfUpdate
 import java.io.File
@@ -56,6 +62,8 @@ internal fun foregroundStartAllowed(start: () -> Unit): Boolean = try {
  * download is most of a build (patching and signing took about 2 s on the emulator), so
  * leaving the app must not stop it. One job per package. An update installs from here too,
  * and may wait up to 30 minutes for the user to confirm it from a notification (UpdateInstall).
+ * A generic build (any installed app) only saves the original and builds here: removing and
+ * installing are the run screen's.
  */
 class PatchService : Service() {
 
@@ -83,7 +91,7 @@ class PatchService : Service() {
             ?: return START_NOT_STICKY
         val givenName = intent.getStringExtra(EXTRA_NAME)
 
-        startForegroundCompat(ongoing(displayName(pkg, givenName), "Checking version…", 0, true))
+        startForegroundCompat(ongoing(displayName(pkg, givenName, mode), "Checking version…", 0, true))
 
         synchronized(lock) {
             latestStartId = startId
@@ -101,25 +109,13 @@ class PatchService : Service() {
     }
 
     private suspend fun run(pkg: String, mode: PatchMode, givenName: String?) {
-        val name = displayName(pkg, givenName)
+        val name = displayName(pkg, givenName, mode)
         // The terminal notification; stays null when the user cancelled or on teardown.
         var finished: NotificationText? = null
         try {
-            val outcome = withContext(Dispatchers.IO) {
-                container.patchJob(pkg).run(
-                    pkg = pkg,
-                    finalFile = { versionName -> finalFile(pkg, versionName, mode) },
-                    onStage = { stage -> onStage(pkg, name, stage) },
-                    confirm = { titles -> confirm(pkg, name, titles) },
-                )
-            }
-            finished = when (outcome) {
-                is PatchOutcome.Ready -> onReady(pkg, name, mode, outcome)
-                is PatchOutcome.Failed -> onFailed(pkg, name, outcome)
-                PatchOutcome.Cancelled -> {
-                    PatchRegistry.clear(pkg)
-                    null
-                }
+            finished = when (mode) {
+                PatchMode.GUIDE, PatchMode.UPDATE -> runBuild(pkg, name, mode)
+                PatchMode.GENERIC -> runGeneric(pkg, name)
             }
         } catch (error: CancellationException) {
             // The scope dies with the service: teardown, not a failure.
@@ -129,13 +125,14 @@ class PatchService : Service() {
         } catch (error: Throwable) {
             Log.e(TAG, "Patch job crashed for $pkg", error)
             val reason = PatchFailure.FAILED
-            PatchRegistry.update(pkg, PatchState.Failed(reason, reason.message()))
-            finished = NotificationText("$name could not be patched", reason.message())
+            val message = if (mode == PatchMode.GENERIC) GenericFailure.FAILED.message(name) else reason.message()
+            PatchRegistry.update(pkg, PatchState.Failed(reason, message))
+            finished = NotificationText("$name could not be patched", message)
         } finally {
             val manager = getSystemService(NotificationManager::class.java)
             // The confirm prompt is moot whichever way this ended.
             manager.cancel(resultId(pkg))
-            finished?.let { runCatching { notifyFinished(pkg, it) } }
+            finished?.let { runCatching { notifyFinished(pkg, it, mode) } }
             val stopId = synchronized(lock) {
                 running.remove(pkg)
                 throttle.forget(DownloadKey(pkg, THROTTLE_VERSION))
@@ -145,23 +142,73 @@ class PatchService : Service() {
         }
     }
 
-    /** From the intent, else the last catalogue that loaded; never the network. */
-    private fun displayName(pkg: String, given: String?): String =
-        given ?: container.appNames[pkg] ?: if (pkg == WHATSAPP) "WhatsApp" else pkg
+    /** A WhatsApp build: for the guide, or an update installed from here. */
+    private suspend fun runBuild(pkg: String, name: String, mode: PatchMode): NotificationText? {
+        val outcome = withContext(Dispatchers.IO) {
+            container.patchJob(pkg).run(
+                pkg = pkg,
+                finalFile = { versionName -> finalFile(pkg, versionName, mode) },
+                onStage = { stage -> onStage(pkg, name, stage) },
+                confirm = { titles -> confirm(pkg, name, titles) },
+            )
+        }
+        return when (outcome) {
+            is PatchOutcome.Ready -> onReady(pkg, name, mode, outcome)
+            is PatchOutcome.Failed -> onFailed(pkg, name, outcome)
+            PatchOutcome.Cancelled -> {
+                PatchRegistry.clear(pkg)
+                null
+            }
+        }
+    }
+
+    /** A generic build: the original saved and the patched copy built, nothing removed or installed. */
+    private suspend fun runGeneric(pkg: String, name: String): NotificationText {
+        val records = container.genericRecords
+        val outcome = withContext(Dispatchers.IO) {
+            container.genericJob(pkg).run(pkg) { stage -> onStage(pkg, name, stage) }
+        }
+        val versionName = withContext(Dispatchers.IO) { records.get(pkg)?.versionName }.orEmpty()
+        PatchRegistry.update(pkg, genericPatchState(outcome, name, records.builtDir(pkg), versionName))
+        return when (outcome) {
+            GenericOutcome.Built -> NotificationText("$name is ready to install", "Tap to open Patched Store and continue.")
+            is GenericOutcome.Failed -> {
+                // The engine's and the server's messages carry no secrets; the token, password and key are never in a cause.
+                Log.w(TAG, "Generic patch failed for $pkg: ${outcome.reason}", outcome.cause)
+                afterFailure(outcome.reason.patchFailure, outcome.cause)
+                NotificationText("$name could not be patched", outcome.message)
+            }
+            is GenericOutcome.Unpatchable -> NotificationText("$name can't be patched", unpatchableMessage(name, outcome.reasons))
+        }
+    }
+
+    /** From the generic record, the intent, else the last catalogue that loaded; never the network. */
+    private fun displayName(pkg: String, given: String?, mode: PatchMode): String {
+        if (mode == PatchMode.GENERIC) {
+            runCatching { container.genericRecords.get(pkg)?.label }.getOrNull()?.let { return it }
+        }
+        return given ?: container.appNames[pkg] ?: if (pkg == WHATSAPP) "WhatsApp" else pkg
+    }
 
     private fun finalFile(pkg: String, versionName: String, mode: PatchMode): File {
         val key = DownloadKey(pkg, versionName)
         return when (mode) {
             PatchMode.GUIDE -> DownloadPaths.targetFile(DownloadService.directoryFor(this), key, "apk")
             PatchMode.UPDATE -> DownloadPaths.targetFile(File(filesDir, READY_DIRECTORY).apply { mkdirs() }, key, "apk")
+            PatchMode.GENERIC -> throw IllegalStateException("A generic build has no single final file")
         }
     }
 
     /** May run on a background thread (download progress, signing). */
     private fun onStage(pkg: String, name: String, stage: PatchStage) {
         PatchRegistry.update(pkg, PatchState.Running(stage))
-        val percent = (stage as? PatchStage.Downloading)?.takeIf { it.total > 0 }
-            ?.let { (it.bytesRead * 100 / it.total).toInt().coerceIn(0, 100) }
+        val progress = when (stage) {
+            is PatchStage.Downloading -> stage.bytesRead to stage.total
+            is PatchStage.SavingOriginal -> stage.bytesDone to stage.total
+            else -> null
+        }
+        val percent = progress?.takeIf { (_, total) -> total > 0 }
+            ?.let { (done, total) -> (done * 100 / total).toInt().coerceIn(0, 100) }
         val signature = "${stage::class.simpleName}|$percent"
         if (!throttle.shouldPost(DownloadKey(pkg, THROTTLE_VERSION), signature, SystemClock.elapsedRealtime())) return
         getSystemService(NotificationManager::class.java).notify(
@@ -204,6 +251,7 @@ class PatchService : Service() {
                 PatchRegistry.update(pkg, PatchState.Failed(PatchFailure.FAILED, failure))
                 return NotificationText("$name could not be updated", failure)
             }
+            PatchMode.GENERIC -> throw IllegalStateException("A generic build is handled by runGeneric")
         }
     }
 
@@ -233,12 +281,17 @@ class PatchService : Service() {
         // The engine's and the server's messages carry no secrets; the token, password and key are never in a cause.
         Log.w(TAG, "Patch failed for $pkg: ${failed.reason}", failed.cause)
         PatchRegistry.update(pkg, PatchState.Failed(failed.reason, failed.message))
-        val cause = failed.cause
-        if (failed.reason == PatchFailure.SIGNED_OUT && cause is ApiException && cause.isAuth) {
+        afterFailure(failed.reason, failed.cause)
+        return NotificationText("$name could not be patched", failed.message)
+    }
+
+    /** What a failure of either job sets off: a real 401 signs out, a store too old updates itself. */
+    private suspend fun afterFailure(reason: PatchFailure, cause: Throwable?) {
+        if (reason == PatchFailure.SIGNED_OUT && cause is ApiException && cause.isAuth) {
             // Same meaning as on any screen: land on the login form.
             container.auth.expireSession()
         }
-        if (failed.reason == PatchFailure.STORE_UPDATE_REQUIRED) {
+        if (reason == PatchFailure.STORE_UPDATE_REQUIRED) {
             try {
                 StoreSelfUpdate.run(container)
             } catch (error: CancellationException) {
@@ -247,7 +300,6 @@ class PatchService : Service() {
                 Log.w(TAG, "Store self-update failed", error)
             }
         }
-        return NotificationText("$name could not be patched", failed.message)
     }
 
     // Android 15+ caps dataSync foreground time; the service must stop within seconds of this call
@@ -324,8 +376,19 @@ class PatchService : Service() {
         )
     }
 
-    /** One result notification per package; a new one replaces the last. */
-    private fun notifyFinished(pkg: String, text: NotificationText) = post(pkg, text)
+    /** One result notification per package; a new one replaces the last. A generic one opens that app's run screen. */
+    private fun notifyFinished(pkg: String, text: NotificationText, mode: PatchMode) =
+        post(pkg, text, if (mode == PatchMode.GENERIC) openGeneric(pkg) else openApp())
+
+    private fun openGeneric(pkg: String): PendingIntent = PendingIntent.getActivity(
+        this,
+        resultId(pkg),
+        Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_OPEN_GENERIC, pkg),
+        // UPDATE_CURRENT: intents that differ only in their extras match, so an older one would be reused as it was.
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     private fun post(
         pkg: String,
@@ -380,9 +443,13 @@ class PatchService : Service() {
         private const val EXTRA_MODE = "mode"
         private const val EXTRA_NAME = "name"
 
+        /** On MainActivity's intent from a generic build's notification: the package whose run screen to open. */
+        const val EXTRA_OPEN_GENERIC = "open_generic"
+
         /**
          * [name] is the catalogue's display name for the notifications; null uses the last
-         * catalogue's name, then WhatsApp/the package. False when Android refused the start
+         * catalogue's name, then WhatsApp/the package. A generic build is named by its record's
+         * label. False when Android refused the start
          * because the app is not in the foreground (see [foregroundStartAllowed]): nothing
          * runs, and the caller says so.
          */

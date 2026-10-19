@@ -14,6 +14,9 @@ sealed interface NavRequest {
 
     /** Open the Library; nothing starts. */
     data object Library : NavRequest
+
+    /** Open the run screen of [pkg]'s generic patch. */
+    data class Generic(val pkg: String) : NavRequest
 }
 
 /**
@@ -38,9 +41,10 @@ object NavigationRequests {
  * The request an incoming intent carries. Null for one relaunched from Recents: the task's
  * base intent keeps its extras, and replaying them would start an update nobody just asked for.
  */
-fun requestFrom(update: String?, move: Boolean, flags: Int, library: Boolean = false): NavRequest? = when {
+fun requestFrom(update: String?, move: Boolean, flags: Int, library: Boolean = false, generic: String? = null): NavRequest? = when {
     flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 -> null
     update != null -> NavRequest.Update(update)
+    generic != null -> NavRequest.Generic(generic)
     move -> NavRequest.Move
     library -> NavRequest.Library
     else -> null

@@ -26,6 +26,12 @@ class NavigationRequestsTest {
     }
 
     @Test
+    fun `the generic extra opens that app's run screen`() {
+        assertEquals(NavRequest.Generic("com.example.app"), requestFrom(null, false, 0, generic = "com.example.app"))
+        assertNull(requestFrom(null, false, fromHistory, generic = "com.example.app"))
+    }
+
+    @Test
     fun `no extras is no request`() {
         assertNull(requestFrom(null, false, 0))
     }

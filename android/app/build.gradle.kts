@@ -212,6 +212,8 @@ dependencies {
     implementation(libs.coroutines.android)
 
     testImplementation(libs.junit)
+    // Signed synthetic APKs and binary manifests, as the engine's own tests build them.
+    testImplementation(testFixtures(project(":patch-engine")))
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.coroutines.test)
 }

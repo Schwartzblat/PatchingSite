@@ -201,6 +201,8 @@ fun AppNavigation() {
                 NavigationRequests.consume()
                 openTab(Routes.LIBRARY)
             }
+            // The generic run screen isn't routed yet: opening the store is all a tap does.
+            is NavRequest.Generic -> NavigationRequests.consume()
         }
     }
 

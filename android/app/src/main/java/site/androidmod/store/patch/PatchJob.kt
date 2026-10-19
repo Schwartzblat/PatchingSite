@@ -30,8 +30,8 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
-/** Why a build runs: the guide's DOWNLOAD step, or an update of the installed app. */
-enum class PatchMode { GUIDE, UPDATE }
+/** Why a build runs: the guide's DOWNLOAD step, an update of the installed app, or a generic patch of any installed app. */
+enum class PatchMode { GUIDE, UPDATE, GENERIC }
 
 /** Patching on the phone needs Android 13 (ArtHooks); below it nothing can be built here. */
 const val PATCH_MIN_SDK = 33
@@ -42,6 +42,9 @@ sealed interface PatchStage {
 
     /** [total] is -1 while the size is unknown. */
     data class Downloading(val bytesRead: Long, val total: Long) : PatchStage
+
+    /** A generic job copying the installed APKs aside; [total] is their size in bytes. */
+    data class SavingOriginal(val bytesDone: Long, val total: Long) : PatchStage
     data object Patching : PatchStage
     data object Signing : PatchStage
 }

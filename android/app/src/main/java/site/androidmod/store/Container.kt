@@ -15,7 +15,13 @@ import site.androidmod.store.data.SubscriptionRepository
 import site.androidmod.store.data.SubscriptionStore
 import site.androidmod.store.data.TokenStore
 import site.androidmod.store.generic.GenericApi
+import site.androidmod.store.generic.GenericJob
+import site.androidmod.store.generic.GenericLatest
+import site.androidmod.store.generic.GenericRecords
 import site.androidmod.store.generic.GenericRepository
+import site.androidmod.store.generic.GenericServer
+import site.androidmod.store.generic.GenericToken
+import site.androidmod.store.generic.splitArchiveInfo
 import site.androidmod.store.install.Installer
 import site.androidmod.store.install.InstalledApps
 import site.androidmod.store.install.RootInstaller
@@ -26,6 +32,7 @@ import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.patch.ApkSigner
 import site.androidmod.patch.DexHash
 import site.androidmod.patch.FastSigner
+import site.androidmod.patch.GenericPatchEngine
 import site.androidmod.patch.OfficialApk
 import site.androidmod.patch.PatchBundle
 import site.androidmod.patch.PatchEngine
@@ -85,6 +92,7 @@ class Container(private val context: Context) {
     val patchApi by lazy { PatchApi(api) }
     val genericApi by lazy { GenericApi(api) }
     val generic by lazy { GenericRepository(genericApi) }
+    val genericRecords by lazy { GenericRecords(File(context.filesDir, "generic")) }
     val signingKeys by lazy { SigningKeyStore(File(context.filesDir, "signing")) { patchApi.signingKey() } }
     val bundles by lazy { BundleCache(File(context.filesDir, "patch/bundles"), patchApi, BundleKey.publicKey) }
     val downloads by lazy { DownloadRepository(api) }
@@ -137,6 +145,33 @@ class Container(private val context: Context) {
         sdkInt = Build.VERSION.SDK_INT,
         storeVersionCode = storeVersionCode,
         workDir = File(context.filesDir, "patch/work/$pkg"),
+    )
+
+    /**
+     * One generic build of the installed [pkg], following its record's intent. Its own work
+     * directory, wiped like the others at launch; our store's apps are refused by the engine.
+     */
+    fun genericJob(pkg: String): GenericJob = GenericJob(
+        server = object : GenericServer {
+            override suspend fun latest(): GenericLatest = genericApi.latest()
+            override suspend fun bundle(patcherVersion: String): PatchBundle =
+                bundles.open(PatchBundle.GENERIC_PACKAGE, patcherVersion)
+            override suspend fun appToken(): GenericToken = genericApi.appToken()
+            override suspend fun signingKey(): SigningKey = signingKeys.get()
+        },
+        records = genericRecords,
+        reserve = ::reserveSpace,
+        engine = { request, signer -> GenericPatchEngine(signer).patch(request) },
+        signerFor = { key -> fastSigner(key) },
+        // PackageManager reads a base only; a split output is read from its own manifest and signature.
+        inspector = { file -> inspectArchive(file) ?: splitArchiveInfo(file) },
+        installed = { installedApps.packageInfo(it) },
+        storePackages = { appNames.keys },
+        signedIn = { tokens.token != null },
+        sdkInt = Build.VERSION.SDK_INT,
+        deviceAbis = Build.SUPPORTED_ABIS.toList(),
+        storeVersionCode = storeVersionCode,
+        workDir = File(context.filesDir, "patch/work/generic-$pkg"),
     )
 
     // The binary ships as libfastsigner.so and is extracted (useLegacyPackaging) so it can be executed.

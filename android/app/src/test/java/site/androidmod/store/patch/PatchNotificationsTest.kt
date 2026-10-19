@@ -11,6 +11,7 @@ class PatchNotificationsTest {
         assertEquals("Checking version…", PatchNotifications.progressText("WhatsApp", PatchStage.CheckingVersion))
         assertEquals("Patching…", PatchNotifications.progressText("WhatsApp", PatchStage.Patching))
         assertEquals("Signing…", PatchNotifications.progressText("WhatsApp", PatchStage.Signing))
+        assertEquals("Saving the original…", PatchNotifications.progressText("Example", PatchStage.SavingOriginal(1, 2)))
     }
 
     @Test
