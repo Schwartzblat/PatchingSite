@@ -14,6 +14,8 @@ import site.androidmod.store.data.StoreUpdateRepository
 import site.androidmod.store.data.SubscriptionRepository
 import site.androidmod.store.data.SubscriptionStore
 import site.androidmod.store.data.TokenStore
+import site.androidmod.store.generic.GenericApi
+import site.androidmod.store.generic.GenericRepository
 import site.androidmod.store.install.Installer
 import site.androidmod.store.install.InstalledApps
 import site.androidmod.store.install.RootInstaller
@@ -81,6 +83,8 @@ class Container(private val context: Context) {
         settings.onDevicePackages = apps.filter { it.onDevice }.map { it.packageName }.toSet()
     } }
     val patchApi by lazy { PatchApi(api) }
+    val genericApi by lazy { GenericApi(api) }
+    val generic by lazy { GenericRepository(genericApi) }
     val signingKeys by lazy { SigningKeyStore(File(context.filesDir, "signing")) { patchApi.signingKey() } }
     val bundles by lazy { BundleCache(File(context.filesDir, "patch/bundles"), patchApi, BundleKey.publicKey) }
     val downloads by lazy { DownloadRepository(api) }
