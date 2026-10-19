@@ -301,6 +301,7 @@ class GenericJobTest {
                 built = builtEntries(),
                 builtBundleId = bundle.id,
                 builtTokenExpiresAt = EXPIRES_AT,
+                builtSigner = USER_CERT,
             ),
             f.records.get(PKG),
         )
@@ -550,21 +551,27 @@ class GenericJobTest {
     }
 
     @Test
-    fun refuses_store_packages_through_engine() = runTest {
-        val f = fixture()
-        f.records.put(f.record())
-        f.storePackages = setOf("com.whatsapp", PKG)
-        f.engineAction = { request, signer ->
-            // As the engine does.
-            if (PKG in request.refusedPackages) throw PatchException.Unpatchable(listOf(CantPatch.IN_OUR_STORE))
-            f.buildOutputs(request, signer)
+    fun refuses_store_packages_before_copying_or_any_network_call() = runTest {
+        // The catalogue gained the app after it was picked: refused before the CHANGED check, the copy or the server.
+        for (intent in listOf(GenericIntent.PATCH, GenericIntent.REFRESH)) {
+            for (app in listOf<(Fixture) -> InstalledPackage?>({ it.original() }, { it.patchedCopy() }, { null })) {
+                val f = fixture()
+                val record = f.record(intent)
+                f.records.put(record)
+                f.installedApp = app(f)
+                f.storePackages = setOf("com.whatsapp", PKG)
+
+                val outcome = f.run()
+
+                assertEquals("$intent", GenericOutcome.Unpatchable(listOf(CantPatch.IN_OUR_STORE)), outcome)
+                assertEquals("$intent", emptyList<String>(), f.events)
+                assertTrue("$intent", f.requests.isEmpty())
+                assertEquals("$intent", record, f.records.get(PKG))
+                assertFalse("$intent", f.originalDir.exists())
+                assertFalse("$intent", f.builtDir.exists())
+                f.assertNoTemporaryFiles()
+            }
         }
-
-        val outcome = f.run()
-
-        assertEquals(GenericOutcome.Unpatchable(listOf(CantPatch.IN_OUR_STORE)), outcome)
-        assertEquals(setOf("com.whatsapp", PKG), f.requests.single().refusedPackages)
-        assertEquals(emptyList<SavedApk>(), f.records.get(PKG)!!.built)
     }
 
     @Test
@@ -738,6 +745,7 @@ class GenericJobTest {
             assertEquals(name, emptyList<SavedApk>(), record.built)
             assertNull(name, record.builtBundleId)
             assertNull(name, record.builtTokenExpiresAt)
+            assertNull(name, record.builtSigner)
             assertFalse(name, f.builtDir.exists())
             assertEquals(name, savedEntries(), record.original)
             f.assertNoTemporaryFiles()
@@ -780,6 +788,31 @@ class GenericJobTest {
     }
 
     @Test
+    fun the_build_records_the_key_it_was_signed_with() = runTest {
+        // Built with another account's key before: that signer goes with the old build.
+        val f = fixture()
+        val old = SavedApk(BASE, 3, sha256(byteArrayOf(1, 2, 3)))
+        f.records.put(f.record(original = f.savedByEarlierRun(), built = listOf(old)).copy(builtSigner = OTHER_CERT))
+        f.builtDir.mkdirs()
+        File(f.builtDir, BASE).writeBytes(byteArrayOf(1, 2, 3))
+        val writes = mutableListOf<GenericRecord>()
+        f.putHook = { record, put ->
+            writes += record
+            put()
+        }
+
+        assertEquals(GenericOutcome.Built, f.run())
+
+        // The record never pairs a build with another build's signer.
+        for (write in writes) {
+            assertEquals("$write", write.built.isEmpty(), write.builtSigner == null)
+            if (write.built.isNotEmpty()) assertEquals(USER_CERT, write.builtSigner)
+        }
+        assertEquals(USER_CERT, f.records.get(PKG)!!.builtSigner)
+        assertEquals(f.key.certSha256, f.signerKeys.single().certSha256)
+    }
+
+    @Test
     fun refresh_from_saved_original_uses_original_source() = runTest {
         val f = fixture()
         val saved = f.savedByEarlierRun()
@@ -802,6 +835,7 @@ class GenericJobTest {
                 built = builtEntries(),
                 builtBundleId = bundle.id,
                 builtTokenExpiresAt = EXPIRES_AT,
+                builtSigner = USER_CERT,
             ),
             f.records.get(PKG),
         )
@@ -1196,6 +1230,7 @@ class GenericJobTest {
         const val SPLIT = "split_config.arm64_v8a.apk"
         val USER_CERT = "a".repeat(64)
         val DEV_CERT = "d".repeat(64)
+        val OTHER_CERT = "9".repeat(64)
         val ABIS = listOf("arm64-v8a", "armeabi-v7a")
         val STORE_PACKAGES = setOf("com.whatsapp", "il.co.mako")
         val BASE_BYTES = "the installed base apk".toByteArray()

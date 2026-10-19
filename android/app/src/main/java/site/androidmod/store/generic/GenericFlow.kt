@@ -86,18 +86,24 @@ class GenericFlow(
     /** The step [packageName] is at now; null when it has no record. */
     fun phase(packageName: String): GenericPhase? = records.get(packageName)?.let(::phaseOf)
 
+    /** Whether the user's signing key is cached: without it, our own copy reads as changed outside the store. */
+    fun keyKnown(): Boolean = userCert() != null
+
     /**
      * Call right before the UI asks Android to remove the app (ACTION_DELETE), and fire that only
      * on null: the request time is then on disk. Anything else says why not, and nothing was
      * written. Allowed at RemoveOriginal while the saved original and the patched copy still match
-     * their hashes, and at RemovePatched while the saved original does.
+     * their hashes and the key the copy was signed with is cached, and at RemovePatched while the
+     * saved original does.
      */
     fun askedToUninstall(packageName: String): String? = synchronized(lock) {
         val record = records.get(packageName) ?: return@synchronized notReadyToRemove(packageName)
         if (busy(packageName)) return@synchronized BUSY
         val intact = when (phaseOf(record)) {
             is GenericPhase.RemoveOriginal -> {
-                // The installer trusts only the cached key: without it the patched copy couldn't go in next.
+                // The installer trusts only the cached key: without it, or with another account's, the patched
+                // copy couldn't go in next. A record from before the build's signer was kept needs some key.
+                if (builtByAnotherKey(record)) return@synchronized wrongAccount(record.label)
                 if (userCert() == null) return@synchronized "Sign in again before removing ${record.label}."
                 intact(records.originalDir(packageName), record.original) && intact(records.builtDir(packageName), record.built)
             }
@@ -114,11 +120,15 @@ class GenericFlow(
         }
     }
 
-    /** Installs our patched copy, base first: at InstallPatched, or InstallUpdate for a Refresh. A failure changes nothing. */
+    /**
+     * Installs our patched copy, base first: at InstallPatched, or InstallUpdate for a Refresh, and
+     * only while the key it was signed with is the one cached. A failure changes nothing.
+     */
     suspend fun installPatched(packageName: String): InstallOutcome = installStep(packageName) { record, phase ->
         val dir = records.builtDir(packageName)
         when {
             phase != GenericPhase.InstallPatched && phase != GenericPhase.InstallUpdate -> Step.Refused(atAnotherStep(record.label))
+            builtByAnotherKey(record) -> Step.Refused(wrongAccount(record.label))
             !intact(dir, record.built) -> Step.Refused("The patched copy of ${record.label} is damaged, so it wasn't installed.")
             // Signed with the user's key, which the installer trusts already.
             else -> Step.Ready(record.built.map { File(dir, it.name) }, emptySet())
@@ -160,7 +170,9 @@ class GenericFlow(
      * Abandons the flow under way, only where the customer keeps a working app, and says whether it
      * did:
      * - PATCH: while the original is installed (its signers, read now), at whatever step, or while
-     *   nothing is saved yet, whatever is installed; the record and all its files go. Never once the
+     *   nothing is saved yet, whatever is installed; the record and all its files go. Once its
+     *   removal was asked for, the saved original stays with the record (no intent), in case Android
+     *   is still removing the app: the Library then forgets it, or puts it back. Never once the
      *   original is removed after being saved: then the way on is installing the patched copy or
      *   putting the original back.
      * - REFRESH: the new build goes; the patched copy installed stays.
@@ -174,7 +186,13 @@ class GenericFlow(
             GenericIntent.PATCH -> {
                 // The job records the original before it builds, so with neither there is nothing of value on disk.
                 val allowed = (record.original.isEmpty() && record.built.isEmpty()) || originalInstalled(record)
-                if (allowed) records.remove(packageName)
+                if (allowed && record.uninstallAskedAt != null && record.original.isNotEmpty()) {
+                    // Android may still list the original while it finishes removing it: keep its saved copy.
+                    records.put(record.withoutBuild().copy(intent = null, uninstallAskedAt = null))
+                    records.builtDir(packageName).deleteRecursively()
+                } else if (allowed) {
+                    records.remove(packageName)
+                }
                 allowed
             }
             GenericIntent.REFRESH -> {
@@ -312,6 +330,15 @@ class GenericFlow(
 
     private fun intact(dir: File, saved: List<SavedApk>): Boolean = savedCopiesIntact(dir, saved, sha256)
 
+    /**
+     * The build was signed with a key other than the cached one (or none is cached), so the installer
+     * wouldn't trust it. False for a record from before the build's signer was kept.
+     */
+    private fun builtByAnotherKey(record: GenericRecord): Boolean {
+        val signer = record.builtSigner ?: return false
+        return !signer.equals(userCert(), ignoreCase = true)
+    }
+
     /** The phone has [record]'s original signers installed now. */
     private fun originalInstalled(record: GenericRecord): Boolean {
         val signers = installedState(record.packageName)?.signers ?: return false
@@ -322,15 +349,18 @@ class GenericFlow(
     private fun GenericRecord.asPatched() =
         copy(patchedBundleId = builtBundleId, tokenExpiresAt = builtTokenExpiresAt, patchedAt = now())
 
-    private fun GenericRecord.withoutBuild() = copy(built = emptyList(), builtBundleId = null, builtTokenExpiresAt = null)
+    private fun GenericRecord.withoutBuild() =
+        copy(built = emptyList(), builtBundleId = null, builtTokenExpiresAt = null, builtSigner = null)
 
     private companion object {
         const val BUSY = "Wait for the current step to finish, then try again."
         const val DAMAGED_ORIGINAL = "The saved original is damaged, so it can't be put back."
 
         fun atAnotherStep(label: String) = "Nothing was installed, because $label is at another step now."
+        fun wrongAccount(label: String) = "Sign in with the account you patched $label with."
         fun notReadyToRemove(label: String) = "$label isn't ready to be removed."
-        fun noSavedOriginal(label: String) = "There's no saved original of $label to put back."
+        fun noSavedOriginal(label: String) =
+            "There's no saved original of $label to put back. To get the original, uninstall $label, then install it from Google Play."
         fun cantRefresh(label: String) = "$label can't be refreshed right now."
     }
 }

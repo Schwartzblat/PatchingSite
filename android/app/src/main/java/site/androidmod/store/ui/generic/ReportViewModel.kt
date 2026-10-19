@@ -15,6 +15,7 @@ import site.androidmod.store.generic.GenericApi
 import site.androidmod.store.generic.GenericRecord
 import site.androidmod.store.generic.payloadLines
 import site.androidmod.store.generic.reportPayload
+import java.util.concurrent.ConcurrentHashMap
 
 /** Everything about the report form but the choice and the note; see [ReportViewModel.note]. */
 data class ReportStatus(
@@ -100,4 +101,21 @@ class ReportViewModel(
 
         private const val HTTP_TOO_MANY = 429
     }
+}
+
+/**
+ * The records of apps just put back, for the report the run screen offers then: finishing the
+ * restore deletes the record from disk, and the report screen needs it. In memory only, the
+ * latest per package; nothing here leaves the phone unless the customer sends the report.
+ */
+class RestoredRecords {
+    private val kept = ConcurrentHashMap<String, GenericRecord>()
+
+    fun keep(record: GenericRecord) {
+        kept[record.packageName] = record
+    }
+
+    /** The record [onDisk] has, which is the app as it is now; otherwise the one kept, if any. */
+    fun lookup(packageName: String, onDisk: (String) -> GenericRecord?): GenericRecord? =
+        onDisk(packageName) ?: kept[packageName]
 }

@@ -52,6 +52,7 @@ import site.androidmod.store.patch.PatchServer
 import site.androidmod.store.patch.SigningKey
 import site.androidmod.store.patch.SigningKeyStore
 import site.androidmod.store.patch.splitArchiveInfo
+import site.androidmod.store.ui.generic.RestoredRecords
 import site.androidmod.store.ui.settings.bugReportContext
 import site.androidmod.store.update.InstalledBuild
 import site.androidmod.store.update.PackageSelfInstaller
@@ -104,6 +105,9 @@ class Container(private val context: Context) {
     val genericApi by lazy { GenericApi(api) }
     val generic by lazy { GenericRepository(genericApi) }
     val genericRecords by lazy { GenericRecords(File(context.filesDir, "generic")) }
+
+    /** For the report offered once an original is back: that deletes the app's record. */
+    val restoredRecords = RestoredRecords()
     val signingKeys by lazy { SigningKeyStore(File(context.filesDir, "signing")) { patchApi.signingKey() } }
     val bundles by lazy { BundleCache(File(context.filesDir, "patch/bundles"), patchApi, BundleKey.publicKey) }
     val downloads by lazy { DownloadRepository(api) }
@@ -160,7 +164,8 @@ class Container(private val context: Context) {
 
     /**
      * One generic build of the installed [pkg], following its record's intent. Its own work
-     * directory, wiped like the others at launch; our store's apps are refused by the engine.
+     * directory, wiped like the others at launch; our store's apps are refused, by the job before it
+     * copies anything and again by the engine.
      */
     fun genericJob(pkg: String): GenericJob = GenericJob(
         server = object : GenericServer {
@@ -263,20 +268,18 @@ class Container(private val context: Context) {
      * getAllocatableBytes counts that cache, and allocateBytes is the request that
      * clears it - without that call the space is only theoretical, and the write
      * would still hit ENOSPC halfway through. Falls back to usable space if the
-     * volume cannot be resolved.
+     * volume cannot be resolved ([reserveOrMeasure]).
      */
-    private fun reserveSpace(directory: File, bytes: Long): Long = try {
+    private fun reserveSpace(directory: File, bytes: Long): Long = reserveOrMeasure(directory, bytes, context.filesDir) { dir, wanted ->
         val storage = context.getSystemService(StorageManager::class.java)
-        val volume = storage.getUuidForPath(directory)
+        val volume = storage.getUuidForPath(dir)
         val allocatable = storage.getAllocatableBytes(volume)
-        if (allocatable < bytes) {
-            bytes - allocatable
+        if (allocatable < wanted) {
+            wanted - allocatable
         } else {
-            storage.allocateBytes(volume, bytes)
+            storage.allocateBytes(volume, wanted)
             0L
         }
-    } catch (error: IOException) {
-        (bytes - directory.usableSpace).coerceAtLeast(0)
     }
 
     /**
@@ -290,4 +293,16 @@ class Container(private val context: Context) {
         } else {
             sessionInstaller
         }
+}
+
+/**
+ * [reserve]'s shortfall for [bytes] under [directory]; when it fails (StorageManager can't resolve
+ * the volume), the shortfall against the usable space of [filesDir]. Not [directory]'s: it may not
+ * exist yet (a generic job's `original/`), and a missing directory has no usable space. Every
+ * directory the store reserves in is under [filesDir], so it is the same volume.
+ */
+internal fun reserveOrMeasure(directory: File, bytes: Long, filesDir: File, reserve: (File, Long) -> Long): Long = try {
+    reserve(directory, bytes)
+} catch (error: IOException) {
+    ApiClient.usableSpaceShortfall(filesDir, bytes)
 }

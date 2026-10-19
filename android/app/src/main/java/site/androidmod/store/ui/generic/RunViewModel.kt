@@ -40,6 +40,9 @@ interface RunFlow {
     fun finish(packageName: String)
     fun stop(packageName: String): Boolean
     fun startRestore(packageName: String): String?
+
+    /** Whether the user's signing key is cached; without it our own copy reads as changed outside the store. */
+    fun keyKnown(): Boolean
 }
 
 /** The store's [GenericFlow], with the record read from [records]. */
@@ -52,6 +55,7 @@ fun runFlowOf(flow: GenericFlow, records: GenericRecords): RunFlow = object : Ru
     override fun finish(packageName: String) = flow.finish(packageName)
     override fun stop(packageName: String) = flow.stop(packageName)
     override fun startRestore(packageName: String) = flow.startRestore(packageName)
+    override fun keyKnown() = flow.keyKnown()
 }
 
 sealed interface RunEvent {
@@ -60,6 +64,9 @@ sealed interface RunEvent {
 
     /** The swap was stopped: leave the screen. */
     data object Closed : RunEvent
+
+    /** Open "Report how it works" for the app just put back. */
+    data class OpenReport(val packageName: String) : RunEvent
 }
 
 data class RunState(
@@ -68,7 +75,7 @@ data class RunState(
     val label: String = "",
     /** The record's; null when nothing is under way. */
     val intent: GenericIntent? = null,
-    /** Null when the app has no record. */
+    /** Null when the app has no record, or when [unchecked]. */
     val phase: GenericPhase? = null,
     /** The record lists the saved original. */
     val originalSaved: Boolean = false,
@@ -85,6 +92,13 @@ data class RunState(
     val message: String? = null,
     /** The swap finished: Patched or Restored. Stays once set, though finishing a restore forgets the app. */
     val done: Boolean = false,
+    /**
+     * The step reads as changed outside the store while the user's signing key isn't cached, and
+     * without the key our own copy reads that way too: it can't be told now, as in the Library.
+     */
+    val unchecked: Boolean = false,
+    /** The record of the app just put back, read before finishing forgot it: Done offers the report with it. */
+    val restoredRecord: GenericRecord? = null,
 )
 
 /**
@@ -107,6 +121,8 @@ class RunViewModel(
     private val canInstall: () -> Boolean = StoreApp.instance.container.let { container ->
         { container.installer() !== container.sessionInstaller || container.sessionInstaller.canInstall() }
     },
+    /** Hands the record of the app just put back to the report screen, which finds it there. */
+    private val keepForReport: (GenericRecord) -> Unit = StoreApp.instance.container.restoredRecords::keep,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
@@ -135,14 +151,29 @@ class RunViewModel(
         viewModelScope.launch { read() }
     }
 
-    /** "Remove <App>" or "Remove the patched copy". */
+    /**
+     * "Remove <App>" or "Remove the patched copy". Android removes the app at once, so this first
+     * makes sure the store may install: without that, neither the patched copy nor the saved
+     * original could go back in.
+     */
     fun onRemove() = act {
+        if (!withContext(io) { canInstall() }) {
+            _state.update { it.copy(needsInstallPermission = true) }
+            return@act null
+        }
         val refusal = withContext(io) { flow.askedToUninstall(packageName) }
         if (refusal == null) {
             _state.update { it.copy(awaitingUninstall = true, stillInstalled = false) }
             _events.send(RunEvent.LaunchUninstall(packageName))
         }
         refusal
+    }
+
+    /** "Report how it works" on Done after putting the original back; nothing before then. */
+    fun onReport() {
+        val record = _state.value.restoredRecord ?: return
+        keepForReport(record)
+        viewModelScope.launch { _events.send(RunEvent.OpenReport(packageName)) }
     }
 
     /** Android's uninstall dialog answered (or couldn't open). */
@@ -215,7 +246,9 @@ class RunViewModel(
     }
 
     private suspend fun read(afterUninstall: Boolean = false) = reading.withLock {
-        val (record, phase) = withContext(io) {
+        val (record, phase, keyKnown) = withContext(io) {
+            // Known before and after the phase: a key cached or cleared meanwhile leaves it unsure.
+            val keyBefore = flow.keyKnown()
             val record = flow.record(packageName)
             val phase = record?.let { flow.phase(packageName) }
             // Refused while an install of the app still reports, or failing to write: the next read finishes it.
@@ -228,8 +261,10 @@ class RunViewModel(
                     // The phone already shows the swap done.
                 }
             }
-            record to phase
+            Triple(record, phase, keyBefore && flow.keyKnown())
         }
+        // The Library's rule (GenericLibrarySource): Attention without the key isn't shown.
+        val unchecked = phase is GenericPhase.Attention && !keyKnown
         _state.update { current ->
             val removing = phase is GenericPhase.RemoveOriginal || phase is GenericPhase.RemovePatched
             // Asked before this screen opened (the store was closed meanwhile), and still here.
@@ -240,10 +275,12 @@ class RunViewModel(
                 loading = false,
                 label = record?.label ?: current.label,
                 intent = record?.intent ?: current.intent.takeIf { done },
-                phase = phase,
+                phase = phase.takeUnless { unchecked },
                 originalSaved = record?.original?.isNotEmpty() == true,
                 stillInstalled = removing && (afterUninstall || current.stillInstalled || (current.loading && askedBefore)),
                 done = done,
+                unchecked = unchecked,
+                restoredRecord = current.restoredRecord ?: record.takeIf { phase == GenericPhase.Restored },
             )
         }
     }

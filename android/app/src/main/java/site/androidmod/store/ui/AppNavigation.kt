@@ -256,7 +256,7 @@ fun AppNavigation() {
     val selectedRoute = when (currentRoute) {
         Routes.APP_DETAIL, Routes.MOVE_CHATS, in GENERIC_ROUTES -> Routes.CATALOG
         Routes.BUG_REPORT, Routes.CHANGE_PASSWORD -> Routes.SETTINGS
-        // Reached from a Library entry.
+        // Reached from a Library entry (or the run screen's Done after a restore).
         Routes.GENERIC_REPORT -> Routes.LIBRARY
         else -> currentRoute
     }
@@ -395,6 +395,7 @@ fun AppNavigation() {
                     onOpenInstallSettings = openInstallSettings,
                     onLibrary = { openTab(Routes.LIBRARY) },
                     onClose = { navController.popBackStack() },
+                    onReport = { name -> navController.navigate(Routes.genericReport(name)) { launchSingleTop = true } },
                 )
             }
             composable(Routes.APP_DETAIL) { entry ->
@@ -427,7 +428,8 @@ fun AppNavigation() {
                 val pkg = entry.arguments?.getString("package").orEmpty()
                 ReportRoute(
                     packageName = pkg,
-                    lookup = container.genericRecords::get,
+                    // From the run screen after a restore, the record is gone from disk and kept in memory.
+                    lookup = { name -> container.restoredRecords.lookup(name, container.genericRecords::get) },
                     create = { record ->
                         ReportViewModel(record, container.genericApi, container.installedBuild().versionCode, Build.VERSION.SDK_INT)
                     },

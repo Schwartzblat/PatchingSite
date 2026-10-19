@@ -54,7 +54,7 @@ class ReportViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun model() = ReportViewModel(
+    private fun model(record: GenericRecord = this.record) = ReportViewModel(
         record = record,
         api = GenericApi(
             ApiClient(OkHttpClient(), baseUrl = { server.url("/").toString().trimEnd('/') }, token = { "tok" }),
@@ -232,6 +232,40 @@ class ReportViewModelTest {
             ),
             payloadLines(request),
         )
+    }
+
+    @Test
+    fun a_record_kept_after_a_restore_is_found_only_when_none_is_on_disk() {
+        val restored = RestoredRecords()
+        assertNull(restored.lookup(record.packageName) { null })
+
+        restored.keep(record)
+        assertEquals(record, restored.lookup(record.packageName) { null })
+        assertNull(restored.lookup("com.other.app") { null })
+
+        // A record on disk is the app as it is now: it wins.
+        val onDisk = record.copy(versionName = "8.0", versionCode = 80L)
+        assertEquals(onDisk, restored.lookup(record.packageName) { onDisk })
+    }
+
+    @Test
+    fun a_report_after_a_restore_sends_the_same_payload() = runTest {
+        // Finishing the restore deleted the record from disk; the run screen kept it for the report.
+        val restored = RestoredRecords()
+        restored.keep(record)
+        val found = restored.lookup(record.packageName) { null }!!
+        server.enqueue(thanks())
+        val model = model(found)
+        model.onWorked(false)
+        model.onNoteChange("Ads came back after a day.")
+        val shown = model.preview
+
+        model.send()
+        model.status.first { it.sent != null }
+
+        val sent = Json.decodeFromString<GenericReportRequest>(server.takeRequest().body!!.utf8())
+        assertEquals(reportPayload(record, worked = false, note = "Ads came back after a day.", STORE_VERSION, SDK), sent)
+        assertEquals(shown, payloadLines(sent))
     }
 
     private companion object {

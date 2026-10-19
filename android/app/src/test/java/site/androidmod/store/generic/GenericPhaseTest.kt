@@ -27,6 +27,10 @@ class GenericPhaseTest {
 
     private fun phase(r: GenericRecord, i: InstalledState?) = genericPhase(r, i, user)
 
+    /** Another signer is installed: only uninstalling it leads anywhere. */
+    private val changedOutside =
+        GenericPhase.Attention("Example was changed outside the store. Uninstall it, then put the original back from the Library.")
+
     // PATCH
     @Test fun patch_removed_before_saved() =
         assertEquals(GenericPhase.Attention("Example was removed before its original was saved."), phase(record(original = emptyList(), built = emptyList()), null))
@@ -47,7 +51,10 @@ class GenericPhaseTest {
         assertEquals(GenericPhase.Patched, phase(record(), ourBuild))
 
     @Test fun patch_other_state_needs_attention() =
-        assertEquals(GenericPhase.Attention("Example was changed outside the store. Uninstall it, then put the original back from the Library."), phase(record(), ourOther))
+        assertEquals(changedOutside, phase(record(), ourOther))
+
+    @Test fun patch_foreign_signer_says_to_uninstall() =
+        assertEquals(changedOutside, phase(record(), InstalledState(setOf("zz"), 5L, "x")))
 
     @Test fun phase_resumes_at_install_after_original_removed() =
         assertEquals(GenericPhase.InstallPatched, phase(record(), null))
@@ -58,8 +65,11 @@ class GenericPhaseTest {
     }
 
     @Test fun play_update_mid_flow_needs_attention() {
+        // The original signer at another version: Stop keeps the app, so the text says Stop, not uninstall.
         val updated = InstalledState(orig, 6L, "play-sha")
-        assertTrue(phase(record(), updated) is GenericPhase.Attention)
+        val expected = GenericPhase.Attention("Example was updated outside the store since you picked it. Stop, then pick it again.")
+        assertEquals(expected, phase(record(), updated))
+        assertEquals(expected, phase(record(asked = 99L), updated))
     }
 
     // RESTORE
@@ -73,7 +83,7 @@ class GenericPhaseTest {
         assertEquals(GenericPhase.Restored, phase(record(GenericIntent.RESTORE), originalInstalled))
 
     @Test fun restore_other_state_needs_attention() =
-        assertTrue(phase(record(GenericIntent.RESTORE), InstalledState(setOf("zz"), 5L, "x")) is GenericPhase.Attention)
+        assertEquals(changedOutside, phase(record(GenericIntent.RESTORE), InstalledState(setOf("zz"), 5L, "x")))
 
     @Test fun restore_without_saved_original_needs_attention() {
         val r = record(GenericIntent.RESTORE, original = emptyList())
@@ -88,8 +98,15 @@ class GenericPhaseTest {
     @Test fun patch_removed_before_saved_wins_even_with_built() =
         assertEquals(GenericPhase.Attention("Example was removed before its original was saved."), phase(record(original = emptyList()), null))
 
-    @Test fun refresh_original_installed_needs_attention() =
-        assertTrue(phase(record(GenericIntent.REFRESH), originalInstalled) is GenericPhase.Attention)
+    @Test fun refresh_original_installed_needs_attention() {
+        // Stop ends a Refresh and keeps what is installed.
+        val expected = GenericPhase.Attention("Example was put back outside the store. Stop to end the Refresh.")
+        assertEquals(expected, phase(record(GenericIntent.REFRESH), originalInstalled))
+        assertEquals(expected, phase(record(GenericIntent.REFRESH), InstalledState(orig, 6L, "play-sha")))
+    }
+
+    @Test fun refresh_foreign_signer_says_to_uninstall() =
+        assertEquals(changedOutside, phase(record(GenericIntent.REFRESH), InstalledState(setOf("zz"), 5L, "x")))
 
     // REFRESH
     @Test fun refresh_without_built_saves_and_builds() =
@@ -121,7 +138,7 @@ class GenericPhaseTest {
         assertEquals(GenericPhase.Unpatched, phase(record(null), originalInstalled))
 
     @Test fun none_other_needs_attention() =
-        assertTrue(phase(record(null), InstalledState(setOf("zz"), 5L, "x")) is GenericPhase.Attention)
+        assertEquals(changedOutside, phase(record(null), InstalledState(setOf("zz"), 5L, "x")))
 
     @Test fun null_user_cert_is_never_ours() =
         assertTrue(genericPhase(record(null), ourBuild, null) is GenericPhase.Attention)

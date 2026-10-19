@@ -213,6 +213,8 @@ class GenericJob(
             // Our store's own apps are refused; before any catalogue has loaded, which they are isn't known.
             val refused = storePackages()
             if (refused.isEmpty()) return failed(GenericFailure.NOT_AVAILABLE, label)
+            // The catalogue may have gained the app since it was picked: refused before anything is copied or asked.
+            if (packageName in refused) return GenericOutcome.Unpatchable(listOf(CantPatch.IN_OUR_STORE))
 
             // Still the app the record describes? No network until this holds for a PATCH.
             val app = blocking { installed(packageName) }
@@ -326,11 +328,18 @@ class GenericJob(
                 }
                 // The record never lists a build that isn't in built/: forget the old one before replacing it.
                 if (record.built.isNotEmpty()) {
-                    update(packageName, intent) { it.copy(built = emptyList(), builtBundleId = null, builtTokenExpiresAt = null) }
+                    update(packageName, intent) {
+                        it.copy(built = emptyList(), builtBundleId = null, builtTokenExpiresAt = null, builtSigner = null)
+                    }
                 }
                 replaceDir(builtTmpDir, records.builtDir(packageName))
                 update(packageName, intent) {
-                    it.copy(built = built, builtBundleId = bundle.id, builtTokenExpiresAt = token.expiresAtMillis)
+                    it.copy(
+                        built = built,
+                        builtBundleId = bundle.id,
+                        builtTokenExpiresAt = token.expiresAtMillis,
+                        builtSigner = signingKey.certSha256,
+                    )
                 }
             }
             return GenericOutcome.Built

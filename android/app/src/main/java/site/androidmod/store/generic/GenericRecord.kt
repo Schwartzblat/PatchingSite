@@ -32,6 +32,8 @@ data class GenericRecord(
     val built: List<SavedApk> = emptyList(),
     @SerialName("built_bundle_id") val builtBundleId: String? = null,
     @SerialName("built_token_expires_at") val builtTokenExpiresAt: Long? = null,
+    /** The SHA-256 of the certificate [built] is signed with; null in a record from before it was kept. */
+    @SerialName("built_signer") val builtSigner: String? = null,
     val intent: GenericIntent? = null,
     @SerialName("uninstall_asked_at") val uninstallAskedAt: Long? = null,
     @SerialName("patched_bundle_id") val patchedBundleId: String? = null,

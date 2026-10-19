@@ -32,6 +32,7 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
     val original = installed != null && installed.signers == record.originalSigners
     val ourBuild = installed != null && record.built.isNotEmpty() && installed.baseSha256 == record.built.first().sha256
     val asked = record.uninstallAskedAt != null
+    // Another signer is installed: only removing it leads anywhere.
     val changed = GenericPhase.Attention("${record.label} was changed outside the store. Uninstall it, then put the original back from the Library.")
 
     return when (record.intent) {
@@ -42,6 +43,8 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
             original && installed.versionCode == record.versionCode -> GenericPhase.RemoveOriginal(asked)
             installed == null -> GenericPhase.InstallPatched
             ourBuild -> GenericPhase.Patched
+            // The original signer at another version (Play updated it): Stop keeps the app as it is.
+            original -> GenericPhase.Attention("${record.label} was updated outside the store since you picked it. Stop, then pick it again.")
             else -> changed
         }
         GenericIntent.RESTORE -> when {
@@ -56,6 +59,8 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
             record.built.isEmpty() -> GenericPhase.SaveAndBuild
             ourBuild -> GenericPhase.Patched
             ours -> GenericPhase.InstallUpdate
+            // Stop ends the Refresh and leaves what is installed.
+            original -> GenericPhase.Attention("${record.label} was put back outside the store. Stop to end the Refresh.")
             else -> changed
         }
         null -> when {

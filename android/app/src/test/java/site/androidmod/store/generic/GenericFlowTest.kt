@@ -74,14 +74,18 @@ class GenericFlowTest {
 
         fun record(): GenericRecord = records.get(PKG)!!
 
-        /** A begun patch after its job: the original saved and the patched copy built, both verified. */
-        fun built(): GenericRecord {
+        /**
+         * A begun patch after its job: the original saved and the patched copy built, both verified.
+         * [signer] is the key the job recorded; null as in a record from before it did.
+         */
+        fun built(signer: String? = null): GenericRecord {
             flow.begin(app())
             val record = record().copy(
                 original = save(originalDir, BASE to BASE_BYTES, SPLIT to SPLIT_BYTES),
                 built = save(builtDir, BASE to BUILT_BASE, SPLIT to BUILT_SPLIT),
                 builtBundleId = BUNDLE_ID,
                 builtTokenExpiresAt = EXPIRES_AT,
+                builtSigner = signer,
             )
             records.put(record)
             return record
@@ -196,17 +200,16 @@ class GenericFlowTest {
 
     @Test
     fun stop_only_cleans_up_while_original_installed() {
-        for (asked in listOf(false, true)) {
-            // The original is installed, at every step before it is removed: Stop forgets everything.
-            val f = fixture()
-            f.built()
-            if (asked) assertNull(f.flow.askedToUninstall(PKG))
-            assertEquals(GenericPhase.RemoveOriginal(asked), f.flow.phase(PKG))
-            assertTrue(f.flow.stop(PKG))
-            assertNull(f.records.get(PKG))
-            assertFalse(f.packageDir.exists())
+        // The original is installed, at every step before it is removed: Stop forgets everything.
+        val f = fixture()
+        f.built()
+        assertEquals(GenericPhase.RemoveOriginal(false), f.flow.phase(PKG))
+        assertTrue(f.flow.stop(PKG))
+        assertNull(f.records.get(PKG))
+        assertFalse(f.packageDir.exists())
 
-            // The original is already removed: no Stop, and nothing is deleted.
+        // The original is already removed: no Stop, and nothing is deleted.
+        for (asked in listOf(false, true)) {
             val g = fixture()
             g.built()
             if (asked) assertNull(g.flow.askedToUninstall(PKG))
@@ -217,12 +220,16 @@ class GenericFlowTest {
             assertEquals(before, g.record())
             assertEquals(listOf(BASE, SPLIT), g.files(g.originalDir))
             assertEquals(listOf(BASE, SPLIT), g.files(g.builtDir))
-
-            // Re-read at the call: once the original is back, Stop cleans up.
-            g.installed = ORIGINAL_INSTALLED
-            assertTrue(g.flow.stop(PKG))
-            assertFalse(g.packageDir.exists())
         }
+
+        // Re-read at the call: once the original is back, Stop cleans up.
+        val back = fixture()
+        back.built()
+        back.installed = null
+        assertFalse(back.flow.stop(PKG))
+        back.installed = ORIGINAL_INSTALLED
+        assertTrue(back.flow.stop(PKG))
+        assertFalse(back.packageDir.exists())
 
         // Before anything was saved.
         val early = fixture()
@@ -252,6 +259,49 @@ class GenericFlowTest {
         assertFalse(none.flow.stop(PKG))
         none.patched()
         assertFalse(none.flow.stop(PKG))
+    }
+
+    @Test
+    fun stop_after_a_removal_request_keeps_the_saved_original() = runTest {
+        // Android may still list the original while it finishes removing it: Stop then keeps its saved copy.
+        val f = fixture()
+        f.built()
+        f.clock = 3_000L
+        assertNull(f.flow.askedToUninstall(PKG))
+        val asked = f.record()
+        assertEquals(GenericPhase.RemoveOriginal(true), f.flow.phase(PKG))
+
+        assertTrue(f.flow.stop(PKG))
+        val kept = asked.copy(
+            built = emptyList(),
+            builtBundleId = null,
+            builtTokenExpiresAt = null,
+            intent = null,
+            uninstallAskedAt = null,
+        )
+        assertEquals(kept, f.record())
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+        assertFalse(f.builtDir.exists())
+        // Still listed: the Library offers Forget.
+        assertEquals(GenericPhase.Unpatched, f.flow.phase(PKG))
+
+        // The removal went through after all: the Library offers Put back, and it works.
+        f.installed = null
+        assertEquals(GenericPhase.Removed, f.flow.phase(PKG))
+        assertNull(f.flow.startRestore(PKG))
+        assertEquals(GenericPhase.InstallOriginal, f.flow.phase(PKG))
+        assertEquals(InstallOutcome.Success, f.flow.installOriginal(PKG))
+        assertEquals(listOf(File(f.originalDir, BASE), File(f.originalDir, SPLIT)) to setOf(DEV_CERT), f.installs.single())
+
+        // A Play update after the request: Stop keeps the saved original too.
+        val g = fixture()
+        g.built()
+        assertNull(g.flow.askedToUninstall(PKG))
+        g.installed = ORIGINAL_INSTALLED.copy(versionCode = VERSION_CODE + 1, baseSha256 = "f".repeat(64))
+        assertTrue(g.flow.stop(PKG))
+        assertNull(g.record().intent)
+        assertEquals(listOf(BASE, SPLIT), g.files(g.originalDir))
+        assertFalse(g.builtDir.exists())
     }
 
     @Test
@@ -632,6 +682,50 @@ class GenericFlowTest {
     }
 
     @Test
+    fun removal_and_install_need_the_account_that_built_the_copy() = runTest {
+        val f = fixture()
+        f.built(signer = USER_CERT)
+        val wrongAccount = "Sign in with the account you patched Example with."
+
+        // Signed in to another account since the build: its key couldn't install the patched copy.
+        for (cert in listOf(OTHER_CERT, null)) {
+            f.cert = cert
+            assertEquals("$cert", wrongAccount, f.flow.askedToUninstall(PKG))
+            assertNull("$cert", f.record().uninstallAskedAt)
+        }
+        // The same key, whatever its case.
+        f.cert = USER_CERT.uppercase()
+        assertNull(f.flow.askedToUninstall(PKG))
+
+        f.installed = null
+        f.cert = OTHER_CERT
+        assertEquals(refused(wrongAccount), f.flow.installPatched(PKG))
+        assertEquals(emptyList<Pair<List<File>, Set<String>>>(), f.installs)
+        assertEquals(GenericPhase.InstallPatched, f.flow.phase(PKG))
+
+        f.cert = USER_CERT
+        assertEquals(InstallOutcome.Success, f.flow.installPatched(PKG))
+        assertEquals(1, f.installs.size)
+
+        // Finishing forgets the build, its signer included.
+        f.installed = PATCHED_INSTALLED
+        f.flow.finish(PKG)
+        assertNull(f.record().builtSigner)
+    }
+
+    @Test
+    fun a_record_from_before_the_built_signer_keeps_the_old_checks() = runTest {
+        val f = fixture()
+        f.built()
+        assertNull(f.record().builtSigner)
+        // Any cached key lets the removal go ahead, as before.
+        f.cert = OTHER_CERT
+        assertNull(f.flow.askedToUninstall(PKG))
+        f.installed = null
+        assertEquals(InstallOutcome.Success, f.flow.installPatched(PKG))
+    }
+
+    @Test
     fun adopt_records_bundle_id_and_no_original() {
         val f = fixture()
         f.installed = PATCHED_INSTALLED
@@ -654,7 +748,10 @@ class GenericFlowTest {
         assertEquals(GenericPhase.Patched, f.flow.phase(PKG))
         assertThrows(IllegalStateException::class.java) { f.flow.adopt(ours, INFO) }
 
-        assertEquals("There's no saved original of Example to put back.", f.flow.startRestore(PKG))
+        assertEquals(
+            "There's no saved original of Example to put back. To get the original, uninstall Example, then install it from Google Play.",
+            f.flow.startRestore(PKG),
+        )
         assertEquals(record, f.record())
         assertEquals(0L, f.flow.savedOriginalBytes(PKG))
         assertFalse(f.flow.deleteSavedOriginal(PKG))
@@ -662,6 +759,25 @@ class GenericFlowTest {
         assertNull(f.flow.startRefresh(PKG))
         assertEquals(GenericIntent.REFRESH, f.record().intent)
         assertEquals(GenericPhase.SaveAndBuild, f.flow.phase(PKG))
+    }
+
+    @Test
+    fun put_back_without_a_saved_original_points_to_play() {
+        val f = fixture()
+        f.patched()
+        assertTrue(f.flow.deleteSavedOriginal(PKG))
+        val deleted = f.record()
+        assertEquals(
+            "There's no saved original of Example to put back. To get the original, uninstall Example, then install it from Google Play.",
+            f.flow.startRestore(PKG),
+        )
+        assertEquals(deleted, f.record())
+
+        // No record at all: the package stands in for the name.
+        assertEquals(
+            "There's no saved original of $PKG to put back. To get the original, uninstall $PKG, then install it from Google Play.",
+            fixture().flow.startRestore(PKG),
+        )
     }
 
     @Test
@@ -841,6 +957,7 @@ class GenericFlowTest {
         const val NEW_EXPIRES_AT = 1_830_000_000_000L
         val USER_CERT = "a".repeat(64)
         val DEV_CERT = "d".repeat(64)
+        val OTHER_CERT = "9".repeat(64)
         val BUNDLE_ID = "b".repeat(64)
         val OLD_BUNDLE_ID = "0".repeat(64)
         val NEW_BUNDLE_ID = "c".repeat(64)

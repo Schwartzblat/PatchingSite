@@ -62,6 +62,12 @@ class RunViewModelTest {
         var installOriginalOutcome: InstallOutcome = InstallOutcome.Success
         var afterRestore: () -> Unit = {}
 
+        /** Runs inside finish, after it is listed. */
+        var afterFinish: () -> Unit = {}
+
+        /** Whether the user's signing key is cached; without it our own copy reads as changed. */
+        var keyKnown = true
+
         /** Thrown by every record write (askedToUninstall, finish, stop, startRestore), as a full disk would. */
         var writeError: Exception? = null
 
@@ -95,7 +101,10 @@ class RunViewModelTest {
         override fun finish(packageName: String) {
             calls += "finish"
             writeError?.let { throw it }
+            afterFinish()
         }
+
+        override fun keyKnown(): Boolean = keyKnown
 
         override fun stop(packageName: String): Boolean {
             calls += "stop"
@@ -116,6 +125,8 @@ class RunViewModelTest {
     private val forgotten = mutableListOf<String>()
     private var installAllowed = true
 
+    private val keptForReport = mutableListOf<GenericRecord>()
+
     private fun TestScope.model(flow: FakeFlow, io: CoroutineDispatcher = UnconfinedTestDispatcher(testScheduler)) = RunViewModel(
         packageName = PKG,
         flow = flow,
@@ -123,6 +134,7 @@ class RunViewModelTest {
         startJob = { pkg, label -> started += pkg to label; true },
         forgetJob = { forgotten += it },
         canInstall = { installAllowed },
+        keepForReport = { keptForReport += it },
         io = io,
     )
 
@@ -319,6 +331,73 @@ class RunViewModelTest {
     }
 
     @Test
+    fun without_the_signing_key_attention_reads_as_unchecked() = runTest {
+        // Without the cached key our own copy reads as changed outside the store: that can't be told now.
+        val changed = GenericPhase.Attention("Example was changed outside the store. Uninstall it, then put the original back from the Library.")
+        for (intent in listOf(GenericIntent.RESTORE, GenericIntent.REFRESH, GenericIntent.PATCH)) {
+            val flow = FakeFlow(changed, intent)
+            flow.keyKnown = false
+            val model = model(flow)
+            assertTrue("$intent", model.state.value.unchecked)
+            assertNull("$intent", model.state.value.phase)
+            assertFalse("$intent", model.state.value.loading)
+            assertTrue("$intent", flow.calls.isEmpty())
+
+            // The key is cached again (the Library fetched it): the step shows.
+            flow.keyKnown = true
+            model.refresh()
+            assertFalse("$intent", model.state.value.unchecked)
+            assertEquals("$intent", changed, model.state.value.phase)
+        }
+
+        // Only Attention depends on the key: every other step shows as it is.
+        val removing = FakeFlow(GenericPhase.RemovePatched(askedBefore = false), GenericIntent.RESTORE)
+        removing.keyKnown = false
+        val model = model(removing)
+        assertFalse(model.state.value.unchecked)
+        assertEquals(GenericPhase.RemovePatched(false), model.state.value.phase)
+    }
+
+    @Test
+    fun a_finished_restore_offers_the_report_with_the_record_read_before_finishing() = runTest {
+        val flow = FakeFlow(GenericPhase.Restored, GenericIntent.RESTORE)
+        val before = flow.record!!
+        // Finishing a restore forgets the app, its record included.
+        flow.afterFinish = {
+            flow.record = null
+            flow.phase = null
+        }
+        val model = model(flow)
+        val events = eventsOf(model)
+        assertEquals(listOf("finish"), flow.calls)
+        assertTrue(model.state.value.done)
+        assertEquals(before, model.state.value.restoredRecord)
+
+        // Still offered after the record is gone.
+        model.refresh()
+        assertEquals(before, model.state.value.restoredRecord)
+        assertTrue(keptForReport.isEmpty())
+
+        model.onReport()
+        assertEquals(listOf(before), keptForReport)
+        assertEquals(listOf(RunEvent.OpenReport(PKG)), events)
+    }
+
+    @Test
+    fun a_finished_patch_offers_no_report_on_the_run_screen() = runTest {
+        // The Library offers it on the Patched entry, whose record stays.
+        val flow = FakeFlow(GenericPhase.Patched)
+        val model = model(flow)
+        val events = eventsOf(model)
+        assertTrue(model.state.value.done)
+        assertNull(model.state.value.restoredRecord)
+
+        model.onReport()
+        assertTrue(keptForReport.isEmpty())
+        assertTrue(events.isEmpty())
+    }
+
+    @Test
     fun nothing_under_way_is_not_done() = runTest {
         val flow = FakeFlow(null)
         flow.record = null
@@ -379,6 +458,31 @@ class RunViewModelTest {
         assertFalse(model.state.value.needsInstallPermission)
         assertEquals(listOf("installPatched", "finish"), flow.calls)
         assertTrue(model.state.value.done)
+    }
+
+    @Test
+    fun remove_waits_for_the_install_permission() = runTest {
+        // Android removes the app at once; without the permission neither copy could go back in.
+        for (phase in listOf(GenericPhase.RemoveOriginal(askedBefore = false), GenericPhase.RemovePatched(askedBefore = false))) {
+            val flow = FakeFlow(phase)
+            installAllowed = false
+            val model = model(flow)
+            val events = eventsOf(model)
+
+            model.onRemove()
+            assertTrue("$phase", model.state.value.needsInstallPermission)
+            // askedToUninstall is what writes uninstallAskedAt: never called, so nothing was written.
+            assertTrue("$phase", flow.calls.isEmpty())
+            assertTrue("$phase", events.isEmpty())
+            assertFalse("$phase", model.state.value.awaitingUninstall)
+            assertFalse("$phase", model.state.value.busy)
+
+            installAllowed = true
+            model.onRemove()
+            assertFalse("$phase", model.state.value.needsInstallPermission)
+            assertEquals("$phase", listOf("askedToUninstall"), flow.calls)
+            assertEquals("$phase", listOf(RunEvent.LaunchUninstall(PKG)), events)
+        }
     }
 
     @Test

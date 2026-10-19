@@ -49,6 +49,7 @@ import site.androidmod.store.patch.PatchStage
 import site.androidmod.store.patch.PatchState
 import site.androidmod.store.ui.ErrorBanner
 import site.androidmod.store.ui.LoadingState
+import site.androidmod.store.ui.library.GENERIC_UNCHECKED
 import site.androidmod.store.ui.library.InstallPermissionBanner
 import site.androidmod.store.ui.move.MainButton
 import site.androidmod.store.ui.move.Progress
@@ -70,6 +71,7 @@ fun RunScreen(
     onOpenInstallSettings: () -> Unit,
     onLibrary: () -> Unit,
     onClose: () -> Unit,
+    onReport: (packageName: String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -97,6 +99,7 @@ fun RunScreen(
                     viewModel.onUninstallReturned()
                 }
                 RunEvent.Closed -> onClose()
+                is RunEvent.OpenReport -> onReport(event.packageName)
             }
         }
     }
@@ -119,7 +122,17 @@ fun RunScreen(
         val phase = state.phase
         val intent = state.intent
         when {
-            state.done -> Done(viewModel.packageName, state.label, onLibrary)
+            state.done -> Done(
+                viewModel.packageName,
+                state.label,
+                onLibrary,
+                // After putting the original back: the report the Works-with list most needs.
+                onReport = viewModel::onReport.takeIf { state.restoredRecord != null },
+            )
+            state.unchecked -> {
+                Text(GENERIC_UNCHECKED, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
+                SecondaryButton("Back to the Library", onClick = onLibrary)
+            }
             phase is GenericPhase.Attention -> {
                 WarningBox(phase.message)
                 ErrorBanner(state.message)
@@ -196,7 +209,7 @@ private fun StepActions(state: RunState, phase: GenericPhase, viewModel: RunView
 }
 
 @Composable
-private fun Done(packageName: String, label: String, onLibrary: () -> Unit) {
+private fun Done(packageName: String, label: String, onLibrary: () -> Unit, onReport: (() -> Unit)?) {
     val context = LocalContext.current
     val launch = remember(packageName) { context.packageManager.getLaunchIntentForPackage(packageName) }
     Text("Done", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 24.dp))
@@ -209,6 +222,7 @@ private fun Done(packageName: String, label: String, onLibrary: () -> Unit) {
             }
         }
     }
+    if (onReport != null) SecondaryButton("Report how it works", onClick = onReport)
     SecondaryButton("Back to the Library", onClick = onLibrary)
 }
 
