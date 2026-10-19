@@ -359,6 +359,8 @@ ON_DEVICE_PACKAGES = _package_set(os.getenv("ON_DEVICE_PACKAGES"))
 # Uploading a generic bundle is allowed either way, so it can be staged first.
 GENERIC_PACKAGE = "generic"
 GENERIC_PATCHING = _bool_env("GENERIC_PATCHING", False)
+# Hand-edited list of apps tested with it; ships empty (see utils/works_with.py).
+GENERIC_WORKS_WITH_PATH = Path(os.getenv("GENERIC_WORKS_WITH_PATH") or Path(__file__).parent / "generic_works_with.json")
 OFFICIAL_SOURCES = {"com.whatsapp": "whatsapp.com"}
 OFFICIAL_APK_URLS = {"com.whatsapp": "https://www.whatsapp.com/android/current/WhatsApp.apk"}
 

@@ -571,6 +571,8 @@ def cmd_doctor(_args) -> int:
         warnings += 1
     warnings += _doctor_signing_keys()
     warnings += _doctor_on_device()
+    problems += _doctor_works_with()
+    warnings += _doctor_generic()
 
     cutoff = config.LEGACY_APP_TOKEN_CUTOFF
     if cutoff is None:
@@ -612,6 +614,36 @@ def _doctor_signing_keys() -> int:
         return 1
     print(f"[{OK}] SIGNING_KEYS_MASTER_KEY opens the stored signing keys")
     return 0
+
+
+def _doctor_works_with() -> int:
+    """Fail when the hand-edited Works-with file is invalid (the endpoint then serves an empty list)."""
+    from utils import works_with
+    path = config.GENERIC_WORKS_WITH_PATH
+    try:
+        entries = works_with.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, works_with.WorksWithError) as e:
+        print(f"[{BAD}] Works-with list {path}: {e}")
+        return 1
+    print(f"[{OK}] Works-with list: {len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
+    return 0
+
+
+def _doctor_generic() -> int:
+    """Warn when GENERIC_PATCHING is on but no generic bundle has been uploaded."""
+    if not config.GENERIC_PATCHING:
+        return 0
+    from utils import patch_store
+    try:
+        uploaded = patch_store.newest_bundle(config.GENERIC_PACKAGE) is not None
+    except sqlite3.Error:
+        uploaded = False
+    if uploaded:
+        print(f"[{OK}] GENERIC_PATCHING is on and a generic bundle is uploaded")
+        return 0
+    print(f"[{WARN}] GENERIC_PATCHING is on but no generic bundle is uploaded: the store app")
+    print(f"         would find nothing to apply (upload the bundle first)")
+    return 1
 
 
 def _doctor_on_device() -> int:
