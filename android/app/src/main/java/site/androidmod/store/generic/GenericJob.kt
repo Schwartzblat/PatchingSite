@@ -403,11 +403,6 @@ class GenericJob(
         app.versionCode == record.versionCode && app.signerSha256s == record.originalSigners &&
             app.apks.map { it.name } == record.apkNames
 
-    private fun savedCopiesIntact(dir: File, saved: List<SavedApk>): Boolean = saved.all { apk ->
-        val file = File(dir, apk.name)
-        file.isFile && file.length() == apk.size && sha256Of(file) == apk.sha256
-    }
-
     /** Runs blocking work off the caller's thread; cancelling the job interrupts it. */
     private suspend fun <T> blocking(block: () -> T): T = runInterruptible(Dispatchers.IO, block)
 

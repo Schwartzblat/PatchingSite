@@ -39,6 +39,9 @@ class GenericFlowTest {
         /** What the phone has for the package; the flow reads it at every call. */
         var installed: InstalledState? = ORIGINAL_INSTALLED
         var busy = false
+
+        /** The user's cached signing key; null when it isn't cached. */
+        var cert: String? = USER_CERT
         var clock = 1_000L
         var installAnswer: InstallOutcome = InstallOutcome.Success
 
@@ -52,7 +55,7 @@ class GenericFlowTest {
                 assertEquals(PKG, pkg)
                 installed
             },
-            userCert = { USER_CERT },
+            userCert = { cert },
             install = { apks, extraTrusted ->
                 installs += apks to extraTrusted
                 duringInstall()
@@ -174,6 +177,10 @@ class GenericFlowTest {
         val patched = f.patched()
         // Our patched copy is installed: a new patch would overwrite the only copy of the original.
         assertThrows(IllegalStateException::class.java) { f.flow.begin(f.app(setOf(USER_CERT))) }
+        // The phone decides, not the caller's snapshot of the app.
+        assertThrows(IllegalStateException::class.java) { f.flow.begin(f.app()) }
+        f.installed = null
+        assertThrows(IllegalStateException::class.java) { f.flow.begin(f.app()) }
         assertEquals(patched, f.record())
         assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
 
@@ -398,7 +405,7 @@ class GenericFlowTest {
     fun refresh_finish_updates_bundle_id_and_token_expiry() = runTest {
         val f = fixture()
         val patched = f.patched()
-        assertTrue(f.flow.startRefresh(PKG))
+        assertNull(f.flow.startRefresh(PKG))
         assertEquals(patched.copy(intent = GenericIntent.REFRESH), f.record())
         assertEquals(GenericPhase.SaveAndBuild, f.flow.phase(PKG))
 
@@ -419,16 +426,17 @@ class GenericFlowTest {
     @Test
     fun refresh_starts_only_from_a_finished_patch() {
         val f = fixture()
-        assertFalse(f.flow.startRefresh(PKG))
+        val cant = "Example can't be refreshed right now."
+        assertEquals("$PKG can't be refreshed right now.", f.flow.startRefresh(PKG))
         f.built()
-        assertFalse(f.flow.startRefresh(PKG)) // mid-patch
+        assertEquals(cant, f.flow.startRefresh(PKG)) // mid-patch
         f.patched()
         f.installed = ORIGINAL_INSTALLED
-        assertFalse(f.flow.startRefresh(PKG)) // not our copy
+        assertEquals(cant, f.flow.startRefresh(PKG)) // not our copy
         assertNull(f.record().intent)
         f.installed = PATCHED_INSTALLED
-        assertTrue(f.flow.startRefresh(PKG))
-        assertTrue(f.flow.startRefresh(PKG)) // already refreshing
+        assertNull(f.flow.startRefresh(PKG))
+        assertNull(f.flow.startRefresh(PKG)) // already refreshing
         assertEquals(GenericIntent.REFRESH, f.record().intent)
     }
 
@@ -436,7 +444,7 @@ class GenericFlowTest {
     fun stop_refresh_deletes_built_and_clears_intent() {
         val f = fixture()
         val patched = f.patched()
-        assertTrue(f.flow.startRefresh(PKG))
+        assertNull(f.flow.startRefresh(PKG))
         f.refreshBuilt()
         assertEquals(GenericPhase.InstallUpdate, f.flow.phase(PKG))
 
@@ -542,6 +550,88 @@ class GenericFlowTest {
     }
 
     @Test
+    fun stop_allowed_when_nothing_was_saved() {
+        // Removed before its original was saved: nothing on disk is worth keeping.
+        val f = fixture()
+        f.flow.begin(f.app())
+        f.installed = null
+        assertEquals(GenericPhase.Attention("Example was removed before its original was saved."), f.flow.phase(PKG))
+        assertTrue(f.flow.stop(PKG))
+        assertNull(f.records.get(PKG))
+        assertFalse(f.packageDir.exists())
+
+        // Whatever is installed meanwhile.
+        val g = fixture()
+        g.flow.begin(g.app())
+        g.installed = PATCHED_INSTALLED
+        assertTrue(g.flow.stop(PKG))
+        assertFalse(g.packageDir.exists())
+
+        // A saved original alone keeps Stop away once the app is gone: it is the only copy.
+        val h = fixture()
+        h.flow.begin(h.app())
+        val saved = h.record().copy(original = save(h.originalDir, BASE to BASE_BYTES, SPLIT to SPLIT_BYTES))
+        h.records.put(saved)
+        h.installed = null
+        assertEquals(GenericPhase.SaveAndBuild, h.flow.phase(PKG))
+        assertFalse(h.flow.stop(PKG))
+        assertEquals(saved, h.record())
+        assertEquals(listOf(BASE, SPLIT), h.files(h.originalDir))
+    }
+
+    @Test
+    fun stop_restore_records_an_installed_build_and_drops_the_rest() = runTest {
+        // A patch installed but never finished, then put back: the installed build is the patch.
+        val f = fixture()
+        val built = f.built()
+        f.installed = null
+        assertEquals(InstallOutcome.Success, f.flow.installPatched(PKG))
+        f.installed = PATCHED_INSTALLED
+        assertNull(f.flow.startRestore(PKG))
+        assertTrue(f.flow.phase(PKG) is GenericPhase.RemovePatched)
+        f.clock = 6_000L
+        assertTrue(f.flow.stop(PKG))
+        assertEquals(
+            built.copy(
+                built = emptyList(),
+                builtBundleId = null,
+                builtTokenExpiresAt = null,
+                intent = null,
+                patchedBundleId = BUNDLE_ID,
+                tokenExpiresAt = EXPIRES_AT,
+                patchedAt = 6_000L,
+            ),
+            f.record(),
+        )
+        assertFalse(f.builtDir.exists())
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+
+        // A Refresh's build that never went in: the patch stays as it was, and the build goes.
+        val g = fixture()
+        val patched = g.patched()
+        assertNull(g.flow.startRefresh(PKG))
+        g.refreshBuilt()
+        assertNull(g.flow.startRestore(PKG))
+        assertTrue(g.flow.phase(PKG) is GenericPhase.RemovePatched)
+        assertTrue(g.flow.stop(PKG))
+        assertEquals(patched, g.record())
+        assertFalse(g.builtDir.exists())
+    }
+
+    @Test
+    fun asked_to_uninstall_needs_the_signing_key() {
+        val f = fixture()
+        f.built()
+        f.cert = null
+        assertEquals(GenericPhase.RemoveOriginal(false), f.flow.phase(PKG))
+        assertEquals("Sign in again before removing Example.", f.flow.askedToUninstall(PKG))
+        assertNull(f.record().uninstallAskedAt)
+
+        f.cert = USER_CERT
+        assertNull(f.flow.askedToUninstall(PKG))
+    }
+
+    @Test
     fun adopt_records_bundle_id_and_no_original() {
         val f = fixture()
         f.installed = PATCHED_INSTALLED
@@ -569,7 +659,7 @@ class GenericFlowTest {
         assertEquals(0L, f.flow.savedOriginalBytes(PKG))
         assertFalse(f.flow.deleteSavedOriginal(PKG))
 
-        assertTrue(f.flow.startRefresh(PKG))
+        assertNull(f.flow.startRefresh(PKG))
         assertEquals(GenericIntent.REFRESH, f.record().intent)
         assertEquals(GenericPhase.SaveAndBuild, f.flow.phase(PKG))
     }
@@ -589,16 +679,23 @@ class GenericFlowTest {
         assertEquals(refused(busy), f.flow.installPatched(PKG))
         assertEquals(emptyList<Pair<List<File>, Set<String>>>(), f.installs)
 
+        f.busy = false
+        assertNull(f.flow.startRestore(PKG))
+        f.busy = true
+        assertEquals(refused(busy), f.flow.installOriginal(PKG))
+        assertEquals(emptyList<Pair<List<File>, Set<String>>>(), f.installs)
+        assertEquals(GenericPhase.InstallOriginal, f.flow.phase(PKG))
+
         val patched = f.patched()
         assertEquals(busy, f.flow.startRestore(PKG))
-        assertFalse(f.flow.startRefresh(PKG))
+        assertEquals("Example is busy. Wait for it to finish.", f.flow.startRefresh(PKG))
         assertFalse(f.flow.deleteSavedOriginal(PKG))
         assertEquals(patched, f.record())
         assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
 
         // The flow's own install in progress holds off changes too.
         f.busy = false
-        assertTrue(f.flow.startRefresh(PKG))
+        assertNull(f.flow.startRefresh(PKG))
         f.refreshBuilt()
         val installing = CompletableDeferred<Unit>()
         val answer = CompletableDeferred<Unit>()
