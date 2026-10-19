@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
@@ -318,6 +318,24 @@ def init():
                          cert_sha256 TEXT NOT NULL,
                          cert_sha1 TEXT NOT NULL,
                          created_at TEXT NOT NULL
+                     )
+                     """)
+        # Customer reports on the generic ad remover. Deliberately no account,
+        # username, customer id or IP column, and the date is only the day, so a
+        # row cannot be matched with an access log by time.
+        conn.execute("""
+                     CREATE TABLE IF NOT EXISTS generic_reports
+                     (
+                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         created_on TEXT NOT NULL,
+                         package TEXT NOT NULL,
+                         app_name TEXT NOT NULL,
+                         version_name TEXT NOT NULL,
+                         version_code INTEGER NOT NULL,
+                         worked INTEGER NOT NULL,
+                         note TEXT DEFAULT NULL,
+                         store_version_code INTEGER NOT NULL,
+                         android_sdk INTEGER NOT NULL
                      )
                      """)
     finally:
@@ -728,6 +746,34 @@ def mark_bug_report_mailed(report_id: int, mailed_at: datetime) -> None:
     try:
         conn.execute("UPDATE bug_reports SET mailed_at = ? WHERE id = ?",
                      (mailed_at.astimezone(timezone.utc).strftime(TIMESTAMP_FORMAT), report_id))
+    finally:
+        conn.close()
+
+
+def add_generic_report(package: str, app_name: str, version_name: str, version_code: int, worked: bool,
+                       note: Optional[str], store_version_code: int, android_sdk: int,
+                       created_on: date) -> int:
+    """Store a customer report and return its id. Nothing here identifies the reporter."""
+    conn = _connect()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO generic_reports (created_on, package, app_name, version_name, version_code, "
+            "worked, note, store_version_code, android_sdk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (created_on.isoformat(), package, app_name, version_name, version_code, 1 if worked else 0,
+             note, store_version_code, android_sdk),
+        )
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def list_generic_reports(limit: int) -> tuple[list[dict], int]:
+    """The newest `limit` reports and the total count."""
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM generic_reports ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM generic_reports").fetchone()[0]
+        return [dict(row) for row in rows], total
     finally:
         conn.close()
 

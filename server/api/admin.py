@@ -150,6 +150,12 @@ def _subscription(user: UserInDB) -> dict:
     return {"subscription": _describe_subscription(sub) if sub is not None else None, "stripe": stripe_info}
 
 
+@router.get("/generic-reports")
+def list_generic_reports(limit: Annotated[int, Query(ge=1, le=500)] = 100) -> dict:
+    reports, total = database.list_generic_reports(limit)
+    return {"reports": reports, "total": total}
+
+
 @router.get("/users")
 def list_users(admin: RequiredAdmin, q: Annotated[str, Query(max_length=254)] = "") -> dict:
     """The accounts, from the database alone: fast, and still there in a Stripe outage."""

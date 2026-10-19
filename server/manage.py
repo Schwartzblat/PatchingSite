@@ -5,11 +5,12 @@
     python manage.py migrate                  # apply it (idempotent)
     python manage.py doctor                   # validate configuration for production
     python manage.py bug-reports [--limit N]  # read-only: recent bug reports, newest first
+    python manage.py generic-reports [--limit N]  # read-only: customer reports on the generic patcher
     python manage.py delete-user NAME [--yes] # delete an account on request (asks first)
     python manage.py grant-trial NAME (--until YYYY-MM-DD | --days N) [--yes]
                                               # a free trial on Stripe, linked to the account
 
-`check` and `bug-reports` open the database read-only and never write, so they
+`check`, `bug-reports` and `generic-reports` open the database read-only and never write, so they
 are safe to point at the live file at any time.
 """
 import argparse
@@ -189,6 +190,43 @@ def cmd_bug_reports(args) -> int:
             print(f"  {_printable(key)}: {_printable(value)}")
         for line in report["message"].splitlines() or [""]:
             print(f"  | {_printable(line)}")
+        print()
+    return 0
+
+
+def cmd_generic_reports(args) -> int:
+    """Print the most recent generic-patcher reports, newest first. Read-only.
+
+    The rows carry no account or IP, so there is nothing to look up beyond what is printed.
+    """
+    db_path = Path(config.DB_PATH)
+    if not db_path.exists():
+        print(f"no generic reports: {db_path} does not exist")
+        return 0
+    conn = _ro(db_path)
+    try:
+        has_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='generic_reports'").fetchone()
+        if not has_table:
+            print("no generic reports: the generic_reports table does not exist yet (restart the server)")
+            return 0
+        reports = conn.execute(
+            "SELECT * FROM generic_reports ORDER BY id DESC LIMIT ?", (max(1, args.limit),)).fetchall()
+    finally:
+        conn.close()
+
+    if not reports:
+        print("no generic reports yet")
+        return 0
+    for report in reports:
+        verdict = "WORKED" if report["worked"] else "DID NOT WORK"
+        print(f"#{report['id']}  {report['created_on']}  {verdict}  {_printable(report['package'])}")
+        print(f"  {_printable(report['app_name'])} {_printable(report['version_name'])}"
+              f" (code {report['version_code']})  store {report['store_version_code']}"
+              f"  android sdk {report['android_sdk']}")
+        if report["note"]:
+            for line in report["note"].splitlines() or [""]:
+                print(f"  | {_printable(line)}")
         print()
     return 0
 
@@ -680,6 +718,9 @@ def main() -> int:
     sub.add_parser("doctor", help="validate configuration for production")
     bug_reports = sub.add_parser("bug-reports", help="list recent bug reports, newest first (read-only)")
     bug_reports.add_argument("--limit", type=int, default=20, help="how many to show (default 20)")
+    generic_reports = sub.add_parser("generic-reports",
+                                     help="list recent generic-patcher reports, newest first (read-only)")
+    generic_reports.add_argument("--limit", type=int, default=20, help="how many to show (default 20)")
     delete_user = sub.add_parser("delete-user", help="delete an account on request (asks first)")
     delete_user.add_argument("username")
     delete_user.add_argument("--yes", action="store_true", help="do not ask for confirmation")
@@ -696,6 +737,7 @@ def main() -> int:
         "migrate": cmd_migrate,
         "doctor": cmd_doctor,
         "bug-reports": cmd_bug_reports,
+        "generic-reports": cmd_generic_reports,
         "delete-user": cmd_delete_user,
         "grant-trial": cmd_grant_trial,
     }[args.command](args)

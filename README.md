@@ -286,6 +286,55 @@ account and 1200/minute per IP; `/app-token` 60/hour per account and 600/hour pe
 IP; `/signing-key` 20/hour per account and 600/hour per IP. Past a limit the
 answer is 429 with `Retry-After`.
 
+### Generic patching (any app)
+
+The generic ad remover lets the store patch any installed app on the phone. It
+is off until `GENERIC_PATCHING` is on (see below).
+
+- `POST /api/internal/bundles` also accepts `package=generic`. A generic bundle
+  needs `catalog.json` and has no `features.json`. Uploading is allowed even
+  while the switch is off, so a bundle can be staged first.
+- `GET /api/patch/generic/latest` (subscriber): the newest generic bundle, as
+  `bundle_id, patcher_version, sha256, min_sdk, min_store_version_code,
+  revision`. The optional `X-Store-Version-Code` header works as for other apps:
+  **200**, **426** `Store update required` (with `min_store_version_code`) or
+  **404** (no bundle).
+- `GET /api/patch/generic/bundle/{patcher_version}` (subscriber): the bundle zip.
+- `POST /api/app-token {"package": "generic"}` returns `{"token", "expires_at"}`.
+  The token names `generic`, never the app it is used on. Every package's
+  response now includes `expires_at`.
+- `GET /api/generic` (public): `{"enabled": bool, "works_with": [...]}`. The list
+  is served whatever the switch says.
+- `POST /api/generic/reports` (subscriber): a "worked / didn't work" report.
+  Body (extra fields are refused with 422): `package`, `app_name` (1-100),
+  `version_name` (1-100), `version_code` (int, 0 or more), `worked` (a real
+  boolean), `note` (optional, at most 500; blank becomes null),
+  `store_version_code` (0 or more), `android_sdk` (1-1000). Answers 201
+  `{"message": "Thanks! Your report was sent."}`; 404 `Generic patching is off`
+  when the switch is off. Limits, in memory: 60/hour per IP and 10 per account
+  per 24 hours (429 with `Retry-After`).
+
+**Privacy rule for reports:** a stored row has no account, username, customer id
+or IP, and its date is only the day (`created_on`), so it cannot be matched with
+an access log by time. The endpoint logs only `Generic report stored (#id)`,
+never the package, the account or the IP. The per-account limit is keyed by id
+in memory and never written down.
+
+Reading reports: `GET /api/admin/generic-reports?limit=N` (admin; N 1-500,
+default 100) returns `{"reports": [...], "total": T}` newest first, and
+`python manage.py generic-reports [--limit N]` prints them read-only.
+
+**Works-with file.** `server/generic_works_with.json` (override with
+`GENERIC_WORKS_WITH_PATH`) ships as `[]`. Each entry has exactly the keys
+`package`, `name`, `note` (at most 200 characters), `tested_version` and
+`tested_on` (`YYYY-MM-DD`); packages must be unique. Add an app by hand, and
+deploy, only after it has passed with the phone-built patch on a real phone.
+
+**Switch.** `GENERIC_PATCHING` turns the three generic reads and the report
+endpoint on. On: `1`, `true`, `yes`, `on`. Off: unset, blank, `0`, `false`,
+`no`, `off` (any case). Anything else stops startup with a `ConfigError` naming
+the variable. While off, they answer 404 `Generic patching is off`.
+
 ### Settings
 
 | Variable | Meaning |

@@ -110,16 +110,23 @@ class RateLimiter:
         for key in stale:
             del self._hits[key]
 
-    def __call__(self, request: Request) -> None:
-        key = rate_limit_key(client_ip(request))
+    def check(self, key: str, logged_as: str = None) -> None:
+        """Count an attempt on `key`; raise 429 with Retry-After when it is over the limit.
+
+        `logged_as` is what the warning names instead of `key`, for keys that must
+        not reach the log (an account id).
+        """
         wait = self.retry_after(key)
         if wait:
-            logger.warning('Rate limit reached on %s from %s', self.name, key)
+            logger.warning('Rate limit reached on %s from %s', self.name, logged_as or key)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many requests, please try again later.",
                 headers={"Retry-After": str(wait)},
             )
+
+    def __call__(self, request: Request) -> None:
+        self.check(rate_limit_key(client_ip(request)))
 
 
 login_rate_limit = RateLimiter("login", limit=10, window_seconds=5 * 60)
@@ -189,6 +196,11 @@ patch_ip_rate_limit = RateLimiter("patch-read-ip", limit=1200, window_seconds=60
 # asks once per install or reinstall. Per account after auth; per-IP flood guard.
 app_token_rate_limit = RateLimiter("app-token", limit=60, window_seconds=60 * 60)
 app_token_ip_rate_limit = RateLimiter("app-token-ip", limit=600, window_seconds=60 * 60)
+# Customer reports on the generic ad remover. The per-IP guard is a flood stop;
+# the per-account one is keyed "user:<id>" by the endpoint, in memory only, so
+# nothing about who reported is ever stored.
+generic_report_ip_rate_limit = RateLimiter("generic-report-ip", limit=60, window_seconds=60 * 60)
+generic_report_rate_limit = RateLimiter("generic-report", limit=10, window_seconds=24 * 60 * 60)
 
 
 def reset_all() -> None:
