@@ -42,7 +42,7 @@ class SessionInstaller(
         extraTrusted: Set<String>,
     ): InstallOutcome = withContext(Dispatchers.IO) {
         val contents = try {
-            apkSetContents(apks)
+            apkSetContents(apks, basePackageName(apks))
         } catch (error: BundleException) {
             return@withContext InstallOutcome.Failure(
                 error.message ?: "These files could not be installed.", InstallFailure.UNKNOWN
@@ -124,6 +124,11 @@ class SessionInstaller(
             runCatching { installer.abandonSession(sessionId) }
         }
     }
+
+    /** The base's package name; the session is pinned to it. Throws when it cannot be read. */
+    private fun basePackageName(apks: List<File>): String =
+        apks.firstOrNull()?.let { context.packageManager.getPackageArchiveInfo(it.path, 0)?.packageName }
+            ?: throw BundleException("The base APK could not be read.")
 
     /**
      * A single APK carries no package name in [BuildContents] - BundleReader only

@@ -28,10 +28,12 @@ private val SESSION_NAME = Regex("[A-Za-z0-9_][A-Za-z0-9._-]*")
  * The session parts for a set of separate APK files (a base and its splits): one part
  * per file, named after the file, in the given order, so `apks[0]` is the base. Pure.
  *
+ * [packageName] is the base's package, read by the installer; the session is pinned to it.
+ *
  * Throws [BundleException] for an empty list, two files with the same name, or a name
  * that is not safe as a session name (it is also typed into a `pm` command line).
  */
-fun apkSetContents(apks: List<File>): BuildContents {
+fun apkSetContents(apks: List<File>, packageName: String? = null): BuildContents {
     if (apks.isEmpty()) throw BundleException("There is nothing to install.")
     val names = apks.map { it.name }
     if (names.toSet().size != names.size) throw BundleException("Two of the APK files have the same name.")
@@ -39,7 +41,7 @@ fun apkSetContents(apks: List<File>): BuildContents {
         ?.let { throw BundleException("The APK file name \"$it\" cannot be used for an install.") }
     return BuildContents(
         parts = apks.map { ApkPart(sessionName = it.name, zipEntry = null, size = it.length(), file = it) },
-        packageName = null,
+        packageName = packageName,
         isBundle = apks.size > 1,
     )
 }

@@ -43,7 +43,7 @@ class RootInstaller(
         extraTrusted: Set<String>,
     ): InstallOutcome = withContext(Dispatchers.IO) {
         val contents = try {
-            apkSetContents(apks)
+            apkSetContents(apks, basePackageName(apks))
         } catch (error: BundleException) {
             return@withContext InstallOutcome.Failure(
                 error.message ?: "These files could not be installed.", InstallFailure.UNKNOWN
@@ -65,8 +65,9 @@ class RootInstaller(
         // hanging forever. install() is contracted to RESOLVE to an outcome, so an
         // unanswered root-grant prompt must become a Failure, not an escaping
         // exception. Leaving it unguarded traded an infinite hang for a crash.
+        val pin = contents.packageName?.takeIf { PACKAGE_NAME.matches(it) }?.let { " -p $it" }.orEmpty()
         val created = try {
-            runSu("pm install-create -r")
+            runSu("pm install-create -r$pin")
         } catch (error: Throwable) {
             return InstallErrors.failure(error.message)
         }
@@ -104,6 +105,11 @@ class RootInstaller(
             InstallOutcome.Failure("The root install failed: ${error.message}", InstallFailure.UNKNOWN)
         }
     }
+
+    private fun basePackageName(apks: List<File>): String =
+        apks.firstOrNull()?.let { context.packageManager.getPackageArchiveInfo(it.path, 0)?.packageName }
+            ?.takeIf { PACKAGE_NAME.matches(it) }
+            ?: throw BundleException("The base APK could not be read.")
 
     private fun runSu(command: String): String = streamToSu(command) { }
 
@@ -166,6 +172,7 @@ class RootInstaller(
         private const val SU_TIMEOUT_SECONDS = 300L
         private const val DRAIN_JOIN_MILLIS = 5_000L
 
+        private val PACKAGE_NAME = Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*")
         private val SESSION_ID = Regex("""\[(\d+)]""")
 
         /** `pm install-create` prints: Success: created install session [2097227766] */

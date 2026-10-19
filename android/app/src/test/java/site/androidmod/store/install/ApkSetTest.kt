@@ -60,4 +60,11 @@ class ApkSetTest {
             }
         }
     }
+
+    @Test
+    fun apk_set_carries_the_base_package_name() {
+        val base = apk("base.apk", 1)
+        assertEquals("com.example.app", apkSetContents(listOf(base), "com.example.app").packageName)
+        assertNull(apkSetContents(listOf(base)).packageName)
+    }
 }
