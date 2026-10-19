@@ -56,6 +56,17 @@ interface Installer {
 
     /** [confirmation] is used only by an installer that can need the user's go-ahead; see [InstallConfirmation]. */
     suspend fun install(file: File, confirmation: InstallConfirmation = InstallConfirmation.DIALOG): InstallOutcome
+
+    /**
+     * Installs separate APK files (a base and its splits) in one session; `apks[0]` is the base.
+     * [extraTrusted] is trusted as a signer for this call only: a restore passes the original's
+     * signers. An empty list, or two files with one name, is a Failure and creates no session.
+     */
+    suspend fun installApks(
+        apks: List<File>,
+        confirmation: InstallConfirmation = InstallConfirmation.DIALOG,
+        extraTrusted: Set<String> = emptySet(),
+    ): InstallOutcome
 }
 
 /**

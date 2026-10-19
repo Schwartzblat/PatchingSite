@@ -82,4 +82,14 @@ class SignatureVerifierTest {
         assertEquals(InstallFailure.UNTRUSTED_SIGNER, (mixed as InstallOutcome.Failure).reason)
         assertEquals(InstallFailure.UNTRUSTED_SIGNER, (withUnknown as InstallOutcome.Failure).reason)
     }
+
+    @Test
+    fun original_signer_trusted_only_when_passed() {
+        val developer = setOf("c0ffee")
+        val refused = SignatureVerifier.evaluate(ours, developer)
+        assertEquals(InstallFailure.UNTRUSTED_SIGNER, (refused as InstallOutcome.Failure).reason)
+        assertNull(SignatureVerifier.evaluate(ours, developer, extraTrusted = developer))
+        // A mix of the developer's signer and an unknown one is still refused.
+        assertNotNull(SignatureVerifier.evaluate(ours, developer + "deadbeef", extraTrusted = developer))
+    }
 }

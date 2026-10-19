@@ -61,7 +61,7 @@ object SignatureVerifier {
         // inflate a DEFLATED entry - or parsing APK Signing Blocks by hand, which
         // is security-critical code to reimplement to save a temporary file.
         val temp = if (base.zipEntry == null) null else stageTemp(context, file, base)
-        val archive = temp ?: file
+        val archive = temp ?: base.file ?: file
         return try {
             evaluate(
                 readSigners(context, context.packageName),

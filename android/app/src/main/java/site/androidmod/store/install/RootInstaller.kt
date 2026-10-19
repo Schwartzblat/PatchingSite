@@ -34,10 +34,31 @@ class RootInstaller(
             )
         }
 
-        // Nothing is piped to `pm` unless it is signed by our key. Especially
-        // important here: the root path installs silently, with no system dialog the
-        // user could use to reject a swapped build.
-        SignatureVerifier.verify(context, file, contents, trustedSigners())?.let { return@withContext it }
+        installContents(file, contents, emptySet())
+    }
+
+    override suspend fun installApks(
+        apks: List<File>,
+        confirmation: InstallConfirmation,
+        extraTrusted: Set<String>,
+    ): InstallOutcome = withContext(Dispatchers.IO) {
+        val contents = try {
+            apkSetContents(apks)
+        } catch (error: BundleException) {
+            return@withContext InstallOutcome.Failure(
+                error.message ?: "These files could not be installed.", InstallFailure.UNKNOWN
+            )
+        }
+        installContents(apks.first(), contents, extraTrusted)
+    }
+
+    private fun installContents(file: File, contents: BuildContents, extraTrusted: Set<String>): InstallOutcome {
+        // Nothing is piped to `pm` unless it is signed by our key (or a signer named in
+        // extraTrusted, for a restore). Especially important here: the root path
+        // installs silently, with no system dialog the user could use to reject a
+        // swapped build.
+        SignatureVerifier.verify(context, file, contents, trustedSigners() + extraTrusted)
+            ?.let { return it }
 
         // Guarded for the same reason SessionInstaller guards createSession: this is
         // the first su call, and streamToSu can now THROW on timeout rather than
@@ -47,14 +68,14 @@ class RootInstaller(
         val created = try {
             runSu("pm install-create -r")
         } catch (error: Throwable) {
-            return@withContext InstallErrors.failure(error.message)
+            return InstallErrors.failure(error.message)
         }
         val sessionId = parseSessionId(created)
-            ?: return@withContext InstallOutcome.Failure(
+            ?: return InstallOutcome.Failure(
                 "Could not open a root install session: ${created.trim()}", InstallFailure.UNKNOWN
             )
 
-        try {
+        return try {
             contents.parts.forEach { part ->
                 // -S is omitted when the zip recorded no size (-1); pm then reads
                 // stdin to EOF. `-S -1` is a malformed command, and SessionInstaller
@@ -66,7 +87,7 @@ class RootInstaller(
 
                 if (!output.trimStart().startsWith("Success")) {
                     runCatching { runSu("pm install-abandon $sessionId") }
-                    return@withContext outcomeOf(output)
+                    return outcomeOf(output)
                 }
             }
             outcomeOf(runSu("pm install-commit $sessionId"))

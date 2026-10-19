@@ -33,11 +33,35 @@ class SessionInstaller(
                 error.message ?: "This build could not be read.", InstallFailure.UNKNOWN
             )
         }
+        installContents(file, contents, confirmation, emptySet())
+    }
 
-        // Nothing gets staged unless it is signed by our key. Runs here, before a
-        // session exists, so an untrusted build costs nothing and never reaches
-        // PackageInstaller.
-        SignatureVerifier.verify(context, file, contents, trustedSigners())?.let { return@withContext it }
+    override suspend fun installApks(
+        apks: List<File>,
+        confirmation: InstallConfirmation,
+        extraTrusted: Set<String>,
+    ): InstallOutcome = withContext(Dispatchers.IO) {
+        val contents = try {
+            apkSetContents(apks)
+        } catch (error: BundleException) {
+            return@withContext InstallOutcome.Failure(
+                error.message ?: "These files could not be installed.", InstallFailure.UNKNOWN
+            )
+        }
+        installContents(apks.first(), contents, confirmation, extraTrusted)
+    }
+
+    private suspend fun installContents(
+        file: File,
+        contents: BuildContents,
+        confirmation: InstallConfirmation,
+        extraTrusted: Set<String>,
+    ): InstallOutcome = withContext(Dispatchers.IO) {
+        // Nothing gets staged unless it is signed by our key (or, for a restore, by a
+        // signer the caller named in extraTrusted). Runs here, before a session exists,
+        // so an untrusted build costs nothing and never reaches PackageInstaller.
+        SignatureVerifier.verify(context, file, contents, trustedSigners() + extraTrusted)
+            ?.let { return@withContext it }
 
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)

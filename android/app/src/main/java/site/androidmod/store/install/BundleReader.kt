@@ -11,16 +11,38 @@ import java.util.zip.ZipFile
 class BundleException(message: String) : Exception(message)
 
 /**
- * One APK to feed into an install session. [zipEntry] is null when the downloaded
- * file is itself the APK.
+ * One APK to feed into an install session. [zipEntry] is null when a whole file is the
+ * APK: [file] when set (a part of an [apkSetContents] set), else the downloaded file.
  */
-data class ApkPart(val sessionName: String, val zipEntry: String?, val size: Long)
+data class ApkPart(val sessionName: String, val zipEntry: String?, val size: Long, val file: File? = null)
 
 data class BuildContents(
     val parts: List<ApkPart>,
     val packageName: String?,
     val isBundle: Boolean,
 )
+
+private val SESSION_NAME = Regex("[A-Za-z0-9_][A-Za-z0-9._-]*")
+
+/**
+ * The session parts for a set of separate APK files (a base and its splits): one part
+ * per file, named after the file, in the given order, so `apks[0]` is the base. Pure.
+ *
+ * Throws [BundleException] for an empty list, two files with the same name, or a name
+ * that is not safe as a session name (it is also typed into a `pm` command line).
+ */
+fun apkSetContents(apks: List<File>): BuildContents {
+    if (apks.isEmpty()) throw BundleException("There is nothing to install.")
+    val names = apks.map { it.name }
+    if (names.toSet().size != names.size) throw BundleException("Two of the APK files have the same name.")
+    names.firstOrNull { !SESSION_NAME.matches(it) }
+        ?.let { throw BundleException("The APK file name \"$it\" cannot be used for an install.") }
+    return BuildContents(
+        parts = apks.map { ApkPart(sessionName = it.name, zipEntry = null, size = it.length(), file = it) },
+        packageName = null,
+        isBundle = apks.size > 1,
+    )
+}
 
 /**
  * Works out what a downloaded build is by reading it.
@@ -102,7 +124,7 @@ object BundleReader {
     }
 
     fun openPart(file: File, part: ApkPart): InputStream {
-        val entryName = part.zipEntry ?: return FileInputStream(file)
+        val entryName = part.zipEntry ?: return FileInputStream(part.file ?: file)
         val zip = ZipFile(file)
         // Everything between opening the archive and handing ownership to the
         // returned stream runs under this try. getEntry() succeeding only proves a
