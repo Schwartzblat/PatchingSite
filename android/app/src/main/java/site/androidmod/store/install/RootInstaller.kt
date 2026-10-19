@@ -34,7 +34,7 @@ class RootInstaller(
             )
         }
 
-        installContents(file, contents, emptySet())
+        installContents(file, contents, emptySet(), pinPackage = null)
     }
 
     override suspend fun installApks(
@@ -49,10 +49,15 @@ class RootInstaller(
                 error.message ?: "These files could not be installed.", InstallFailure.UNKNOWN
             )
         }
-        installContents(apks.first(), contents, extraTrusted)
+        installContents(apks.first(), contents, extraTrusted, contents.packageName)
     }
 
-    private fun installContents(file: File, contents: BuildContents, extraTrusted: Set<String>): InstallOutcome {
+    private fun installContents(
+        file: File,
+        contents: BuildContents,
+        extraTrusted: Set<String>,
+        pinPackage: String?,
+    ): InstallOutcome {
         // Nothing is piped to `pm` unless it is signed by our key (or a signer named in
         // extraTrusted, for a restore). Especially important here: the root path
         // installs silently, with no system dialog the user could use to reject a
@@ -65,9 +70,8 @@ class RootInstaller(
         // hanging forever. install() is contracted to RESOLVE to an outcome, so an
         // unanswered root-grant prompt must become a Failure, not an escaping
         // exception. Leaving it unguarded traded an infinite hang for a crash.
-        val pin = contents.packageName?.takeIf { PACKAGE_NAME.matches(it) }?.let { " -p $it" }.orEmpty()
         val created = try {
-            runSu("pm install-create -r$pin")
+            runSu(createCommand(pinPackage))
         } catch (error: Throwable) {
             return InstallErrors.failure(error.message)
         }
@@ -108,7 +112,6 @@ class RootInstaller(
 
     private fun basePackageName(apks: List<File>): String =
         apks.firstOrNull()?.let { context.packageManager.getPackageArchiveInfo(it.path, 0)?.packageName }
-            ?.takeIf { PACKAGE_NAME.matches(it) }
             ?: throw BundleException("The base APK could not be read.")
 
     private fun runSu(command: String): String = streamToSu(command) { }
@@ -173,6 +176,17 @@ class RootInstaller(
         private const val DRAIN_JOIN_MILLIS = 5_000L
 
         private val PACKAGE_NAME = Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*")
+        /**
+         * `--pkg` is `setAppPackageName` (AOSP PackageManagerShellCommand.makeInstallParams);
+         * `-p` would instead select MODE_INHERIT_EXISTING. [packageName] goes into
+         * the shell, so a name that is not a plain dotted identifier is refused.
+         */
+        fun createCommand(packageName: String?): String {
+            if (packageName == null) return "pm install-create -r"
+            require(PACKAGE_NAME.matches(packageName)) { "Not a package name." }
+            return "pm install-create -r --pkg $packageName"
+        }
+
         private val SESSION_ID = Regex("""\[(\d+)]""")
 
         /** `pm install-create` prints: Success: created install session [2097227766] */

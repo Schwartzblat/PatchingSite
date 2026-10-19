@@ -1,6 +1,7 @@
 package site.androidmod.store.install
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,5 +54,18 @@ class RootInstallerTest {
 
         assertTrue(outcome is InstallOutcome.Failure)
         assertEquals(InstallFailure.UNKNOWN, (outcome as InstallOutcome.Failure).reason)
+    }
+
+    @Test
+    fun `an apk set session is pinned with --pkg, never -p`() {
+        val command = RootInstaller.createCommand("com.example.app")
+        assertEquals("pm install-create -r --pkg com.example.app", command)
+        assertFalse(command.split(" ").contains("-p"))
+        assertEquals("pm install-create -r", RootInstaller.createCommand(null))
+        try {
+            RootInstaller.createCommand("a; reboot")
+            org.junit.Assert.fail("expected a refusal")
+        } catch (expected: IllegalArgumentException) {
+        }
     }
 }
