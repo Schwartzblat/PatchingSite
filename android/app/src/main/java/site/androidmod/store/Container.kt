@@ -28,6 +28,7 @@ import site.androidmod.store.generic.sha256Of
 import site.androidmod.store.install.InstallConfirmation
 import site.androidmod.store.install.Installer
 import site.androidmod.store.install.InstalledApps
+import site.androidmod.store.install.ObbProbeClient
 import site.androidmod.store.install.RootInstaller
 import site.androidmod.store.install.SessionInstaller
 import site.androidmod.store.install.useRootInstaller
@@ -116,6 +117,7 @@ class Container(private val context: Context) {
     val sessionInstaller by lazy { SessionInstaller(context, trustedKeys) }
     val rootInstaller by lazy { RootInstaller(context, trustedKeys) }
     val installedApps by lazy { InstalledApps(context) }
+    private val obbProbe by lazy { ObbProbeClient(context) }
     val storeUpdates by lazy { StoreUpdateRepository(api) }
     val selfInstaller: SelfInstaller by lazy { PackageSelfInstaller(context, this) }
     val bugReports by lazy { BugReportRepository(api) }
@@ -193,7 +195,8 @@ class Container(private val context: Context) {
     /**
      * Removing, installing, stopping, putting back and refreshing a generic patch. Patched copies
      * are signed with the user's key, which the installer trusts already; a restore trusts the
-     * original's signers for that install only.
+     * original's signers for that install only. Android/obb is read by the probe's own process
+     * (ObbProbeClient): this one may not see it.
      */
     val genericFlow by lazy {
         GenericFlow(
@@ -204,7 +207,7 @@ class Container(private val context: Context) {
             sha256 = ::sha256Of,
             now = System::currentTimeMillis,
             isBusy = PatchRegistry::isBusy,
-            obb = installedApps::hasObbFiles,
+            obb = obbProbe::hasObbFiles,
         )
     }
 

@@ -375,7 +375,8 @@ private fun GenericLibraryCard(entry: GenericEntry, busy: Boolean, onAction: (Ge
     val phase = entry.phase
     val tint = when {
         showsGenericHints(entry) -> PapSuccess
-        phase == GenericPhase.Removed || phase == GenericPhase.Unpatched -> MaterialTheme.colorScheme.onSurfaceVariant
+        phase == GenericPhase.Removed || phase == GenericPhase.Unpatched || phase == GenericPhase.OtherSigner ->
+            MaterialTheme.colorScheme.onSurfaceVariant
         else -> PapWarning
     }
     LibraryCardFrame(

@@ -380,8 +380,8 @@ class GenericLibraryTest {
 
         val entry = f.source.entries().single()
 
-        assertEquals(GenericPhase.Unpatched, entry.phase)
-        assertEquals("Original installed", genericStatusLine(entry))
+        assertEquals(GenericPhase.OtherSigner, entry.phase)
+        assertEquals("Not patched with this account", genericStatusLine(entry))
         assertEquals(listOf(GenericAction.FORGET), genericActions(entry))
         assertEquals("$PKG stays on your phone as it is.", forgetDialogText(entry))
         assertTrue(f.flow.forget(PKG))
@@ -410,6 +410,7 @@ class GenericLibraryTest {
         assertEquals("Patched on this phone · 7.1", line(GenericPhase.Patched))
         assertEquals("Removed from this phone", line(GenericPhase.Removed))
         assertEquals("Original installed", line(GenericPhase.Unpatched))
+        assertEquals("Not patched with this account", line(GenericPhase.OtherSigner))
         assertEquals("Example was changed.", line(GenericPhase.Attention("Example was changed."), under))
         assertEquals("Example was changed.", line(GenericPhase.Attention("Example was changed.")))
         val unfinished = listOf(
@@ -500,6 +501,8 @@ class GenericLibraryTest {
         // The original is installed again: forget it, saved copy and all.
         assertEquals(listOf(GenericAction.FORGET), genericActions(GenericEntry(saved, GenericPhase.Unpatched, 3L, null)))
         assertEquals(listOf(GenericAction.FORGET), genericActions(GenericEntry(record(), GenericPhase.Unpatched, 0L, null)))
+        // Another signer, nothing saved: nothing of ours to keep.
+        assertEquals(listOf(GenericAction.FORGET), genericActions(GenericEntry(record(), GenericPhase.OtherSigner, 0L, null)))
         // Attention says to uninstall it first, which makes it Removed.
         assertTrue(genericActions(GenericEntry(saved, GenericPhase.Attention("changed"), 3L, null)).isEmpty())
         assertEquals("Remove from the Library", genericActionLabel(GenericAction.FORGET, GenericEntry(record(), GenericPhase.Unpatched, 0L, null)))
@@ -521,6 +524,10 @@ class GenericLibraryTest {
         assertEquals(
             "Example is no longer on this phone, and nothing of it is saved.",
             forgetDialogText(GenericEntry(record(), GenericPhase.Removed, 0L, null)),
+        )
+        assertEquals(
+            "Example stays on your phone as it is.",
+            forgetDialogText(GenericEntry(record(), GenericPhase.OtherSigner, 0L, null)),
         )
     }
 

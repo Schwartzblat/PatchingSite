@@ -106,7 +106,8 @@ class GenericFlow(
         val intact = when (phaseOf(record)) {
             is GenericPhase.RemoveOriginal -> {
                 // Android deletes Android/obb with the app, and nothing here brings it back. Read again
-                // now: the picker can't read it before "install unknown apps" is allowed.
+                // now, by a process started for it (Container): the picker's read can't see it unless
+                // "Install unknown apps" was allowed before the store started.
                 if (keepsObbFiles(packageName)) return@synchronized keepsObb(record.label)
                 // The installer trusts only the cached key: without it, or with another account's, the patched
                 // copy couldn't go in next. A record from before the build's signer was kept needs some key.
@@ -282,13 +283,13 @@ class GenericFlow(
      * Forgets an app the Library has nothing left to do for, with its record and every file of it,
      * and says whether it did. Only with no flow under way and the package idle, and only where
      * nothing still needed goes: at Unpatched (the original is installed, so a saved copy of it is
-     * spare; or another signer is, with nothing saved), or at Removed with no saved original.
-     * Otherwise nothing changes.
+     * spare), at OtherSigner (nothing is saved), or at Removed with no saved original. Otherwise
+     * nothing changes.
      */
     fun forget(packageName: String): Boolean = synchronized(lock) {
         val record = records.get(packageName) ?: return@synchronized false
         val allowed = !busy(packageName) && record.intent == null && when (phaseOf(record)) {
-            GenericPhase.Unpatched -> true
+            GenericPhase.Unpatched, GenericPhase.OtherSigner -> true
             GenericPhase.Removed -> record.original.isEmpty()
             else -> false
         }

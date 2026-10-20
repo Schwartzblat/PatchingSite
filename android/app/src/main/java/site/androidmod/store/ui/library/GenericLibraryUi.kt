@@ -12,10 +12,10 @@ enum class GenericAction { CONTINUE, REFRESH, PUT_BACK, REPORT, DELETE_ORIGINAL,
  * A flow under way only continues (on the run screen). A finished patch is refreshed and reported
  * on, and when its original is saved, put back or the saved original deleted. Every other finished
  * entry has a way out: an app removed by hand has its saved original put back, or is forgotten when
- * nothing is saved; an app whose original is installed again (or another build, with nothing
- * saved) is forgotten (GenericFlow.forget). Attention offers nothing: putting back while another
- * copy is installed would stop at "changed outside the store", and its message says to uninstall
- * first, which makes it Removed.
+ * nothing is saved; an app whose original is installed again, or another signer's build with
+ * nothing saved (OtherSigner), is forgotten (GenericFlow.forget). Attention offers nothing:
+ * putting back while another copy is installed would stop at "changed outside the store", and its
+ * message says to uninstall first, which makes it Removed.
  */
 internal fun genericActions(entry: GenericEntry): List<GenericAction> {
     val saved = entry.record.original.isNotEmpty()
@@ -28,7 +28,7 @@ internal fun genericActions(entry: GenericEntry): List<GenericAction> {
             GenericAction.DELETE_ORIGINAL.takeIf { saved },
         )
         entry.phase == GenericPhase.Removed -> listOf(if (saved) GenericAction.PUT_BACK else GenericAction.FORGET)
-        entry.phase == GenericPhase.Unpatched -> listOf(GenericAction.FORGET)
+        entry.phase == GenericPhase.Unpatched || entry.phase == GenericPhase.OtherSigner -> listOf(GenericAction.FORGET)
         else -> emptyList()
     }
 }
@@ -53,6 +53,7 @@ fun genericStatusLine(entry: GenericEntry): String {
         phase == GenericPhase.Patched -> "Patched on this phone · ${entry.record.versionName}"
         phase == GenericPhase.Removed -> "Removed from this phone"
         phase == GenericPhase.Unpatched -> "Original installed"
+        phase == GenericPhase.OtherSigner -> "Not patched with this account"
         // The other steps only come with an intent.
         else -> "Not finished — open to continue"
     }

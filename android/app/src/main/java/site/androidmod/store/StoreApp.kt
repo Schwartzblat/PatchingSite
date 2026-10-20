@@ -15,6 +15,9 @@ class StoreApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The OBB probe's process (install.ObbProbeProvider) needs none of the store, and setting it up
+        // there would wipe a running job's work and downloads, and register a second watcher.
+        if (!isMainProcess(Application.getProcessName(), packageName)) return
         instance = this
         container = Container(this)
         // For the life of the process: the Play Store installing WhatsApp is the
@@ -67,3 +70,11 @@ class StoreApp : Application() {
             private set
     }
 }
+
+/**
+ * Whether [processName] is the store's main process, named after its package; the OBB probe's is
+ * `<package>:obbprobe`. A missing name counts as the main process: Android names a process before
+ * Application.onCreate, and a store that can't set itself up would be worse.
+ */
+internal fun isMainProcess(processName: String?, packageName: String): Boolean =
+    processName == null || processName == packageName

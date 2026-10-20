@@ -515,6 +515,62 @@ class GenericFlowTest {
     }
 
     @Test
+    fun stop_ends_a_refresh_whose_app_was_removed_outside_the_store() {
+        val f = fixture()
+        val patched = f.patched()
+        assertNull(f.flow.startRefresh(PKG))
+        f.refreshBuilt()
+        f.installed = null
+        assertEquals(GenericPhase.Attention("Example was removed outside the store. Stop to end the Refresh."), f.flow.phase(PKG))
+
+        assertTrue(f.flow.stop(PKG))
+
+        // The patch as it was, its saved original kept: the Library offers Put the original back.
+        assertEquals(patched, f.record())
+        assertFalse(f.builtDir.exists())
+        assertEquals(listOf(BASE, SPLIT), f.files(f.originalDir))
+        assertEquals(GenericPhase.Removed, f.flow.phase(PKG))
+    }
+
+    @Test
+    fun stop_ends_a_refresh_whose_app_was_changed_outside_the_store() {
+        val changed = GenericPhase.Attention("Example was changed outside the store. Stop to end the Refresh.")
+        // Adopted (nothing saved): it ends at OtherSigner, which the Library forgets.
+        val f = fixture()
+        f.installed = PATCHED_INSTALLED
+        f.flow.adopt(f.app(setOf(USER_CERT)), INFO)
+        assertNull(f.flow.startRefresh(PKG))
+        f.refreshBuilt()
+        f.installed = ORIGINAL_INSTALLED
+        assertEquals(changed, f.flow.phase(PKG))
+
+        assertTrue(f.flow.stop(PKG))
+
+        assertNull(f.record().intent)
+        assertEquals(emptyList<SavedApk>(), f.record().built)
+        assertFalse(f.builtDir.exists())
+        assertEquals(GenericPhase.OtherSigner, f.flow.phase(PKG))
+        assertTrue(f.flow.forget(PKG))
+
+        // A saved original: it ends at "changed outside the store", whose advice (uninstall, then put back) holds then.
+        val g = fixture()
+        val patched = g.patched()
+        assertNull(g.flow.startRefresh(PKG))
+        g.refreshBuilt()
+        g.installed = InstalledState(setOf(OTHER_CERT), VERSION_CODE, "f".repeat(64))
+        assertEquals(changed, g.flow.phase(PKG))
+
+        assertTrue(g.flow.stop(PKG))
+
+        assertEquals(patched, g.record())
+        assertFalse(g.builtDir.exists())
+        assertEquals(
+            GenericPhase.Attention("Example was changed outside the store. Uninstall it, then put the original back from the Library."),
+            g.flow.phase(PKG),
+        )
+    }
+
+    @Test
     fun stop_restore_only_while_patched_copy_installed() {
         val f = fixture()
         val patched = f.patched()
@@ -946,7 +1002,7 @@ class GenericFlowTest {
         f.installed = PATCHED_INSTALLED
         f.flow.adopt(f.app(setOf(USER_CERT)), INFO)
         f.installed = ORIGINAL_INSTALLED
-        assertEquals(GenericPhase.Unpatched, f.flow.phase(PKG))
+        assertEquals(GenericPhase.OtherSigner, f.flow.phase(PKG))
 
         // Without the key it can't be told from our own copy: kept.
         f.cert = null

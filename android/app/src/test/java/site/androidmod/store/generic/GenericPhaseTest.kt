@@ -147,13 +147,15 @@ class GenericPhaseTest {
     @Test fun none_other_needs_attention() =
         assertEquals(changedOutside, phase(record(null), InstalledState(setOf("zz"), 5L, "x")))
 
-    @Test fun none_other_signer_with_nothing_saved_is_unpatched() {
+    @Test fun none_other_signer_with_nothing_saved_is_other_signer() {
         // Adopted (no saved original), then the developer's build installed by hand: nothing of ours to protect.
         val adopted = record(null, original = emptyList(), built = emptyList()).copy(originalSigners = emptySet())
-        assertEquals(GenericPhase.Unpatched, phase(adopted, InstalledState(setOf("zz"), 5L, "x")))
-        assertEquals(GenericPhase.Unpatched, phase(record(null, original = emptyList()), InstalledState(setOf("zz"), 5L, "x")))
+        assertEquals(GenericPhase.OtherSigner, phase(adopted, InstalledState(setOf("zz"), 5L, "x")))
+        assertEquals(GenericPhase.OtherSigner, phase(record(null, original = emptyList()), InstalledState(setOf("zz"), 5L, "x")))
         // Without the key our own copy reads as another signer: that can't be told, so it stays Attention.
         assertEquals(changedOutside, genericPhase(adopted, ourBuild, null))
+        // The original signer, nothing saved: still the original.
+        assertEquals(GenericPhase.Unpatched, phase(record(null, original = emptyList()), originalInstalled))
     }
 
     @Test fun null_user_cert_is_never_ours() =

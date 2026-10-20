@@ -66,12 +66,13 @@ class InstalledApps(private val context: Context) {
         emptySet()
     }
 
-    /** Whether the app keeps files in Android/obb; null when that can't be read. */
-    fun hasObbFiles(packageName: String): Boolean? = try {
-        File(Environment.getExternalStorageDirectory(), "Android/obb/$packageName").listFiles()?.isNotEmpty()
-    } catch (error: Exception) {
-        null
-    }
+    /**
+     * Whether the app keeps files in Android/obb, as this process sees it ([obbFolderHasFiles]); null
+     * when that can't be read. The removal asks [ObbProbeClient] instead, which sees it as Android
+     * allows now.
+     */
+    fun hasObbFiles(packageName: String): Boolean? =
+        obbFolderHasFiles(Environment.getExternalStorageDirectory(), packageName)
 
     private fun toInstalledPackage(info: PackageInfo, app: ApplicationInfo) = InstalledPackage(
         packageName = info.packageName,

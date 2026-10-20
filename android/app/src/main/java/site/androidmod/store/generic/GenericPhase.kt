@@ -21,11 +21,15 @@ sealed interface GenericPhase {
     /** No intent, and the app isn't installed. */
     data object Removed : GenericPhase
 
-    /**
-     * No intent, and the original signer is installed; or, with nothing of ours saved (an adopted
-     * record, say), any signer the user's key tells apart from our own copy.
-     */
+    /** No intent, and the original signer is installed. */
     data object Unpatched : GenericPhase
+
+    /**
+     * No intent, nothing saved, and a signer that is neither the user's key nor the original's is
+     * installed: a copy patched with another account, or any other build of an adopted app (whose
+     * record knows no original signers). Nothing of ours to protect: the Library forgets it.
+     */
+    data object OtherSigner : GenericPhase
     data class Attention(val message: String) : GenericPhase
 }
 
@@ -73,7 +77,7 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
             original -> GenericPhase.Unpatched
             // Another signer and no saved original: nothing of ours to protect. Without the key our own
             // copy would read this way too, so then it stays changed (and the Library can't check it).
-            record.original.isEmpty() && userCert != null -> GenericPhase.Unpatched
+            record.original.isEmpty() && userCert != null -> GenericPhase.OtherSigner
             else -> changed
         }
     }

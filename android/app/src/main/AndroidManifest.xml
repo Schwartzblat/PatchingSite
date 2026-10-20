@@ -93,6 +93,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- Answers whether an app keeps files in Android/obb, right before its original is
+             removed. A process of its own that ends after each answer: the store's process keeps
+             the storage view it started with, and can't see other apps' Android/obb when
+             "Install unknown apps" was allowed after that (see ObbProbeClient). Not exported:
+             only the store asks. -->
+        <provider
+            android:name=".install.ObbProbeProvider"
+            android:authorities="${applicationId}.obbprobe"
+            android:exported="false"
+            android:process=":obbprobe" />
+
         <!-- Not exported: MY_PACKAGE_REPLACED comes from the system, which delivers
              to unexported receivers, and no other app has any business sending it. -->
         <receiver
