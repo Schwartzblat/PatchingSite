@@ -2,6 +2,7 @@ package site.androidmod.store.ui.generic
 
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -18,6 +19,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -125,6 +127,9 @@ class RunViewModelTest {
     private val forgotten = mutableListOf<String>()
     private var installAllowed = true
 
+    /** The thread of every install-permission check. */
+    private val installChecks = CopyOnWriteArrayList<Thread>()
+
     private val keptForReport = mutableListOf<GenericRecord>()
 
     private fun TestScope.model(flow: FakeFlow, io: CoroutineDispatcher = UnconfinedTestDispatcher(testScheduler)) = RunViewModel(
@@ -133,7 +138,10 @@ class RunViewModelTest {
         jobs = jobs,
         startJob = { pkg, label -> started += pkg to label; true },
         forgetJob = { forgotten += it },
-        canInstall = { installAllowed },
+        canInstall = {
+            installChecks += Thread.currentThread()
+            installAllowed
+        },
         keepForReport = { keptForReport += it },
         io = io,
     )
@@ -483,6 +491,79 @@ class RunViewModelTest {
             assertEquals("$phase", listOf("askedToUninstall"), flow.calls)
             assertEquals("$phase", listOf(RunEvent.LaunchUninstall(PKG)), events)
         }
+    }
+
+    @Test
+    fun allowing_installs_in_settings_clears_the_banner_on_resume() = runTest {
+        // "Open settings", then Back: the screen resumes and reads again.
+        val flow = FakeFlow(GenericPhase.RemoveOriginal(askedBefore = false))
+        installAllowed = false
+        val model = model(flow)
+        val events = eventsOf(model)
+        model.onRemove()
+        assertTrue(model.state.value.needsInstallPermission)
+
+        // Back without allowing it: the banner stays.
+        model.refresh()
+        assertTrue(model.state.value.needsInstallPermission)
+
+        // Allowed: it goes, and nothing else happens; Remove waits for the customer's tap.
+        installAllowed = true
+        model.refresh()
+        assertFalse(model.state.value.needsInstallPermission)
+        assertTrue(flow.calls.isEmpty())
+        assertTrue(events.isEmpty())
+    }
+
+    @Test
+    fun the_permission_is_checked_again_on_io() = runTest {
+        val pool = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        try {
+            val poolThread = withContext(pool) { Thread.currentThread() }
+            installAllowed = false
+            val model = model(FakeFlow(GenericPhase.RemoveOriginal(askedBefore = false)), io = pool)
+            model.state.first { !it.loading }
+            model.onRemove()
+            model.state.first { it.needsInstallPermission && !it.busy }
+
+            installChecks.clear()
+            installAllowed = true
+            model.refresh()
+            model.state.first { !it.needsInstallPermission }
+            assertTrue(installChecks.isNotEmpty())
+            assertTrue(installChecks.all { it === poolThread })
+        } finally {
+            pool.close()
+        }
+    }
+
+    @Test
+    fun a_read_without_the_banner_does_not_check_the_permission() = runTest {
+        val flow = FakeFlow(GenericPhase.RemoveOriginal(askedBefore = false))
+        val model = model(flow)
+        model.refresh()
+        assertTrue(installChecks.isEmpty())
+        assertFalse(model.state.value.needsInstallPermission)
+    }
+
+    @Test
+    fun an_obb_refusal_removes_nothing_and_stop_still_works() = runTest {
+        val refusal = "Example keeps extra data in Android/obb, which Android deletes with the app, so it wasn't removed. " +
+            "Stop to keep Example as it is."
+        val flow = FakeFlow(GenericPhase.RemoveOriginal(askedBefore = false))
+        flow.uninstallAnswer = refusal
+        val model = model(flow)
+        val events = eventsOf(model)
+
+        model.onRemove()
+        assertEquals(refusal, model.state.value.message)
+        assertFalse(model.state.value.awaitingUninstall)
+        assertTrue(events.isEmpty())
+
+        model.onStop()
+        assertEquals(listOf("askedToUninstall", "stop"), flow.calls)
+        assertEquals(listOf(RunEvent.Closed), events)
+        assertEquals(listOf(PKG), forgotten)
     }
 
     @Test

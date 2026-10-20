@@ -85,6 +85,7 @@ class GenericLibraryTest {
             sha256 = { sha256(it.readBytes()) },
             now = { NOW },
             isBusy = { false },
+            obb = { false },
         )
 
         val source = GenericLibrarySource(
@@ -366,6 +367,28 @@ class GenericLibraryTest {
     }
 
     @Test
+    fun an_adopted_app_replaced_by_the_developers_build_can_be_removed_from_the_library() = runTest {
+        // Adopted after the store's data was cleared (nothing saved), then the developer's build installed by hand.
+        val f = Fixture()
+        f.apps = listOf(app(PKG, setOf(USER_CERT), base = "ours-base.apk"))
+        f.infos["ours-base.apk"] = INFO
+        f.installed[PKG] = InstalledState(setOf(USER_CERT), 7L, "ours-sha")
+        repeat(2) { server.enqueue(latest(NEW_BUNDLE)) }
+        assertEquals(GenericPhase.Patched, f.source.entries().single().phase)
+        f.apps = listOf(app(PKG, setOf(DEV_CERT), base = "dev-base.apk"))
+        f.installed[PKG] = InstalledState(setOf(DEV_CERT), 8L, "dev-sha")
+
+        val entry = f.source.entries().single()
+
+        assertEquals(GenericPhase.Unpatched, entry.phase)
+        assertEquals("Original installed", genericStatusLine(entry))
+        assertEquals(listOf(GenericAction.FORGET), genericActions(entry))
+        assertEquals("$PKG stays on your phone as it is.", forgetDialogText(entry))
+        assertTrue(f.flow.forget(PKG))
+        assertTrue(f.records.all().isEmpty())
+    }
+
+    @Test
     fun missing_key_keeps_phases_that_dont_need_it() = runTest {
         val f = Fixture()
         f.patched()
@@ -421,14 +444,20 @@ class GenericLibraryTest {
 
     @Test
     fun update_hint_names_the_app() {
+        val saved = record().copy(original = listOf(SavedApk("base.apk", 3L, "ab")))
         assertEquals(
             "To update Example, put the original back, update it in Play, and patch it again.",
-            genericUpdateHint("Example"),
+            genericUpdateHint(GenericEntry(saved, GenericPhase.Patched, 3L, null)),
+        )
+        // Nothing saved to put back (deleted, or adopted): through Play.
+        assertEquals(
+            "To update Example, uninstall it, install it from Google Play, and patch it again.",
+            genericUpdateHint(GenericEntry(record(), GenericPhase.Patched, 0L, null)),
         )
     }
 
     @Test
-    fun delete_original_action_only_with_saved_original() {
+    fun put_back_and_delete_original_only_with_saved_original() {
         val saved = record().copy(original = listOf(SavedApk("base.apk", 1_572_864L, "ab")))
         val withOriginal = GenericEntry(saved, GenericPhase.Patched, 1_572_864L, null)
         val without = GenericEntry(record(), GenericPhase.Patched, 0L, null)
@@ -437,7 +466,8 @@ class GenericLibraryTest {
             listOf(GenericAction.REFRESH, GenericAction.PUT_BACK, GenericAction.REPORT, GenericAction.DELETE_ORIGINAL),
             genericActions(withOriginal),
         )
-        assertEquals(listOf(GenericAction.REFRESH, GenericAction.PUT_BACK, GenericAction.REPORT), genericActions(without))
+        // Nothing saved to put back.
+        assertEquals(listOf(GenericAction.REFRESH, GenericAction.REPORT), genericActions(without))
         assertEquals("Delete the saved original (1.5 MB)", genericActionLabel(GenericAction.DELETE_ORIGINAL, withOriginal))
     }
 

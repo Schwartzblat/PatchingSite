@@ -79,9 +79,12 @@ class ReportViewModel(
                 _status.value = ReportStatus(sent = api.report(request))
             } catch (error: ApiException) {
                 // The form stays as it was, so it can be sent again.
-                _status.update {
-                    it.copy(sending = false, error = if (error.status == HTTP_TOO_MANY) RATE_LIMITED else error.message)
+                val message = when (error.status) {
+                    HTTP_TOO_MANY -> RATE_LIMITED
+                    HTTP_NOT_FOUND -> REPORTS_OFF
+                    else -> error.message
                 }
+                _status.update { it.copy(sending = false, error = message) }
             }
         }
     }
@@ -99,7 +102,11 @@ class ReportViewModel(
         /** The server takes a few reports per account a day. */
         const val RATE_LIMITED = "You've sent several reports today. Try again tomorrow."
 
+        /** The server answers 404 while generic patching is off; its own detail isn't meant for customers. */
+        const val REPORTS_OFF = "Reports are turned off right now."
+
         private const val HTTP_TOO_MANY = 429
+        private const val HTTP_NOT_FOUND = 404
     }
 }
 

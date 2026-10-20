@@ -394,7 +394,7 @@ private fun GenericLibraryCard(entry: GenericEntry, busy: Boolean, onAction: (Ge
                 )
             }
             Text(
-                genericUpdateHint(label),
+                genericUpdateHint(entry),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 10.dp),

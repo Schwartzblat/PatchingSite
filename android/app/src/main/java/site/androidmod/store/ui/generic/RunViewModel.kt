@@ -246,6 +246,8 @@ class RunViewModel(
     }
 
     private suspend fun read(afterUninstall: Boolean = false) = reading.withLock {
+        // Back from "Open settings" (a resume reads): the banner goes once installs are allowed.
+        val permitted = _state.value.needsInstallPermission && withContext(io) { canInstall() }
         val (record, phase, keyKnown) = withContext(io) {
             // Known before and after the phase: a key cached or cleared meanwhile leaves it unsure.
             val keyBefore = flow.keyKnown()
@@ -278,6 +280,8 @@ class RunViewModel(
                 phase = phase.takeUnless { unchecked },
                 originalSaved = record?.original?.isNotEmpty() == true,
                 stillInstalled = removing && (afterUninstall || current.stillInstalled || (current.loading && askedBefore)),
+                // Only ever cleared here; a step sets it from its own check.
+                needsInstallPermission = current.needsInstallPermission && !permitted,
                 done = done,
                 unchecked = unchecked,
                 restoredRecord = current.restoredRecord ?: record.takeIf { phase == GenericPhase.Restored },

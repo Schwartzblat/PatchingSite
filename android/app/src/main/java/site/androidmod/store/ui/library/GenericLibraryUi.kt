@@ -9,12 +9,13 @@ import site.androidmod.store.ui.formatBytes
 enum class GenericAction { CONTINUE, REFRESH, PUT_BACK, REPORT, DELETE_ORIGINAL, FORGET }
 
 /**
- * A flow under way only continues (on the run screen). A finished patch is refreshed, put back,
- * reported on, and its saved original deleted when there is one. Every other finished entry has a
- * way out: an app removed by hand has its saved original put back, or is forgotten when nothing is
- * saved; an app whose original is installed again is forgotten (GenericFlow.forget). Attention
- * offers nothing: putting back while another copy is installed would stop at "changed outside the
- * store", and its message says to uninstall first, which makes it Removed.
+ * A flow under way only continues (on the run screen). A finished patch is refreshed and reported
+ * on, and when its original is saved, put back or the saved original deleted. Every other finished
+ * entry has a way out: an app removed by hand has its saved original put back, or is forgotten when
+ * nothing is saved; an app whose original is installed again (or another build, with nothing
+ * saved) is forgotten (GenericFlow.forget). Attention offers nothing: putting back while another
+ * copy is installed would stop at "changed outside the store", and its message says to uninstall
+ * first, which makes it Removed.
  */
 internal fun genericActions(entry: GenericEntry): List<GenericAction> {
     val saved = entry.record.original.isNotEmpty()
@@ -22,7 +23,7 @@ internal fun genericActions(entry: GenericEntry): List<GenericAction> {
         entry.record.intent != null -> listOf(GenericAction.CONTINUE)
         entry.phase == GenericPhase.Patched -> listOfNotNull(
             GenericAction.REFRESH,
-            GenericAction.PUT_BACK,
+            GenericAction.PUT_BACK.takeIf { saved },
             GenericAction.REPORT,
             GenericAction.DELETE_ORIGINAL.takeIf { saved },
         )
@@ -65,8 +66,15 @@ fun refreshHintText(label: String, hint: RefreshHint): String = when (hint) {
     RefreshHint.TokenUnknown -> "Refresh $label to keep it working."
 }
 
-internal fun genericUpdateHint(label: String) =
-    "To update $label, put the original back, update it in Play, and patch it again."
+/** How to update a finished patch: through its saved original, or with none saved, through Play. */
+internal fun genericUpdateHint(entry: GenericEntry): String {
+    val label = entry.record.label
+    return if (entry.record.original.isNotEmpty()) {
+        "To update $label, put the original back, update it in Play, and patch it again."
+    } else {
+        "To update $label, uninstall it, install it from Google Play, and patch it again."
+    }
+}
 
 /** The refresh hint and the update hint go under a finished patch only. */
 internal fun showsGenericHints(entry: GenericEntry): Boolean =

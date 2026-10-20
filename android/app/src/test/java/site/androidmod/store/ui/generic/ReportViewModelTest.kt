@@ -182,6 +182,24 @@ class ReportViewModelTest {
     }
 
     @Test
+    fun reports_turned_off_message() = runTest {
+        // GENERIC_PATCHING off: the server's own detail isn't customer copy.
+        server.enqueue(MockResponse(code = 404, body = """{"detail":"Generic patching is off"}"""))
+        val model = model()
+        model.onWorked(false)
+        model.onNoteChange("Ads are back.")
+
+        model.send()
+        val status = model.status.first { it.error != null }
+
+        assertEquals("/api/generic/reports", server.takeRequest().target)
+        assertEquals("Reports are turned off right now.", status.error)
+        assertFalse(status.sending)
+        assertEquals(false, model.worked)
+        assertEquals("Ads are back.", model.note)
+    }
+
+    @Test
     fun error_keeps_form() = runTest {
         server.enqueue(MockResponse(code = 503, body = """{"detail":"Patching other apps isn't available right now."}"""))
         val model = model()

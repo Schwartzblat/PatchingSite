@@ -204,6 +204,7 @@ class Container(private val context: Context) {
             sha256 = ::sha256Of,
             now = System::currentTimeMillis,
             isBusy = PatchRegistry::isBusy,
+            obb = installedApps::hasObbFiles,
         )
     }
 

@@ -13,6 +13,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import site.androidmod.patch.GenericPatchInfo
+import site.androidmod.store.install.InstallErrors
 import site.androidmod.store.install.InstallFailure
 import site.androidmod.store.install.InstallOutcome
 import java.io.File
@@ -45,6 +46,10 @@ class GenericFlowTest {
         var clock = 1_000L
         var installAnswer: InstallOutcome = InstallOutcome.Success
 
+        /** Whether the app keeps files in Android/obb, as read now; null when that can't be read. */
+        var obbFiles: () -> Boolean? = { false }
+        var obbReads = 0
+
         /** Runs inside the installer, before it answers. */
         var duringInstall: suspend () -> Unit = {}
         val installs = mutableListOf<Pair<List<File>, Set<String>>>()
@@ -66,6 +71,11 @@ class GenericFlowTest {
             isBusy = { pkg ->
                 assertEquals(PKG, pkg)
                 busy
+            },
+            obb = { pkg ->
+                assertEquals(PKG, pkg)
+                obbReads++
+                obbFiles()
             },
         )
 
@@ -600,6 +610,101 @@ class GenericFlowTest {
     }
 
     @Test
+    fun removing_the_original_is_refused_while_it_keeps_obb_files() {
+        // Android deletes Android/obb with the app; the picker may not have been able to read it.
+        val refusal = "Example keeps extra data in Android/obb, which Android deletes with the app, so it wasn't removed. " +
+            "Stop to keep Example as it is."
+        val f = fixture()
+        val built = f.built()
+        f.obbFiles = { true }
+        assertEquals(GenericPhase.RemoveOriginal(false), f.flow.phase(PKG))
+
+        assertEquals(refusal, f.flow.askedToUninstall(PKG))
+        assertEquals(built, f.record())
+        assertNull(f.record().uninstallAskedAt)
+        assertEquals(GenericPhase.RemoveOriginal(false), f.flow.phase(PKG))
+
+        // Stop still ends it, with the app as it is.
+        assertTrue(f.flow.stop(PKG))
+        assertNull(f.records.get(PKG))
+        assertFalse(f.packageDir.exists())
+
+        // Unknown (it can't be read, or the read fails) doesn't block, nor does an empty folder.
+        for (unknown in listOf<() -> Boolean?>({ null }, { throw SecurityException("no access") }, { false })) {
+            val g = fixture()
+            g.built()
+            g.clock = 5_000L
+            g.obbFiles = unknown
+            assertNull(g.flow.askedToUninstall(PKG))
+            assertEquals(5_000L, g.record().uninstallAskedAt)
+            assertEquals(1, g.obbReads)
+        }
+
+        // Removing our patched copy to put the original back: its obb folder isn't read.
+        val restoring = fixture()
+        restoring.patched()
+        assertNull(restoring.flow.startRestore(PKG))
+        restoring.obbFiles = { true }
+        assertTrue(restoring.flow.phase(PKG) is GenericPhase.RemovePatched)
+        assertNull(restoring.flow.askedToUninstall(PKG))
+        assertNotNull(restoring.record().uninstallAskedAt)
+        assertEquals(0, restoring.obbReads)
+    }
+
+    @Test
+    fun a_signature_conflict_with_the_app_not_installed_says_android_kept_its_data() = runTest {
+        // The original was removed with its data kept (or is installed for another user): Android still holds its signature.
+        val kept = "Android kept Example's data (or a copy for another user), so the patched copy can't be installed. " +
+            "Put the original back to use Example again."
+        val conflict = InstallErrors.failure(
+            "INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package com.example.app signatures do not match newer version; ignoring!",
+        )
+        assertEquals(InstallFailure.SIGNATURE_CONFLICT, conflict.reason)
+        val f = fixture()
+        f.built()
+        assertNull(f.flow.askedToUninstall(PKG))
+        f.installed = null
+        f.installAnswer = conflict
+        val before = f.record()
+
+        assertEquals(conflict.copy(message = kept), f.flow.installPatched(PKG))
+        assertEquals(before, f.record())
+        assertEquals(GenericPhase.InstallPatched, f.flow.phase(PKG))
+        // Putting the original back still works.
+        assertNull(f.flow.startRestore(PKG))
+        f.installAnswer = InstallOutcome.Success
+        assertEquals(InstallOutcome.Success, f.flow.installOriginal(PKG))
+
+        // Android lists the app once the install answers: the installer's own text stays.
+        val g = fixture()
+        g.built()
+        assertNull(g.flow.askedToUninstall(PKG))
+        g.installed = null
+        g.installAnswer = conflict
+        g.duringInstall = { g.installed = InstalledState(setOf(OTHER_CERT), VERSION_CODE, "f".repeat(64)) }
+        assertEquals(conflict, g.flow.installPatched(PKG))
+
+        // Any other failure keeps its text.
+        val h = fixture()
+        h.built()
+        assertNull(h.flow.askedToUninstall(PKG))
+        h.installed = null
+        val storage = InstallErrors.failure("INSTALL_FAILED_INSUFFICIENT_STORAGE")
+        h.installAnswer = storage
+        assertEquals(storage, h.flow.installPatched(PKG))
+
+        // A Refresh's update installs over our copy: its conflict keeps the installer's text.
+        val r = fixture()
+        r.patched()
+        assertNull(r.flow.startRefresh(PKG))
+        r.refreshBuilt()
+        assertEquals(GenericPhase.InstallUpdate, r.flow.phase(PKG))
+        r.installAnswer = conflict
+        r.duringInstall = { r.installed = null }
+        assertEquals(conflict, r.flow.installPatched(PKG))
+    }
+
+    @Test
     fun stop_allowed_when_nothing_was_saved() {
         // Removed before its original was saved: nothing on disk is worth keeping.
         val f = fixture()
@@ -832,6 +937,27 @@ class GenericFlowTest {
 
         assertNull(g.records.get(PKG))
         assertFalse(g.packageDir.exists())
+    }
+
+    @Test
+    fun forget_an_adopted_app_replaced_by_another_signer() {
+        // Adopted (nothing saved), then the developer's build installed by hand: nothing of ours is left to protect.
+        val f = fixture()
+        f.installed = PATCHED_INSTALLED
+        f.flow.adopt(f.app(setOf(USER_CERT)), INFO)
+        f.installed = ORIGINAL_INSTALLED
+        assertEquals(GenericPhase.Unpatched, f.flow.phase(PKG))
+
+        // Without the key it can't be told from our own copy: kept.
+        f.cert = null
+        assertTrue(f.flow.phase(PKG) is GenericPhase.Attention)
+        assertFalse(f.flow.forget(PKG))
+        assertNotNull(f.records.get(PKG))
+
+        f.cert = USER_CERT
+        assertTrue(f.flow.forget(PKG))
+        assertNull(f.records.get(PKG))
+        assertFalse(f.packageDir.exists())
     }
 
     @Test

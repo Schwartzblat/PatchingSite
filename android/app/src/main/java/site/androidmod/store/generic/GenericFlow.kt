@@ -16,6 +16,7 @@ import java.io.File
  * The customer keeps a working app at every step:
  * - nothing is removed ([askedToUninstall] says go) unless the copy that replaces it is on disk
  *   and still matches its recorded SHA-256;
+ * - an original that keeps files in Android/obb is never removed: Android would delete them too;
  * - every install re-hashes the files it hands to Android;
  * - nothing changes while the package's job runs ([isBusy]) or while one of its installs is in
  *   progress here.
@@ -31,6 +32,8 @@ class GenericFlow(
     private val sha256: (File) -> String,
     private val now: () -> Long,
     private val isBusy: (String) -> Boolean,
+    /** Whether the app keeps files in Android/obb; null when that can't be read. Reads storage. */
+    private val obb: (String) -> Boolean?,
 ) {
     // Guards every read-then-write of a record, and [installing].
     private val lock = Any()
@@ -92,7 +95,8 @@ class GenericFlow(
     /**
      * Call right before the UI asks Android to remove the app (ACTION_DELETE), and fire that only
      * on null: the request time is then on disk. Anything else says why not, and nothing was
-     * written. Allowed at RemoveOriginal while the saved original and the patched copy still match
+     * written. Allowed at RemoveOriginal while the app keeps no files in Android/obb (read now; one
+     * that can't be read counts as none), the saved original and the patched copy still match
      * their hashes and the key the copy was signed with is cached, and at RemovePatched while the
      * saved original does.
      */
@@ -101,6 +105,9 @@ class GenericFlow(
         if (busy(packageName)) return@synchronized BUSY
         val intact = when (phaseOf(record)) {
             is GenericPhase.RemoveOriginal -> {
+                // Android deletes Android/obb with the app, and nothing here brings it back. Read again
+                // now: the picker can't read it before "install unknown apps" is allowed.
+                if (keepsObbFiles(packageName)) return@synchronized keepsObb(record.label)
                 // The installer trusts only the cached key: without it, or with another account's, the patched
                 // copy couldn't go in next. A record from before the build's signer was kept needs some key.
                 if (builtByAnotherKey(record)) return@synchronized wrongAccount(record.label)
@@ -122,7 +129,9 @@ class GenericFlow(
 
     /**
      * Installs our patched copy, base first: at InstallPatched, or InstallUpdate for a Refresh, and
-     * only while the key it was signed with is the one cached. A failure changes nothing.
+     * only while the key it was signed with is the one cached. A failure changes nothing. At
+     * InstallPatched, a signature conflict while the app still isn't installed for this user says
+     * Android kept the original's data (or a copy for another user), not to uninstall it.
      */
     suspend fun installPatched(packageName: String): InstallOutcome = installStep(packageName) { record, phase ->
         val dir = records.builtDir(packageName)
@@ -131,7 +140,11 @@ class GenericFlow(
             builtByAnotherKey(record) -> Step.Refused(wrongAccount(record.label))
             !intact(dir, record.built) -> Step.Refused("The patched copy of ${record.label} is damaged, so it wasn't installed.")
             // Signed with the user's key, which the installer trusts already.
-            else -> Step.Ready(record.built.map { File(dir, it.name) }, emptySet())
+            else -> Step.Ready(
+                record.built.map { File(dir, it.name) },
+                emptySet(),
+                conflictWhileAbsent = keptData(record.label).takeIf { phase == GenericPhase.InstallPatched },
+            )
         }
     }
 
@@ -269,7 +282,8 @@ class GenericFlow(
      * Forgets an app the Library has nothing left to do for, with its record and every file of it,
      * and says whether it did. Only with no flow under way and the package idle, and only where
      * nothing still needed goes: at Unpatched (the original is installed, so a saved copy of it is
-     * spare), or at Removed with no saved original. Otherwise nothing changes.
+     * spare; or another signer is, with nothing saved), or at Removed with no saved original.
+     * Otherwise nothing changes.
      */
     fun forget(packageName: String): Boolean = synchronized(lock) {
         val record = records.get(packageName) ?: return@synchronized false
@@ -286,7 +300,8 @@ class GenericFlow(
     fun savedOriginalBytes(packageName: String): Long = records.get(packageName)?.original?.sumOf { it.size } ?: 0L
 
     private sealed interface Step {
-        class Ready(val apks: List<File>, val extraTrusted: Set<String>) : Step
+        /** [conflictWhileAbsent]: the message for a signature conflict while the app isn't installed for this user. */
+        class Ready(val apks: List<File>, val extraTrusted: Set<String>, val conflictWhileAbsent: String? = null) : Step
         class Refused(val message: String) : Step
     }
 
@@ -315,11 +330,23 @@ class GenericFlow(
             }
             return when (step) {
                 is Step.Refused -> InstallOutcome.Failure(step.message, InstallFailure.UNKNOWN)
-                is Step.Ready -> install(step.apks, step.extraTrusted)
+                is Step.Ready -> explained(packageName, step, install(step.apks, step.extraTrusted))
             }
         } finally {
             synchronized(lock) { if (reserved) installing -= packageName }
         }
+    }
+
+    /**
+     * [outcome], or for a signature conflict while the app isn't installed for this user (read
+     * again now) [Step.Ready.conflictWhileAbsent]: the installer's own text says to uninstall an app
+     * the phone doesn't show.
+     */
+    private suspend fun explained(packageName: String, step: Step.Ready, outcome: InstallOutcome): InstallOutcome {
+        val message = step.conflictWhileAbsent ?: return outcome
+        if (outcome !is InstallOutcome.Failure || outcome.reason != InstallFailure.SIGNATURE_CONFLICT) return outcome
+        val absent = runInterruptible(Dispatchers.IO) { installedState(packageName) == null }
+        return if (absent) outcome.copy(message = message) else outcome
     }
 
     private fun phaseOf(record: GenericRecord): GenericPhase =
@@ -329,6 +356,13 @@ class GenericFlow(
     private fun busy(packageName: String): Boolean = packageName in installing || isBusy(packageName)
 
     private fun intact(dir: File, saved: List<SavedApk>): Boolean = savedCopiesIntact(dir, saved, sha256)
+
+    /** The app keeps files in Android/obb; false when that can't be read (unknown doesn't block). */
+    private fun keepsObbFiles(packageName: String): Boolean = try {
+        obb(packageName) == true
+    } catch (error: Exception) {
+        false
+    }
 
     /**
      * The build was signed with a key other than the cached one (or none is cached), so the installer
@@ -359,6 +393,12 @@ class GenericFlow(
         fun atAnotherStep(label: String) = "Nothing was installed, because $label is at another step now."
         fun wrongAccount(label: String) = "Sign in with the account you patched $label with."
         fun notReadyToRemove(label: String) = "$label isn't ready to be removed."
+        fun keepsObb(label: String) =
+            "$label keeps extra data in Android/obb, which Android deletes with the app, so it wasn't removed. " +
+                "Stop to keep $label as it is."
+        fun keptData(label: String) =
+            "Android kept $label's data (or a copy for another user), so the patched copy can't be installed. " +
+                "Put the original back to use $label again."
         fun noSavedOriginal(label: String) =
             "There's no saved original of $label to put back. To get the original, uninstall $label, then install it from Google Play."
         fun cantRefresh(label: String) = "$label can't be refreshed right now."

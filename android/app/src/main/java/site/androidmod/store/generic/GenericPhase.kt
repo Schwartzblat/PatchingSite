@@ -21,7 +21,10 @@ sealed interface GenericPhase {
     /** No intent, and the app isn't installed. */
     data object Removed : GenericPhase
 
-    /** No intent, and the original signer is installed. */
+    /**
+     * No intent, and the original signer is installed; or, with nothing of ours saved (an adopted
+     * record, say), any signer the user's key tells apart from our own copy.
+     */
     data object Unpatched : GenericPhase
     data class Attention(val message: String) : GenericPhase
 }
@@ -61,12 +64,16 @@ fun genericPhase(record: GenericRecord, installed: InstalledState?, userCert: St
             ours -> GenericPhase.InstallUpdate
             // Stop ends the Refresh and leaves what is installed.
             original -> GenericPhase.Attention("${record.label} was put back outside the store. Stop to end the Refresh.")
-            else -> changed
+            installed == null -> GenericPhase.Attention("${record.label} was removed outside the store. Stop to end the Refresh.")
+            else -> GenericPhase.Attention("${record.label} was changed outside the store. Stop to end the Refresh.")
         }
         null -> when {
             installed == null -> GenericPhase.Removed
             ours -> GenericPhase.Patched
             original -> GenericPhase.Unpatched
+            // Another signer and no saved original: nothing of ours to protect. Without the key our own
+            // copy would read this way too, so then it stays changed (and the Library can't check it).
+            record.original.isEmpty() && userCert != null -> GenericPhase.Unpatched
             else -> changed
         }
     }

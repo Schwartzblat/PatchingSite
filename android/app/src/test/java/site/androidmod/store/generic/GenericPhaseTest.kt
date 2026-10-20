@@ -105,8 +105,12 @@ class GenericPhaseTest {
         assertEquals(expected, phase(record(GenericIntent.REFRESH), InstalledState(orig, 6L, "play-sha")))
     }
 
-    @Test fun refresh_foreign_signer_says_to_uninstall() =
-        assertEquals(changedOutside, phase(record(GenericIntent.REFRESH), InstalledState(setOf("zz"), 5L, "x")))
+    @Test fun refresh_foreign_signer_says_to_stop() =
+        // Stop ends the Refresh and leaves what is installed: uninstalling first would lead nowhere.
+        assertEquals(
+            GenericPhase.Attention("Example was changed outside the store. Stop to end the Refresh."),
+            phase(record(GenericIntent.REFRESH), InstalledState(setOf("zz"), 5L, "x")),
+        )
 
     // REFRESH
     @Test fun refresh_without_built_saves_and_builds() =
@@ -124,8 +128,11 @@ class GenericPhaseTest {
         assertEquals(GenericPhase.Patched, phase(r, ourBuild))
     }
 
-    @Test fun refresh_not_installed_needs_attention() =
-        assertTrue(phase(record(GenericIntent.REFRESH), null) is GenericPhase.Attention)
+    @Test fun refresh_not_installed_says_to_stop() {
+        val expected = GenericPhase.Attention("Example was removed outside the store. Stop to end the Refresh.")
+        assertEquals(expected, phase(record(GenericIntent.REFRESH), null))
+        assertEquals(expected, phase(record(GenericIntent.REFRESH, original = emptyList()), null))
+    }
 
     // no intent
     @Test fun none_not_installed_is_removed() =
@@ -139,6 +146,15 @@ class GenericPhaseTest {
 
     @Test fun none_other_needs_attention() =
         assertEquals(changedOutside, phase(record(null), InstalledState(setOf("zz"), 5L, "x")))
+
+    @Test fun none_other_signer_with_nothing_saved_is_unpatched() {
+        // Adopted (no saved original), then the developer's build installed by hand: nothing of ours to protect.
+        val adopted = record(null, original = emptyList(), built = emptyList()).copy(originalSigners = emptySet())
+        assertEquals(GenericPhase.Unpatched, phase(adopted, InstalledState(setOf("zz"), 5L, "x")))
+        assertEquals(GenericPhase.Unpatched, phase(record(null, original = emptyList()), InstalledState(setOf("zz"), 5L, "x")))
+        // Without the key our own copy reads as another signer: that can't be told, so it stays Attention.
+        assertEquals(changedOutside, genericPhase(adopted, ourBuild, null))
+    }
 
     @Test fun null_user_cert_is_never_ours() =
         assertTrue(genericPhase(record(null), ourBuild, null) is GenericPhase.Attention)
