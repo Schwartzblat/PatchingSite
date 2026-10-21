@@ -129,7 +129,6 @@ APPS = (
             "Send More Group History to New Members",
             "Shared Members Between Groups",
             "Back Up Chats to Your Own Google Drive",
-            "Unlimited Pinned Chats",
         ),
     ),
     AppConfig(

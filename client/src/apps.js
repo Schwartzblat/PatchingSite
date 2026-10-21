@@ -111,12 +111,6 @@ export const apps = {
                     + "nightly chat backup to a folder in your Google Drive about once a day, and restores it "
                     + "without reinstalling. Chats only, not media. It is off until you turn it on.",
             },
-            {
-                name: "Unlimited Pinned Chats",
-                detail: "Pin as many chats as you like, instead of WhatsApp's three, or twenty with WhatsApp "
-                    + "Premium. Pinning or unpinning a chat on a linked device such as WhatsApp Web, or linking a "
-                    + "new one, keeps only the twenty chats you pinned most recently.",
-            },
         ],
         faq: [
             {
