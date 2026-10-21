@@ -470,6 +470,13 @@
       ],
       "name": "Ad tech (web)",
       "packages": []
+    },
+    {
+      "hosts": [
+        "m-ads-configs.miniclip.com"
+      ],
+      "name": "Publisher ad servers",
+      "packages": []
     }
   ],
   "url_rules": [
