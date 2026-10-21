@@ -20,9 +20,9 @@ def client(tmp_db, fake_stripe):
 
 @pytest.fixture
 def build(patched_apps_dir):
-    version_dir = patched_apps_dir / "com.tranzmate" / "1.0"
+    version_dir = patched_apps_dir / "com.whatsapp" / "1.0"
     version_dir.mkdir(parents=True)
-    (version_dir / "patched_com.tranzmate-1.0.apk").write_bytes(b"PK")
+    (version_dir / "patched_com.whatsapp-1.0.apk").write_bytes(b"PK")
 
 
 def on_device(monkeypatch, *packages):
@@ -34,20 +34,23 @@ def by_package(client):
 
 
 def test_apps_marks_on_device(client, monkeypatch):
+    assert by_package(client)["com.whatsapp"]["on_device"] is False
     on_device(monkeypatch, "com.whatsapp")
-    items = by_package(client)
-    assert items["com.whatsapp"]["on_device"] is True
-    assert items["com.tranzmate"]["on_device"] is False
+    assert by_package(client)["com.whatsapp"]["on_device"] is True
 
 
-def test_list_is_empty_for_on_device_package(client, monkeypatch, build):
+def test_list_is_empty_for_on_device_package(client, monkeypatch):
     on_device(monkeypatch, "com.whatsapp")
     # No build directory for WhatsApp at all: still an empty list, not a 404.
     response = client.get("/api/list/com.whatsapp")
     assert response.status_code == 200
     assert response.json() == []
-    other = client.get("/api/list/com.tranzmate")
-    assert [item["version"] for item in other.json()] == ["1.0"]
+
+
+def test_list_hides_builds_once_on_device(client, monkeypatch, build):
+    assert [item["version"] for item in client.get("/api/list/com.whatsapp").json()] == ["1.0"]
+    on_device(monkeypatch, "com.whatsapp")
+    assert client.get("/api/list/com.whatsapp").json() == []
 
 
 def test_download_refused_with_410(client, monkeypatch, fake_stripe):
@@ -68,5 +71,8 @@ def test_download_refused_with_410(client, monkeypatch, fake_stripe):
 def test_default_changes_nothing(client, build):
     assert config.ON_DEVICE_PACKAGES == frozenset()
     assert by_package(client)["com.whatsapp"]["on_device"] is False
-    assert client.get("/api/list/com.tranzmate").json() != []
+    assert [item["version"] for item in client.get("/api/list/com.whatsapp").json()] == ["1.0"]
+
+
+def test_default_without_builds_is_404(client):
     assert client.get("/api/list/com.whatsapp").status_code == 404

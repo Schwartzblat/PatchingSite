@@ -132,7 +132,7 @@
     margin-top: auto;
 }
 
-/* Only where the card name alone means nothing abroad ("12+" is Mako). */
+/* Only where the card name alone means nothing abroad. */
 .home-card-about {
     margin: 0.15rem 0 0;
     font-size: 0.95rem;

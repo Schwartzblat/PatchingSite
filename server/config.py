@@ -131,31 +131,6 @@ APPS = (
             "Back Up Chats to Your Own Google Drive",
         ),
     ),
-    AppConfig(
-        name="Moovit", package="com.tranzmate", key="moovit",
-        features=("No Ads", "Live Location Enabled"),
-    ),
-    AppConfig(
-        name="12+", package="com.keshet.mako.VOD", key="mako",
-        features=("No Ads",),
-    ),
-    AppConfig(
-        name="Reshet 13+", package="com.applicaster.iReshet", key="reshet",
-        # The ReshetPatcher README's feature list, regrouped by what a viewer
-        # sees: the player's video ads, then every other ad in the app.
-        features=("No Video Ads", "No Full-Screen or Banner Ads"),
-    ),
-    AppConfig(
-        name="OkCupid", package="com.okcupid.okcupid", key="okcupid",
-        # A deliberate subset of the OkCupidPremiumPatcher README's feature
-        # list: the patched build also unblurs and names the gated "Interested
-        # in You" cards, which the catalogue does not advertise.
-        features=(
-            "Unlimited Rewinds",
-            "See who viewed/liked you (full profile)",
-            "Regular Like on OkCupid Picks",
-        ),
-    ),
 )
 APPS_BY_PACKAGE = {app.package: app for app in APPS}
 

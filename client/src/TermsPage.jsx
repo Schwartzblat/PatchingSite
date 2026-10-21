@@ -26,9 +26,8 @@ function TermsPage() {
 
             <DocSection id="service" title="What the service is">
                 <p>
-                    We publish modified (&quot;patched&quot;) builds of third-party Android apps: WhatsApp,
-                    Moovit, 12+ (Mako), Reshet 13+ and OkCupid at the moment. Each build is changed to add or remove
-                    features and is re-signed with our own key.
+                    We publish modified (&quot;patched&quot;) builds of third-party Android apps: WhatsApp at the
+                    moment. Each build is changed to add or remove features and is re-signed with our own key.
                 </p>
                 <ul>
                     <li>

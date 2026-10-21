@@ -7,15 +7,15 @@ const SEPARATOR = ' — ';
 /* The home tab names the apps rather than the category, because it is what a
    search result shows. Its en dash is the requested wording, not SEPARATOR;
    every other page keeps SEPARATOR. */
-const HOME_TITLE = `${SITE_NAME} – Patched WhatsApp, Moovit & 12+`;
+const HOME_TITLE = `${SITE_NAME} – Patched WhatsApp`;
 
 /* Any page that passes no description of its own gets this one. It used to be
    read out of index.html, so that a crawler running no JavaScript saw it. The
    build now writes every page's own tags into that page's file
    (scripts/prerender.js), so the copy lives here and index.html has none. */
 const HOME_DESCRIPTION =
-    'AndroidMod rebuilds popular Android apps with their limits removed - ad-free Moovit '
-    + 'and Mako, WhatsApp without view-once or anti-revoke restrictions - signed and ready to install.';
+    'AndroidMod rebuilds WhatsApp with its limits removed - no view-once or anti-revoke restrictions - '
+    + 'signed and ready to install.';
 
 /**
  * Every route renders exactly one of these. React 19 hoists the <title> and

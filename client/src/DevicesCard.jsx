@@ -137,8 +137,8 @@ function DevicesCard() {
                             </div>
                         )}
                         <p className="subscription-hint">
-                            Each patched app on each phone takes one slot, so WhatsApp and Moovit on the same phone
-                            use two. A phone you no longer use keeps its slots until you reset them.
+                            Each patched app on each phone takes one slot, so WhatsApp on two phones uses two. A
+                            phone you no longer use keeps its slots until you reset them.
                         </p>
                         {lastReset && <p className="subscription-period">Last reset {lastReset}.</p>}
                     </div>

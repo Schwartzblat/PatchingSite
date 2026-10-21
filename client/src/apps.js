@@ -6,7 +6,7 @@ import {appsHe} from './apps.he.js';
  * with server/config.py APPS — the backend is the source of truth for them.
  *
  * `about` is web-only copy for an app whose name means nothing to a visitor
- * from abroad: "12+" is what Keshet 12 calls its Mako app on the Play Store.
+ * from abroad.
  *
  * `description` is the page's <meta name="description"> and its SoftwareApplication
  * blurb. It names the actual patches rather than the app, because the app's own
@@ -20,8 +20,8 @@ import {appsHe} from './apps.he.js';
  * so on); anything else is reported as an invalid value.
  *
  * `intro`, each feature's `detail` and `faq` are the app page's text. Every
- * claim in them comes from the patcher's own code and docs (the WhatsApp,
- * Moovit, Mako, Reshet and OkCupid patcher projects), not from the feature's name:
+ * claim in them comes from the patcher's own code and docs (the WhatsApp patcher
+ * project), not from the feature's name:
  * where the code does less than the name suggests, the detail says what it
  * does. Change them when a patch changes.
  *
@@ -133,160 +133,6 @@ export const apps = {
                 q: "What happens when WhatsApp updates?",
                 a: "A patched WhatsApp does not update from the Play Store. When a newer patched build is listed "
                     + "here and in the store app, install it over yours, and your chats stay.",
-            },
-        ],
-    },
-    moovit: {
-        name: "Moovit",
-        package: "com.tranzmate",
-        category: "TravelApplication",
-        description:
-            "Patched Moovit for Android: public-transport routes and live arrival times with no ads, "
-            + "plus Moovit+ Live Location to follow your line on the map.",
-        icon: "/moovit.webp",
-        intro:
-            "The official Moovit with its ads taken out and Moovit+'s Live Location switched on. Routes, "
-            + "live arrival times and everything else come from the same Moovit service as the Play Store "
-            + "version.",
-        features: [
-            {
-                name: "No Ads",
-                detail: "Removes the banners, full-screen ads, ads in lists, sponsored places on the map and the "
-                    + "\"watch a video to remove ads\" offer.",
-            },
-            {
-                name: "Live Location Enabled",
-                detail: "Moovit+'s Live Location, which follows your bus or train on the map, without a Moovit+ "
-                    + "subscription.",
-            },
-        ],
-        faq: [
-            {
-                q: "Are the routes and times the same?",
-                a: "Yes. It is the same app talking to the same Moovit service; only the ads and the Moovit+ "
-                    + "lock are changed.",
-            },
-            {
-                q: "What happens when Moovit updates?",
-                a: "The patched Moovit does not update from the Play Store. When a newer patched build is listed "
-                    + "here and in the store app, install it over yours, and your saved places stay.",
-            },
-        ],
-    },
-    mako: {
-        name: "12+",
-        about: "Mako, the Keshet 12 TV app",
-        package: "com.keshet.mako.VOD",
-        category: "EntertainmentApplication",
-        description:
-            "Patched 12+ for Android, the Keshet 12 (Mako) TV app, with the ad breaks removed "
-            + "from live channels and on-demand episodes.",
-        icon: "/mako.webp",
-        intro:
-            "12+ is Keshet 12's app for Mako: the live channel and full episodes on demand. This build plays "
-            + "them without the video ad breaks.",
-        features: [
-            {
-                name: "No Ads",
-                detail: "Removes the video ads before a show starts and the ad breaks in the middle of it, on the "
-                    + "live channel and on demand.",
-            },
-        ],
-        faq: [
-            {
-                q: "Does everything else work as usual?",
-                a: "Yes. It is the same app and the same Mako service; the patch only changes when ads play.",
-            },
-            {
-                q: "What happens when 12+ updates?",
-                a: "The patched 12+ does not update from the Play Store. When a newer patched build is listed "
-                    + "here and in the store app, install it over yours.",
-            },
-        ],
-    },
-    reshet: {
-        name: "Reshet 13+",
-        about: "The Channel 13 TV app",
-        package: "com.applicaster.iReshet",
-        category: "EntertainmentApplication",
-        description:
-            "Patched Reshet 13+ for Android, the Channel 13 TV app, without its video ads on demand "
-            + "and live, or its full-screen, banner and web ads.",
-        icon: "/reshet.webp",
-        intro:
-            "Reshet 13+ is Reshet's app for Channel 13: the live channel and full episodes on demand. This "
-            + "build plays them without the app's video ads, and leaves out its full-screen, banner and web ads.",
-        features: [
-            {
-                name: "No Video Ads",
-                detail: "Removes the video ads before a show and in the middle of an episode on demand, and the "
-                    + "ads the app adds to the live channel. The live channel's commercial breaks stay: they show "
-                    + "the channel's own TV commercials, exactly as on TV.",
-            },
-            {
-                name: "No Full-Screen or Banner Ads",
-                detail: "No full-screen ads when the app opens or between screens, no banners, and no ads on the "
-                    + "web pages the app shows inside it.",
-            },
-        ],
-        faq: [
-            {
-                q: "Why are there still commercials on the live channel?",
-                a: "The live channel is the broadcast itself, and its commercial breaks are part of it, so they "
-                    + "play as they air on TV. What the patch removes are the ads the app adds on its own: before "
-                    + "a show, during episodes on demand, and in place of the broadcast's commercials. If the "
-                    + "broadcast's own stream cannot be reached, the app's stream plays instead, with each of its "
-                    + "ads replaced by a black, silent screen of the same length.",
-            },
-            {
-                q: "Does everything else work as usual?",
-                a: "Yes. It is the same app and the same Reshet 13 service; the patch only changes the ads.",
-            },
-            {
-                q: "What happens when Reshet 13+ updates?",
-                a: "The patched Reshet 13+ does not update from the Play Store. When a newer patched build is "
-                    + "listed here and in the store app, install it over yours.",
-            },
-        ],
-    },
-    okcupid: {
-        name: "OkCupid",
-        package: "com.okcupid.okcupid",
-        category: "SocialNetworkingApplication",
-        description:
-            "Patched OkCupid for Android: unlimited rewinds to undo a pass, and see the full "
-            + "profiles of everyone who viewed or liked you.",
-        icon: "/okcupid.webp",
-        intro:
-            "The official OkCupid with two paid features free: rewinding as often as you like, and the full "
-            + "list of people who liked or viewed your profile. It also adds a plain Like to OkCupid Picks.",
-        features: [
-            {
-                name: "Unlimited Rewinds",
-                detail: "Undo a pass as many times as you like, instead of the few rewinds a free account gets.",
-            },
-            {
-                name: "See who viewed/liked you (full profile)",
-                detail: "The \"Interested in you\" list shows everyone who liked or viewed your profile with their "
-                    + "name and an unblurred photo, and tapping a card opens their full profile. The first time, "
-                    + "names fill in over a few minutes as the app looks each one up.",
-            },
-            {
-                name: "Regular Like on OkCupid Picks",
-                detail: "A Picks card normally offers only its profile and a SuperLike, which costs tokens. A Like "
-                    + "button next to the SuperLike sends an ordinary like instead.",
-            },
-        ],
-        faq: [
-            {
-                q: "Do I keep my OkCupid account?",
-                a: "Yes. You sign in with the account you have. Uninstalling the Play Store version signs you out, "
-                    + "so you sign in again once the patched one is installed.",
-            },
-            {
-                q: "Will these features keep working?",
-                a: "They rely on how OkCupid's service works today. If OkCupid changes it, a feature can stop "
-                    + "working until a new build is out.",
             },
         ],
     },
