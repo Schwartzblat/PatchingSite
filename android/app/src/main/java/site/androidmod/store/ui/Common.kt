@@ -45,10 +45,6 @@ import java.util.Locale
  */
 private val BundledIcons = mapOf(
     "com.whatsapp" to R.drawable.app_whatsapp,
-    "com.tranzmate" to R.drawable.app_moovit,
-    "com.keshet.mako.VOD" to R.drawable.app_mako,
-    "com.applicaster.iReshet" to R.drawable.app_reshet,
-    "com.okcupid.okcupid" to R.drawable.app_okcupid,
 )
 
 @Composable
