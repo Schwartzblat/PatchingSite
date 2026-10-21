@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "package": "com.kiloo.subwaysurf",
+    "name": "Subway Surfers",
+    "note": "No ads.",
+    "tested_version": "3.70.3",
+    "tested_on": "2026-10-21"
+  }
+]

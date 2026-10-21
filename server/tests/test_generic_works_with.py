@@ -55,13 +55,14 @@ def client(tmp_db, fake_stripe, tmp_path, monkeypatch):
 
 
 def test_generic_status_public(client, tmp_path, monkeypatch):
+    path = tmp_path / "ww.json"
+    path.write_text(text())
+    monkeypatch.setattr(config, "GENERIC_WORKS_WITH_PATH", path)
     response = client.get("/api/generic")
     assert response.status_code == 200
     assert response.json() == {"enabled": False, "works_with": []}
 
-    path = tmp_path / "ww.json"
     path.write_text(text(ENTRY))
-    monkeypatch.setattr(config, "GENERIC_WORKS_WITH_PATH", path)
     monkeypatch.setattr(config, "GENERIC_PATCHING", True)
     assert client.get("/api/generic").json() == {"enabled": True, "works_with": [ENTRY]}
 
@@ -84,7 +85,7 @@ def test_broken_works_with_file_serves_empty_list(client, tmp_path, monkeypatch,
 
 def test_shipped_file_is_valid():
     shipped = config.GENERIC_WORKS_WITH_PATH.read_text()
-    assert works_with.parse(shipped) == []
+    assert isinstance(works_with.parse(shipped), list)
 
 
 def test_doctor_flags_broken_works_with(monkeypatch, capsys, tmp_path):
