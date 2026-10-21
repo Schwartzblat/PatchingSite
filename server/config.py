@@ -123,7 +123,6 @@ APPS = (
             "Meta AI Removed From the Home Screen",
             "Save View Once Media",
             "Profile Picture Screenshot",
-            "Unlock Premium Features",
             "Tag a Group With @everyone",
             "Settings Screen to Toggle Features",
             "Group and Member Statistics",

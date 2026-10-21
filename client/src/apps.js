@@ -78,11 +78,6 @@ export const apps = {
                     + "On Android 14 and newer, WhatsApp is not told when you take one.",
             },
             {
-                name: "Unlock Premium Features",
-                detail: "Turns on the WhatsApp Premium extras that WhatsApp offers only to some users: app themes "
-                    + "and icons, ringtones, chat lists, more pinned chats and custom reactions.",
-            },
-            {
                 name: "Tag a Group With @everyone",
                 detail: "Type @everyone or @all in a group to mention every member at once. Members whose WhatsApp "
                     + "has not switched this feature on yet are not notified.",
