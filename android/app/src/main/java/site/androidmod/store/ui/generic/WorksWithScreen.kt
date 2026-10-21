@@ -18,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import site.androidmod.store.generic.WorksWithEntry
-import site.androidmod.store.ui.AppIcon
 import site.androidmod.store.ui.move.MainButton
 import site.androidmod.store.ui.theme.PapSuccess
 
@@ -48,7 +47,7 @@ private fun WorksWithCard(entry: WorksWithEntry) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
     ) {
         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            AppIcon(packageName = entry.packageName, name = entry.name, size = 44.dp)
+            InstalledAppIcon(entry.packageName, entry.name, size = 44.dp)
             Column(modifier = Modifier.weight(1f).padding(start = 14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(entry.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f, fill = false))
