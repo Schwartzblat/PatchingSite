@@ -1,9 +1,11 @@
 package site.androidmod.patch
 
 import java.io.File
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -128,6 +130,30 @@ class PatchBundleTest {
         rejects("catalog format 2") {
             PatchBundle.open(bundle(files = genericFiles + ("catalog.json" to catalogJson(2).toByteArray()), meta = genericMeta), key.public)
         }
+    }
+
+    @Test fun genericBundleReadsTheIapSection() {
+        val catalog = PatchBundleTest::class.java.getResource("/generic/catalog.json")!!.readBytes()
+        val b = PatchBundle.open(bundle(files = genericFiles + ("catalog.json" to catalog), meta = genericMeta), key.public)
+        val iap = b.catalog!!.iap
+        assertNotNull(iap)
+        val clients = iap!!.clients
+        // The full client order is the IAP_CLIENTS wire contract; size is >= 5 (clients are additive across releases).
+        assertTrue(clients.size >= 5)
+        assertEquals(clients.map { it.name }.take(5),
+            listOf("Play Billing Library", "Unity IAP", "Unity Ads store bridge", "Facebook IAP tracker", "Embedded Play billing AIDL"))
+        assertTrue(iap.verifierAnchors.isNotEmpty())
+        assertTrue(clients.any { it.packages.isNotEmpty() })
+    }
+
+    @Test fun genericBundleWithoutIapColumnStillOpens() {
+        val obj = PatchBundleTest::class.java.getResource("/generic/catalog.json")!!.readText()
+            .let(kotlinx.serialization.json.Json::parseToJsonElement).jsonObject
+            .toMutableMap().apply { remove("iap") }
+        val withoutIap = kotlinx.serialization.json.JsonObject(obj).toString()
+        val b = PatchBundle.open(bundle(files = genericFiles + ("catalog.json" to withoutIap.toByteArray()), meta = genericMeta), key.public)
+        assertEquals(1, b.catalog!!.format)
+        assertNull(b.catalog!!.iap)
     }
 
     @Test fun badEntryNameRejected() {
