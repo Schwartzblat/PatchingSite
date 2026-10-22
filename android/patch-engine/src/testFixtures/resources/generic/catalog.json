@@ -45,6 +45,44 @@
     "tv",
     "xyz"
   ],
+  "iap": {
+    "clients": [
+      {
+        "name": "Play Billing Library",
+        "packages": [
+          "com.android.billingclient"
+        ]
+      },
+      {
+        "name": "Unity IAP",
+        "packages": [
+          "com.unity.purchasing"
+        ]
+      },
+      {
+        "name": "Unity Ads store bridge",
+        "packages": [
+          "com.unity3d.services.store"
+        ]
+      },
+      {
+        "name": "Facebook IAP tracker",
+        "packages": [
+          "com.facebook.appevents.iap"
+        ]
+      },
+      {
+        "name": "Embedded Play billing AIDL",
+        "packages": [
+          "com.android.vending.billing"
+        ]
+      }
+    ],
+    "verifier_anchors": [
+      "IABUtil/Security",
+      "Error generating PublicKey from encoded key: "
+    ]
+  },
   "package_roots": [
     "android",
     "androidx",
