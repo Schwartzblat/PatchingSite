@@ -35,6 +35,7 @@ import site.androidmod.store.install.useRootInstaller
 import site.androidmod.store.move.MoveRepository
 import site.androidmod.store.move.WHATSAPP_PACKAGE
 import site.androidmod.patch.ApkSigner
+import site.androidmod.patch.Capability
 import site.androidmod.patch.DexHash
 import site.androidmod.patch.FastSigner
 import site.androidmod.patch.GenericPatchEngine
@@ -165,11 +166,12 @@ class Container(private val context: Context) {
     )
 
     /**
-     * One generic build of the installed [pkg], following its record's intent. Its own work
-     * directory, wiped like the others at launch; our store's apps are refused, by the job before it
-     * copies anything and again by the engine.
+     * One generic build of the installed [pkg], following its record's intent. [capabilities] is the
+     * confirm flow's mix from the start intent; null leaves it to the record and the installed copy.
+     * Its own work directory, wiped like the others at launch; our store's apps are refused, by the
+     * job before it copies anything and again by the engine.
      */
-    fun genericJob(pkg: String): GenericJob = GenericJob(
+    fun genericJob(pkg: String, capabilities: Set<Capability>? = null): GenericJob = GenericJob(
         server = object : GenericServer {
             override suspend fun latest(): GenericLatest = genericApi.latest()
             override suspend fun bundle(patcherVersion: String): PatchBundle =
@@ -190,6 +192,7 @@ class Container(private val context: Context) {
         deviceAbis = Build.SUPPORTED_ABIS.toList(),
         storeVersionCode = storeVersionCode,
         workDir = File(context.filesDir, "patch/work/generic-$pkg"),
+        requested = capabilities,
     )
 
     /**

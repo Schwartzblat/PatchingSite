@@ -4,10 +4,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runInterruptible
 import site.androidmod.patch.ApkSigner
 import site.androidmod.patch.CantPatch
+import site.androidmod.patch.Capability
 import site.androidmod.patch.GenericPatchEngine
+import site.androidmod.patch.GenericPatchInfo
 import site.androidmod.patch.GenericPatchRequest
 import site.androidmod.patch.GenericPatchResult
 import site.androidmod.patch.GenericSource
@@ -191,6 +194,8 @@ class GenericJob(
     private val deviceAbis: List<String>,
     private val storeVersionCode: Long,
     private val workDir: File,
+    /** The start intent's capability names when it carried a choice; null when it carried none. */
+    private val requested: Set<Capability>? = null,
 ) {
 
     /** [onStage] may be called from a background thread (saving the original, signing). */
@@ -202,6 +207,10 @@ class GenericJob(
         // on disk doesn't list is deleted, and whatever it lists stays, however the run ended.
         var wroteOriginal = false
         var wroteBuilt = false
+        // What the request (once one is built) patches with, so a failed build keeps it too.
+        var buildIntent: GenericIntent? = null
+        var requestedWires: List<String>? = null
+        var requestBuilt = false
         try {
             clearTemporary(builtTmpDir)
             if (!signedIn()) return failed(GenericFailure.SIGNED_OUT, label)
@@ -210,6 +219,14 @@ class GenericJob(
             label = record.label
             val intent = record.intent
             if (intent != GenericIntent.PATCH && intent != GenericIntent.REFRESH) return failed(GenericFailure.FAILED, label)
+            buildIntent = intent
+            // The confirmed mix rides the start intent; it is the record's from the begin of a PATCH.
+            // A resumed PATCH, and every Refresh, keeps what its record already says.
+            if (intent == GenericIntent.PATCH && requested != null && record.capabilities == null) {
+                record = blocking {
+                    update(packageName, intent) { it.copy(capabilities = capabilityWires(requested)) }
+                }
+            }
             // Our store's own apps are refused; before any catalogue has loaded, which they are isn't known.
             val refused = storePackages()
             if (refused.isEmpty()) return failed(GenericFailure.NOT_AVAILABLE, label)
@@ -241,6 +258,10 @@ class GenericJob(
                     else -> failed(GenericFailure.DAMAGED_ORIGINAL, label)
                 }
             }
+
+            // What this build patches with: the record's choice when it has one; else the installed
+            // copy's patch-info (an adopted orphan, or a record from before choices); else ads-only.
+            val capabilities = resolveCapabilities(record, app?.apks?.firstOrNull())
 
             // The engine reads the saved original, or for a Refresh without one, the installed patched copy.
             val installedApks = app?.apks.orEmpty()
@@ -297,10 +318,14 @@ class GenericJob(
                 signerCertSha256 = signingKey.certSha256,
                 deviceSdk = sdkInt,
                 deviceAbis = deviceAbis,
+                capabilities = capabilities,
                 workDir = workDir,
                 outputDir = builtTmpDir,
                 refusedPackages = refused,
             )
+            val wireNames = capabilityWires(capabilities)
+            requestedWires = wireNames
+            requestBuilt = true
             val result = try {
                 blocking { engine(request, announcing) }
             } catch (error: PatchException.Unpatchable) {
@@ -329,7 +354,13 @@ class GenericJob(
                 // The record never lists a build that isn't in built/: forget the old one before replacing it.
                 if (record.built.isNotEmpty()) {
                     update(packageName, intent) {
-                        it.copy(built = emptyList(), builtBundleId = null, builtTokenExpiresAt = null, builtSigner = null)
+                        it.copy(
+                            built = emptyList(),
+                            builtBundleId = null,
+                            builtTokenExpiresAt = null,
+                            builtSigner = null,
+                            capabilities = wireNames,
+                        )
                     }
                 }
                 replaceDir(builtTmpDir, records.builtDir(packageName))
@@ -339,6 +370,7 @@ class GenericJob(
                         builtBundleId = bundle.id,
                         builtTokenExpiresAt = token.expiresAtMillis,
                         builtSigner = signingKey.certSha256,
+                        capabilities = wireNames,
                     )
                 }
             }
@@ -352,6 +384,14 @@ class GenericJob(
         } finally {
             clearTemporary(builtTmpDir)
             if (wroteOriginal || wroteBuilt) discardUnrecorded(packageName, wroteOriginal, wroteBuilt)
+            // A build that failed after its request keeps the mix it requested; a successful one
+            // wrote it with its result. A cancelled run, or one that never reached a request,
+            // writes nothing (a failed check or download has no request to speak of).
+            val intent = buildIntent
+            val wires = requestedWires
+            if (requestBuilt && intent != null && wires != null && currentCoroutineContext().isActive) {
+                persistCapabilities(packageName, intent, wires)
+            }
         }
     }
 
@@ -451,9 +491,38 @@ class GenericJob(
         return change(current).also(records::put)
     }
 
+    /**
+     * Puts the mix the request carried on the record, best effort: a run already failing keeps its
+     * own outcome, and a record another flow took over is left alone.
+     */
+    private fun persistCapabilities(packageName: String, intent: GenericIntent, wireNames: List<String>) {
+        runCatching {
+            val current = records.get(packageName)?.takeIf { it.intent == intent } ?: return@runCatching
+            if (current.capabilities != wireNames) records.put(current.copy(capabilities = wireNames))
+        }
+    }
+
     private fun isOriginal(app: InstalledPackage, record: GenericRecord): Boolean =
         app.versionCode == record.versionCode && app.signerSha256s == record.originalSigners &&
             app.apks.map { it.name } == record.apkNames
+
+    /**
+     * What this build patches with: the record's wire names when it has them (a confirmed choice, or
+     * one an earlier run persisted), else the installed base APK's patch-info (an adopted patch, or a
+     * record from before choices), else ads-only.
+     */
+    private suspend fun resolveCapabilities(record: GenericRecord, installedBase: File?): Set<Capability> =
+        record.capabilities?.let(::capabilitiesOf)
+            ?: installedBase?.let { base -> patchInfoCapabilities(base) }?.let(::capabilitiesOf)
+            ?: setOf(Capability.ADS)
+
+    /** The installed [base]'s recorded capabilities; null when it has no generic patch-info or can't be read. */
+    private suspend fun patchInfoCapabilities(base: File): List<String>? = try {
+        blocking { GenericPatchInfo.read(base) }?.capabilities
+    } catch (_: PatchException) {
+        // Not a readable generic APK: nothing to inherit.
+        null
+    }
 
     /** Runs blocking work off the caller's thread; cancelling the job interrupts it. */
     private suspend fun <T> blocking(block: () -> T): T = runInterruptible(Dispatchers.IO, block)

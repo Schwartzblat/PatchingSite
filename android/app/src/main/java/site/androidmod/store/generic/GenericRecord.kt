@@ -5,6 +5,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import site.androidmod.patch.Capability
 import site.androidmod.store.patch.writeAtomically
 
 enum class GenericIntent { PATCH, RESTORE, REFRESH }
@@ -39,7 +40,19 @@ data class GenericRecord(
     @SerialName("patched_bundle_id") val patchedBundleId: String? = null,
     @SerialName("token_expires_at") val tokenExpiresAt: Long? = null,
     @SerialName("patched_at") val patchedAt: Long? = null,
+    /** The capabilities this app was patched for, as wire names in enum order; null in a record from before choices were kept. */
+    val capabilities: List<String>? = null,
 )
+
+/**
+ * The capabilities [names] (wire names, as the record and a start intent carry them) select, in
+ * enum order. Casing is ignored; a name that is not a wire name selects nothing.
+ */
+fun capabilitiesOf(names: Iterable<String>): Set<Capability> = Capability.of(names.map { it.trim().lowercase() })
+
+/** [capabilities] as their wire names, in enum order. */
+fun capabilityWires(capabilities: Set<Capability>): List<String> =
+    Capability.entries.filter { it in capabilities }.map { it.wire }
 
 private val PACKAGE_NAME = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
 

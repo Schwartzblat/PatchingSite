@@ -19,6 +19,7 @@ import org.junit.rules.TemporaryFolder
 import site.androidmod.patch.ApkFacts
 import site.androidmod.patch.ApkSigner
 import site.androidmod.patch.CantPatch
+import site.androidmod.patch.Capability
 import site.androidmod.patch.GenericPatchEngine
 import site.androidmod.patch.GenericPatchInfo
 import site.androidmod.patch.GenericPatchRequest
@@ -30,10 +31,13 @@ import site.androidmod.patch.PatchException
 import site.androidmod.store.data.ApiException
 import site.androidmod.store.patch.ArchiveInfo
 import site.androidmod.store.patch.PatchFailure
+import site.androidmod.store.patch.PatchService
 import site.androidmod.store.patch.PatchStage
 import site.androidmod.store.patch.PatchState
 import site.androidmod.store.patch.SigningKey
 import site.androidmod.store.patch.StoreUpdateRequired
+import site.androidmod.store.patch.capabilitiesExtra
+import site.androidmod.store.patch.capabilitiesFromExtra
 import site.androidmod.store.patch.genericTestBundleZip
 import site.androidmod.store.patch.newTestKeyPair
 import site.androidmod.store.patch.testBundleZip
@@ -41,6 +45,8 @@ import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class GenericJobTest {
 
@@ -117,11 +123,37 @@ class GenericJobTest {
             return InstalledPackage(PKG, LABEL, VERSION_NAME, VERSION_CODE, apks, signers)
         }
 
+        /**
+         * Our patched copy, installed, whose base is a readable APK with a generic patch-info naming
+         * [capabilities]; null writes a pre-options info (no capabilities key, which reads as ads).
+         */
+        fun patchedZipCopy(capabilities: List<String>?): InstalledPackage {
+            val dir = File(root, "data/app/$PKG-patched").apply { mkdirs() }
+            val info = buildString {
+                append(
+                    """{"kind":"generic","patcher_version":"$PATCHER_VERSION","bundle_id":"${"f".repeat(64)}",""" +
+                        """"catalog_format":1,"abi":"arm64-v8a","lib_dir":"lib/arm64-v8a","sdks_present":"AppLovin",""" +
+                        """"added":["${GenericPatchInfo.ENTRY}"]""",
+                )
+                if (capabilities != null) append(""","capabilities":[${capabilities.joinToString(",") { "\"$it\"" }}]""")
+                append("}")
+            }
+            val baseFile = File(dir, BASE)
+            ZipOutputStream(baseFile.outputStream()).use { zip ->
+                zip.putNextEntry(ZipEntry(GenericPatchInfo.ENTRY))
+                zip.write(info.toByteArray())
+                zip.closeEntry()
+            }
+            val apks = listOf(baseFile, File(dir, SPLIT).apply { writeBytes(SPLIT_BYTES + SIGNED) })
+            return InstalledPackage(PKG, LABEL, VERSION_NAME, VERSION_CODE, apks, setOf(USER_CERT))
+        }
+
         fun record(
             intent: GenericIntent? = GenericIntent.PATCH,
             original: List<SavedApk> = emptyList(),
             built: List<SavedApk> = emptyList(),
             patchedBundleId: String? = null,
+            capabilities: List<String>? = null,
         ) = GenericRecord(
             packageName = PKG,
             label = LABEL,
@@ -134,6 +166,7 @@ class GenericJobTest {
             intent = intent,
             uninstallAskedAt = null,
             patchedBundleId = patchedBundleId,
+            capabilities = capabilities,
         )
 
         /** Saved, verified copies of the installed APKs, as an earlier run leaves them. */
@@ -199,7 +232,12 @@ class GenericJobTest {
             }
         }
 
-        fun job(sdkInt: Int = 33, storeVersionCode: Long = 100, signedIn: Boolean = true) = GenericJob(
+        fun job(
+            sdkInt: Int = 33,
+            storeVersionCode: Long = 100,
+            signedIn: Boolean = true,
+            requested: Set<Capability>? = null,
+        ) = GenericJob(
             server = server,
             records = records,
             reserve = { dir, bytes ->
@@ -234,6 +272,7 @@ class GenericJobTest {
             deviceAbis = ABIS,
             storeVersionCode = storeVersionCode,
             workDir = workDir,
+            requested = requested,
         )
 
         suspend fun run(job: GenericJob = job()): GenericOutcome = job.run(PKG) { stage ->
@@ -302,6 +341,7 @@ class GenericJobTest {
                 builtBundleId = bundle.id,
                 builtTokenExpiresAt = EXPIRES_AT,
                 builtSigner = USER_CERT,
+                capabilities = listOf("ads"),
             ),
             f.records.get(PKG),
         )
@@ -836,6 +876,7 @@ class GenericJobTest {
                 builtBundleId = bundle.id,
                 builtTokenExpiresAt = EXPIRES_AT,
                 builtSigner = USER_CERT,
+                capabilities = listOf("ads"),
             ),
             f.records.get(PKG),
         )
@@ -1172,6 +1213,114 @@ class GenericJobTest {
             GenericFailure.NOT_OUR_COPY.message(LABEL),
         )
         assertEquals("Patching failed. Nothing was removed. Try again, or send us a report.", GenericFailure.FAILED.message(LABEL))
+    }
+
+    @Test
+    fun startExtraRidesIntoTheJob() = runTest {
+        // What PatchService.start puts on the intent for the confirm flow's {ads, iap}, and what
+        // onStartCommand hands the job.
+        val extra = capabilitiesExtra(setOf(Capability.ADS, Capability.IAP))
+        assertEquals("ads,iap", extra)
+        val f = fixture()
+        f.records.put(f.record())
+
+        assertEquals(GenericOutcome.Built, f.run(f.job(requested = capabilitiesFromExtra(extra))))
+
+        assertEquals(setOf(Capability.ADS, Capability.IAP), f.requests.single().capabilities)
+        assertEquals(listOf("ads", "iap"), f.records.get(PKG)!!.capabilities)
+    }
+
+    @Test
+    fun defaultIsAdsOnly() = runTest {
+        // A start that names no mix carries ads; the job patches ads-only.
+        assertEquals("ads", capabilitiesExtra(PatchService.DEFAULT_CAPABILITIES))
+        assertEquals(setOf(Capability.ADS), capabilitiesFromExtra("ads"))
+
+        val f = fixture()
+        f.records.put(f.record())
+
+        assertEquals(
+            GenericOutcome.Built,
+            f.run(f.job(requested = capabilitiesFromExtra(capabilitiesExtra(PatchService.DEFAULT_CAPABILITIES)))),
+        )
+
+        assertEquals(setOf(Capability.ADS), f.requests.single().capabilities)
+        assertEquals(listOf("ads"), f.records.get(PKG)!!.capabilities)
+    }
+
+    @Test
+    fun unknownOnlyExtraRefuses() = runTest {
+        val f = fixture()
+        f.records.put(f.record())
+        // The engine's own first statement (GenericPatchEngine.run): an empty set is refused here,
+        // never duplicated in the job.
+        f.engineAction = { request, signer ->
+            if (request.capabilities.isEmpty()) throw PatchException.Unsupported("nothing to patch")
+            f.buildOutputs(request, signer)
+        }
+
+        val outcome = f.run(f.job(requested = capabilitiesFromExtra("surprise")))
+
+        assertEquals(failed(GenericFailure.FAILED), outcome)
+        assertEquals(
+            "Patching failed. Nothing was removed. Try again, or send us a report.",
+            (outcome as GenericOutcome.Failed).message,
+        )
+        // The empty request reached the engine; nothing was built.
+        assertEquals(emptySet<Capability>(), f.requests.single().capabilities)
+        assertTrue("engine" in f.events)
+        assertEquals(emptyList<SavedApk>(), f.records.get(PKG)!!.built)
+        assertFalse(f.builtDir.exists())
+        f.assertNoTemporaryFiles()
+    }
+
+    @Test
+    fun recordCarriesAndResolves() = runTest {
+        // The confirmed mix is the record's from the begin of a PATCH.
+        val f = fixture()
+        f.records.put(f.record())
+        assertEquals(GenericOutcome.Built, f.run(f.job(requested = setOf(Capability.ADS, Capability.IAP))))
+        assertEquals(listOf("ads", "iap"), f.records.get(PKG)!!.capabilities)
+        assertEquals(setOf(Capability.ADS, Capability.IAP), f.requests.single().capabilities)
+
+        // A record from before choices reads the installed patched copy's patch-info.
+        val g = fixture()
+        g.records.put(g.record(intent = GenericIntent.REFRESH, patchedBundleId = "old-bundle"))
+        g.installedApp = g.patchedZipCopy(capabilities = listOf("iap"))
+        assertEquals(GenericOutcome.Built, g.run())
+        assertEquals(setOf(Capability.IAP), g.requests.single().capabilities)
+        assertEquals(listOf("iap"), g.records.get(PKG)!!.capabilities)
+
+        // A pre-options patch-info (no capabilities key) reads ads, the engine's read-default.
+        val h = fixture()
+        h.records.put(h.record(intent = GenericIntent.REFRESH, patchedBundleId = "old-bundle"))
+        h.installedApp = h.patchedZipCopy(capabilities = null)
+        assertEquals(GenericOutcome.Built, h.run())
+        assertEquals(setOf(Capability.ADS), h.requests.single().capabilities)
+        assertEquals(listOf("ads"), h.records.get(PKG)!!.capabilities)
+
+        // Neither a record field nor an install: ads-only, here a resumed PATCH whose app is gone.
+        val i = fixture()
+        i.records.put(i.record(original = i.savedByEarlierRun()))
+        i.installedApp = null
+        assertEquals(GenericOutcome.Built, i.run())
+        assertEquals(setOf(Capability.ADS), i.requests.single().capabilities)
+        assertEquals(listOf("ads"), i.records.get(PKG)!!.capabilities)
+    }
+
+    @Test
+    fun refreshResolvesFromTheRecord() = runTest {
+        val f = fixture()
+        f.records.put(
+            f.record(intent = GenericIntent.REFRESH, patchedBundleId = "old-bundle").copy(capabilities = listOf("iap")),
+        )
+        f.installedApp = f.patchedCopy()
+
+        // The start extra says ads (the default), but a Refresh keeps what the record says.
+        assertEquals(GenericOutcome.Built, f.run(f.job(requested = setOf(Capability.ADS))))
+
+        assertEquals(setOf(Capability.IAP), f.requests.single().capabilities)
+        assertEquals(listOf("iap"), f.records.get(PKG)!!.capabilities)
     }
 
     @Test

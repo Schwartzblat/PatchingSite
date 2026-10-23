@@ -21,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import site.androidmod.patch.Capability
 import site.androidmod.store.Container
 import site.androidmod.store.MainActivity
 import site.androidmod.store.R
@@ -36,6 +37,8 @@ import site.androidmod.store.download.NotificationText
 import site.androidmod.store.download.ProgressThrottle
 import site.androidmod.store.generic.GenericFailure
 import site.androidmod.store.generic.GenericOutcome
+import site.androidmod.store.generic.capabilitiesOf
+import site.androidmod.store.generic.capabilityWires
 import site.androidmod.store.generic.genericPatchState
 import site.androidmod.store.generic.message
 import site.androidmod.store.generic.patchFailure
@@ -56,6 +59,14 @@ internal fun foregroundStartAllowed(start: () -> Unit): Boolean = try {
 } catch (error: IllegalStateException) {
     false
 }
+
+/** What [PatchService.start] carries for [capabilities]: their wire names, in enum order, comma-joined. */
+internal fun capabilitiesExtra(capabilities: Set<Capability>): String =
+    capabilityWires(capabilities).joinToString(",")
+
+/** What the start intent's capabilities extra names select; null when the intent carries none. */
+internal fun capabilitiesFromExtra(value: String?): Set<Capability>? =
+    value?.let { capabilitiesOf(it.split(',')) }
 
 /**
  * Runs on-device builds in the foreground: the official WhatsApp APK is about 155 MB and its
@@ -90,6 +101,7 @@ class PatchService : Service() {
         val mode = intent.getStringExtra(EXTRA_MODE)?.let { name -> PatchMode.entries.firstOrNull { it.name == name } }
             ?: return START_NOT_STICKY
         val givenName = intent.getStringExtra(EXTRA_NAME)
+        val capabilities = capabilitiesFromExtra(intent.getStringExtra(EXTRA_PATCH_CAPABILITIES))
 
         startForegroundCompat(ongoing(displayName(pkg, givenName, mode), "Checking version…", 0, true))
 
@@ -103,19 +115,19 @@ class PatchService : Service() {
             PatchRegistry.update(pkg, PatchState.Running(PatchStage.CheckingVersion))
             // Stored under the lock the finally block takes, so an instant finish cannot
             // remove its entry before it exists.
-            running[pkg] = scope.launch { run(pkg, mode, givenName) }
+            running[pkg] = scope.launch { run(pkg, mode, givenName, capabilities) }
         }
         return START_NOT_STICKY
     }
 
-    private suspend fun run(pkg: String, mode: PatchMode, givenName: String?) {
+    private suspend fun run(pkg: String, mode: PatchMode, givenName: String?, capabilities: Set<Capability>?) {
         val name = displayName(pkg, givenName, mode)
         // The terminal notification; stays null when the user cancelled or on teardown.
         var finished: NotificationText? = null
         try {
             finished = when (mode) {
                 PatchMode.GUIDE, PatchMode.UPDATE -> runBuild(pkg, name, mode)
-                PatchMode.GENERIC -> runGeneric(pkg, name)
+                PatchMode.GENERIC -> runGeneric(pkg, name, capabilities)
             }
         } catch (error: CancellationException) {
             // The scope dies with the service: teardown, not a failure.
@@ -165,10 +177,10 @@ class PatchService : Service() {
     }
 
     /** A generic build: the original saved and the patched copy built, nothing removed or installed. */
-    private suspend fun runGeneric(pkg: String, name: String): NotificationText {
+    private suspend fun runGeneric(pkg: String, name: String, capabilities: Set<Capability>?): NotificationText {
         val records = container.genericRecords
         val outcome = withContext(Dispatchers.IO) {
-            container.genericJob(pkg).run(pkg) { stage -> onStage(pkg, name, stage) }
+            container.genericJob(pkg, capabilities).run(pkg) { stage -> onStage(pkg, name, stage) }
         }
         val versionName = withContext(Dispatchers.IO) { records.get(pkg)?.versionName }.orEmpty()
         PatchRegistry.update(pkg, genericPatchState(outcome, name, records.builtDir(pkg), versionName))
@@ -447,21 +459,35 @@ class PatchService : Service() {
         private const val EXTRA_MODE = "mode"
         private const val EXTRA_NAME = "name"
 
+        /** The confirm flow's capability wire names, comma-joined, as [start] received them. */
+        private const val EXTRA_PATCH_CAPABILITIES = "patch_capabilities"
+
+        /** What a start that names no mix carries: today's ads-only build. */
+        internal val DEFAULT_CAPABILITIES: Set<Capability> = setOf(Capability.ADS)
+
         /** On MainActivity's intent from a generic build's notification: the package whose run screen to open. */
         const val EXTRA_OPEN_GENERIC = "open_generic"
 
         /**
          * [name] is the catalogue's display name for the notifications; null uses the last
          * catalogue's name, then WhatsApp/the package; a generic build passes its record's label
-         * (null shows the package). False when Android refused the start
+         * (null shows the package). [capabilities] is the confirm flow's mix for a generic build,
+         * ads-only when it passes none. False when Android refused the start
          * because the app is not in the foreground (see [foregroundStartAllowed]): nothing
          * runs, and the caller says so.
          */
-        fun start(context: Context, pkg: String, mode: PatchMode, name: String? = null): Boolean {
+        fun start(
+            context: Context,
+            pkg: String,
+            mode: PatchMode,
+            name: String? = null,
+            capabilities: Set<Capability> = DEFAULT_CAPABILITIES,
+        ): Boolean {
             val intent = Intent(context, PatchService::class.java).apply {
                 putExtra(EXTRA_PACKAGE, pkg)
                 putExtra(EXTRA_MODE, mode.name)
                 putExtra(EXTRA_NAME, name)
+                putExtra(EXTRA_PATCH_CAPABILITIES, capabilitiesExtra(capabilities))
             }
             return foregroundStartAllowed { context.startForegroundService(intent) }
         }
