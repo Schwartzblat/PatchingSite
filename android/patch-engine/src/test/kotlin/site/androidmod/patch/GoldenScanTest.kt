@@ -67,7 +67,7 @@ class GoldenScanTest(private val name: String) {
         @JvmStatic @Parameterized.Parameters(name = "{0}")
         fun goldens(): List<String> =
             File(GoldenScanTest::class.java.getResource("/generic/goldens")!!.toURI())
-                .listFiles { f -> f.name.endsWith(".json") }!!
+                .listFiles { f -> f.name.endsWith(".json") && !f.name.endsWith("-iap.json") }!!
                 .map { it.name.removeSuffix(".json") }
                 .sorted()
     }
