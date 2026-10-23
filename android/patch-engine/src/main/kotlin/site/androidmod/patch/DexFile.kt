@@ -1,5 +1,8 @@
 package site.androidmod.patch
 
+/** A declared method of a class: name, static-ness, and JVM-flavoured type descriptors (e.g. `"Ljava/lang/String;"`, `"Z"`). */
+data class DexMethodSig(val name: String, val static: Boolean, val params: List<String>, val returns: String)
+
 /**
  * A minimal dex reader for the ad scan: class descriptors and the `const-string` operands of each
  * class's methods. Reads [bytes] in place; the class list is parsed eagerly, strings decode on demand.
@@ -11,6 +14,10 @@ class DexFile(private val bytes: ByteArray) {
     private val typeIdsSize: Int
     private val classDefsOff: Int
     private val classDefsSize: Int
+    private val protoIdsOff: Int
+    private val protoIdsSize: Int
+    private val methodIdsOff: Int
+    private val methodIdsSize: Int
     private val classDataOffs: IntArray
 
     /** Class descriptors in class_defs order, like `Lcom/applovin/a/B;`. */
@@ -26,8 +33,12 @@ class DexFile(private val bytes: ByteArray) {
         stringIdsSize = u32(0x38); stringIdsOff = u32(0x3c)
         typeIdsSize = u32(0x40); typeIdsOff = u32(0x44)
         classDefsSize = u32(0x60); classDefsOff = u32(0x64)
+        protoIdsSize = u32(0x48); protoIdsOff = u32(0x4c)
+        methodIdsSize = u32(0x58); methodIdsOff = u32(0x5c)
         table(stringIdsOff, stringIdsSize, 4, "string_ids")
         table(typeIdsOff, typeIdsSize, 4, "type_ids")
+        table(protoIdsOff, protoIdsSize, 12, "proto_ids")
+        table(methodIdsOff, methodIdsSize, 8, "method_ids")
         table(classDefsOff, classDefsSize, 32, "class_defs")
         classDataOffs = IntArray(classDefsSize)
         val names = ArrayList<String>(classDefsSize)
@@ -56,6 +67,56 @@ class DexFile(private val bytes: ByteArray) {
             if (codeOff != 0) walk(codeOff, out)
         }
         return out
+    }
+
+    /**
+     * The class's declared methods, in class_data order (direct then virtual, exactly as written).
+     * Static-ness comes from the entry's access flags (`0x8` = `AccStatic`); the name and prototype
+     * descriptors are resolved through method_ids and proto_ids. `code_off` is read even for abstract
+     * methods (0) but carries no signature meaning. Any malformed table read is `BadApk("bad dex: …")`.
+     */
+    fun methodSigs(classIndex: Int): List<DexMethodSig> {
+        val dataOff = classDataOffs[classIndex]
+        if (dataOff == 0) return emptyList()
+        val r = Cursor(dataOff)
+        val staticFields = r.uleb(); val instanceFields = r.uleb()
+        val direct = r.uleb(); val virtual = r.uleb()
+        for (i in 0 until (staticFields.toLong() + instanceFields)) { r.uleb(); r.uleb() }
+        val out = ArrayList<DexMethodSig>()
+        for (count in listOf(direct, virtual)) { // each list restarts the idx_diff baseline at 0
+            var methodIdx = 0
+            for (i in 0 until count) {
+                methodIdx += r.uleb() // idx_diff
+                val flags = r.uleb()
+                r.uleb() // code_off (0 for abstract/native, no signature meaning)
+                if (methodIdx < 0 || methodIdx >= methodIdsSize) bad("method idx $methodIdx out of range")
+                val id = methodIdsOff + methodIdx * 8 // class_idx u16, proto_idx u16, name_idx u32
+                val protoIdx = u16(id + 2)
+                if (protoIdx < 0 || protoIdx >= protoIdsSize) bad("proto idx $protoIdx out of range")
+                val proto = protoIdsOff + protoIdx * 12 // shorty_idx u32, return_type_idx u32, parameters_off u32
+                val paramsOff = u32(proto + 8)
+                out.add(DexMethodSig(
+                    stringAt(u32(id + 4)),
+                    flags and 0x8 != 0,
+                    if (paramsOff == 0) emptyList() else typeList(paramsOff),
+                    typeAt(u32(proto + 4)),
+                ))
+            }
+        }
+        return out
+    }
+
+    /** The type descriptor at type_ids [idx], like `Ljava/lang/String;` or `Z`. */
+    private fun typeAt(idx: Int): String {
+        if (idx < 0 || idx >= typeIdsSize) bad("type idx $idx out of range")
+        return stringAt(u32(typeIdsOff + idx * 4))
+    }
+
+    /** The type_list at [off]: u32 size, then size type indices. */
+    private fun typeList(off: Int): List<String> {
+        val size = u32(off)
+        if (off + 4 + size.toLong() * 2 > bytes.size) bad("parameters type list out of range")
+        return (0 until size).map { typeAt(u16(off + 4 + it * 2)) }
     }
 
     private fun walk(codeOff: Int, out: MutableList<String>) {

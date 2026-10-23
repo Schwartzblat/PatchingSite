@@ -2,15 +2,33 @@ package site.androidmod.patch
 
 import java.io.ByteArrayOutputStream
 
-/** A method of a [TinyDex] class: raw 16-bit code units, or null for an abstract/native method (code_off 0). */
-class TinyMethod(val code: List<Int>?, val direct: Boolean = true)
+/**
+ * A method of a [TinyDex] class: raw 16-bit code units, or null for an abstract/native method (code_off 0).
+ * [flags] go verbatim into the class_data entry (`0x8` for `AccStatic`); [name], [params] and [returns]
+ * (both type descriptors) fill the method_ids and proto_ids tables — the method_ids index of a method is
+ * its position across all classes in declaration order, and the default name is `tm` + that index.
+ * These fixtures are synthetic: method_ids are not sorted by (class_idx, proto_idx, name_idx), and the
+ * default `flags = 0` with `direct = true` can express static/direct shapes a real dex would not contain;
+ * the reader under test depends on neither.
+ */
+class TinyMethod(
+    val code: List<Int>?,
+    val direct: Boolean = true,
+    val flags: Int = 0,
+    val name: String? = null,
+    val params: List<String> = emptyList(),
+    val returns: String = "V",
+)
 
 /** A class: [methods] null means no class_data at all (class_data_off 0). */
 class TinyClass(val descriptor: String, val methods: List<TinyMethod>? = emptyList())
 
 /**
  * Writes a minimal dex for tests. String indices: [strings] keep their positions 0..n-1; every class
- * descriptor not already present is appended after them (in class order). Fields the reader ignores are zero.
+ * descriptor, method name and param/return type descriptor not already present is appended after them
+ * (class descriptors first, in class order). Protos are deduped by (returns, params); protos without
+ * parameters get `parameters_off` 0; every declared method gets a real method_ids entry in declaration
+ * order, and class_data's idx_diff sequences match (one baseline reset per direct/virtual list).
  */
 object TinyDex {
     fun constString(idx: Int) = listOf(0x001a, idx)
@@ -25,18 +43,56 @@ object TinyDex {
 
     fun build(strings: List<String>, classes: List<TinyClass>): ByteArray {
         val table = strings.toMutableList()
-        classes.forEach { if (it.descriptor !in table) table.add(it.descriptor) }
-        val typeStr = classes.map { table.indexOf(it.descriptor) }
+        val typeStrings = ArrayList<String>()
+        fun stringIdx(s: String): Int = table.indexOf(s).let { if (it >= 0) it else { table.add(s); table.lastIndex } }
+        fun typeIdx(s: String): Int = typeStrings.indexOf(s).let { if (it >= 0) it else { typeStrings.add(s); typeStrings.lastIndex } }
+        fun addType(d: String): Int { stringIdx(d); return typeIdx(d) }
+        fun shorty(returns: String, params: List<String>): String {
+            fun c(d: String) = if (d[0] == '[') 'L' else d[0]
+            return (listOf(returns) + params).joinToString("") { c(it).toString() }
+        }
+
+        classes.forEach { addType(it.descriptor) }
+        val classTypes = classes.map { typeIdx(it.descriptor) }
+
+        val protos = LinkedHashMap<Pair<String, List<String>>, Int>() // (return desc, param descs) -> proto idx
+        fun protoOf(returns: String, params: List<String>): Int =
+            protos.getOrPut(returns to params) { stringIdx(shorty(returns, params)); protos.size }
+        val methodIds = ArrayList<Triple<Int, Int, Int>>()            // (class_type, proto_idx, name_str) in declaration order
+        val methodIdx = classes.mapIndexed { ci, c ->
+            (c.methods ?: emptyList()).map { m ->
+                val mid = methodIds.size
+                val nameIdx = stringIdx(m.name ?: "tm$mid")
+                addType(m.returns)
+                m.params.forEach { addType(it) }
+                val protoIdx = protoOf(m.returns, m.params)
+                methodIds.add(Triple(classTypes[ci], protoIdx, nameIdx))
+                mid
+            }
+        }
+
         val strOff = 0x70
         val typeOff = strOff + table.size * 4
-        val classOff = typeOff + classes.size * 4
+        val protoOff = typeOff + typeStrings.size * 4
+        val methodOff = protoOff + protos.size * 12
+        val classOff = methodOff + methodIds.size * 8
         val dataStart = classOff + classes.size * 32
 
         val data = ByteArrayOutputStream()
         fun pos() = dataStart + data.size()
         val strPos = table.map { s -> pos().also { data.write(uleb(s.length)); data.write(mutf8(s)); data.write(0) } }
-        val classDataPos = classes.map { c ->
-            val ms = c.methods ?: return@map 0
+        // One type_list per distinct (non-empty) params list, shared by the protos that declare it.
+        val paramsPos = LinkedHashMap<List<String>, Int>()
+        protos.keys.forEach { (_, params) ->
+            if (params.isNotEmpty() && params !in paramsPos) {
+                paramsPos[params] = pos().also {
+                    data.write(le32(params.size))
+                    params.forEach { p -> data.write(le16(typeIdx(p))) }
+                }
+            }
+        }
+        val classDataPos = classes.mapIndexed { ci, c ->
+            val ms = c.methods ?: return@mapIndexed 0
             val codePos = ms.map { m -> m.code?.let { code ->
                 pos().also {
                     data.write(le16(1)); data.write(le16(0)); data.write(le16(0)); data.write(le16(0))
@@ -48,7 +104,14 @@ object TinyDex {
                 val direct = ms.indices.filter { ms[it].direct }
                 val virtual = ms.indices.filter { !ms[it].direct }
                 data.write(uleb(0)); data.write(uleb(0)); data.write(uleb(direct.size)); data.write(uleb(virtual.size))
-                for (i in direct + virtual) { data.write(uleb(0)); data.write(uleb(1)); data.write(uleb(codePos[i])) }
+                for (list in listOf(direct, virtual)) {
+                    var prev = 0
+                    for (i in list) {
+                        val idx = methodIdx[ci][i]
+                        data.write(uleb(idx - prev)); prev = idx
+                        data.write(uleb(ms[i].flags)); data.write(uleb(codePos[i]))
+                    }
+                }
             }
         }
 
@@ -60,13 +123,24 @@ object TinyDex {
         put(0x24, 0x70)
         put(0x28, 0x12345678)
         put(0x38, table.size); put(0x3c, strOff)
-        put(0x40, classes.size); put(0x44, typeOff)
+        put(0x40, typeStrings.size); put(0x44, typeOff)
+        put(0x48, protos.size); put(0x4c, protoOff)
+        put(0x58, methodIds.size); put(0x5c, methodOff)
         put(0x60, classes.size); put(0x64, classOff)
         out.write(header)
         strPos.forEach { out.write(le32(it)) }
-        typeStr.forEach { out.write(le32(it)) }
+        typeStrings.forEach { out.write(le32(table.indexOf(it))) }
+        protos.forEach { (sig, _) ->
+            val (returns, params) = sig
+            out.write(le32(stringIdx(shorty(returns, params))))
+            out.write(le32(typeIdx(returns)))
+            out.write(le32(paramsPos[params] ?: 0))
+        }
+        methodIds.forEach { (cls, protoIdx, nameIdx) ->
+            out.write(le16(cls)); out.write(le16(protoIdx)); out.write(le32(nameIdx))
+        }
         classes.forEachIndexed { i, _ ->
-            out.write(le32(i)); out.write(le32(1)); out.write(le32(-1)); out.write(le32(0))
+            out.write(le32(classTypes[i])); out.write(le32(1)); out.write(le32(-1)); out.write(le32(0))
             out.write(le32(-1)); out.write(le32(0)); out.write(le32(classDataPos[i])); out.write(le32(0))
         }
         out.write(data.toByteArray())

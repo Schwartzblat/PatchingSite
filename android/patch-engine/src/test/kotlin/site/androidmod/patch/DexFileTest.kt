@@ -7,6 +7,9 @@ import org.junit.Test
 class DexFileTest {
     private fun cls(d: String, vararg code: List<Int>) = TinyClass(d, code.map { TinyMethod(it) })
 
+    private fun method(name: String, static: Boolean, params: List<String>, returns: String, code: List<Int>? = emptyList()) =
+        TinyMethod(code, direct = static, flags = if (static) 0x8 else 0, name = name, params = params, returns = returns)
+
     @Test fun readsClassesAndConstStrings() {
         val strings = listOf("https://ads.example.com", "é", "😀", "a\u0000b", "unused")
         val dex = DexFile(TinyDex.build(strings, listOf(
@@ -50,6 +53,48 @@ class DexFileTest {
         assertEquals(listOf("LNoData;", "LAbstract;"), dex.classes)
         assertTrue(dex.constStrings(0).isEmpty())
         assertTrue(dex.constStrings(1).isEmpty())
+    }
+
+    @Test fun methodSigsReadStatics_PARAMS_AND_NAMES() {
+        val dex = DexFile(TinyDex.build(listOf("S"), listOf(TinyClass("LA;", listOf(
+            method("verify", static = true, params = listOf("Ljava/lang/String;", "Ljava/lang/String;"), returns = "Z"),
+            method("verify3", static = true, params = listOf("Ljava/lang/String;", "Ljava/lang/String;", "Ljava/lang/String;"), returns = "Z"),
+            method("log", static = false, params = listOf("Ljava/lang/String;"), returns = "V"),
+            method("scratch", static = false, params = emptyList(), returns = "V", code = null),
+        )))))
+        assertEquals(listOf(
+            DexMethodSig("verify", true, listOf("Ljava/lang/String;", "Ljava/lang/String;"), "Z"),
+            DexMethodSig("verify3", true, listOf("Ljava/lang/String;", "Ljava/lang/String;", "Ljava/lang/String;"), "Z"),
+            DexMethodSig("log", false, listOf("Ljava/lang/String;"), "V"),
+            DexMethodSig("scratch", false, emptyList(), "V"),
+        ), dex.methodSigs(0))
+    }
+
+    @Test fun methodSigsOfAnEmptyClassIsEmpty() {
+        val dex = DexFile(TinyDex.build(listOf("S"), listOf(TinyClass("LEmpty;"))))
+        assertTrue(dex.methodSigs(0).isEmpty())
+    }
+
+    @Test fun methodSigsOfAClassWithoutClassData() {
+        val dex = DexFile(TinyDex.build(emptyList(), listOf(TinyClass("LNoData;", null))))
+        assertTrue(dex.methodSigs(0).isEmpty())
+    }
+
+    @Test fun truncatedMethodTableIsBadApk() {
+        val bytes = TinyDex.build(listOf("S"), listOf(TinyClass("LA;", listOf(
+            method("m", static = true, params = listOf("Ljava/lang/String;"), returns = "Z"),
+        ))))
+        val short = bytes.copyOf(bytes.size - 2) // the class_data ends with the code_off uleb, so this lands inside it
+        try { DexFile(short).methodSigs(0); throw AssertionError("accepted") } catch (e: PatchException.BadApk) {
+            assertTrue(e.message!!.startsWith("bad dex"))
+        }
+    }
+
+    @Test fun protoWithoutParamsReadsEmptyParams() {
+        val dex = DexFile(TinyDex.build(listOf("S"), listOf(TinyClass("LA;", listOf(
+            method("gone", static = false, params = emptyList(), returns = "Z"),
+        )))))
+        assertEquals(listOf(DexMethodSig("gone", false, emptyList(), "Z")), dex.methodSigs(0))
     }
 
     @Test fun truncatedDexIsBadApk() {
