@@ -17,6 +17,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import site.androidmod.patch.GenericFixtures
+import site.androidmod.patch.GenericPatchInfo
 
 class GenericMainTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -87,6 +88,67 @@ class GenericMainTest {
         assertEquals(art.keys.sorted(), art.keys.toList())
         assertTrue(r.out, r.out.startsWith("{\n  \"AD_APP_FRAME_PACKAGES\""))
         assertTrue(r.out.endsWith("}\n"))
+    }
+
+    @Test fun capsFlagParses() {
+        assertEquals(listOf("ads", "iap"), capabilities("ads,IAP").map { it.wire })
+        assertEquals(listOf("ads", "iap"), capabilities(" Ads , iap ").map { it.wire })
+        assertEquals(listOf("ads"), capabilities(null).map { it.wire })
+    }
+
+    @Test fun capsFlagIsWrittenIntoScan() {
+        val r = capture(scanArgs(fx.app()) + listOf("--capabilities", "iap"))
+        assertEquals(r.err, 0, r.code)
+        val art = Json.parseToJsonElement(r.out).jsonObject
+        assertEquals("true", art.getValue("IAP_ENABLED").jsonPrimitive.content)
+        assertTrue(art.containsKey("IAP_CLIENTS_PRESENT"))
+        assertTrue("${art.keys}", art.keys.none { it.startsWith("AD_") })
+    }
+
+    @Test fun capsDefaultIsAds() {
+        val r = capture(scanArgs(fx.app()))
+        assertEquals(r.err, 0, r.code)
+        val art = Json.parseToJsonElement(r.out).jsonObject
+        assertTrue(art.containsKey("AD_SDKS_PRESENT"))
+        assertFalse(art.containsKey("IAP_ENABLED"))
+    }
+
+    @Test fun capsFlagReachesTheGenericPatch() {
+        assumeTrue(File(System.getProperty("patch.fastsigner")).canExecute())
+        val (ks, password, _) = keystore()
+        val apks = fx.app().let { listOf(it[0], it[1]) }
+        val default = capture(genericArgs(apks, ks, File(tmp.root, "out-ads")), mapOf("KS_PASS" to password))
+        assertEquals(default.err, 0, default.code)
+        val adsLine = default.out.lineSequence().single { it.startsWith("AD_SDKS_PRESENT:") }
+        assertEquals("AppLovin", adsLine.substringAfter("AD_SDKS_PRESENT: ").trim())
+        val adsInfo = GenericPatchInfo.read(File(File(tmp.root, "out-ads"), "base.apk"))!!
+        assertEquals(listOf("ads"), adsInfo.capabilities)
+        val iap = capture(
+            genericArgs(apks, ks, File(tmp.root, "out-iap"), listOf("--capabilities", "iap")),
+            mapOf("KS_PASS" to password),
+        )
+        assertEquals(iap.err, 0, iap.code)
+        assertFalse(iap.out, "AD_SDKS_PRESENT" in iap.out)
+        val iapInfo = GenericPatchInfo.read(File(File(tmp.root, "out-iap"), "base.apk"))!!
+        assertEquals(listOf("iap"), iapInfo.capabilities)
+    }
+
+    @Test fun capsUnknownNameIsError() {
+        val scan = capture(scanArgs(fx.app()) + listOf("--capabilities", "ads,surprise"))
+        assertEquals(2, scan.code)
+        assertTrue(scan.err, "surprise" in scan.err)
+        val empty = capture(scanArgs(fx.app()) + listOf("--capabilities", ""))
+        assertEquals(2, empty.code)
+        assertTrue(empty.err, "--capabilities" in empty.err)
+        val bare = capture(scanArgs(fx.app()) + listOf("--capabilities"))
+        assertEquals(2, bare.code)
+        assertTrue(bare.err, "needs a value" in bare.err)
+        val twice = capture(scanArgs(fx.app()) + listOf("--capabilities", "ads", "--capabilities", "iap"))
+        assertEquals(2, twice.code)
+        assertTrue(twice.err, "given twice" in twice.err)
+        val generic = capture(listOf("generic") + genericBase + listOf("--capabilities", "ads,surprise"), mapOf("KS" to "pw"))
+        assertEquals(2, generic.code)
+        assertTrue(generic.err, "surprise" in generic.err)
     }
 
     @Test fun scanRefusesAppBundle() {
