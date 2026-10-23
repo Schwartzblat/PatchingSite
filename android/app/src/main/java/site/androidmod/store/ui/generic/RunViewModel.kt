@@ -18,12 +18,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import site.androidmod.patch.Capability
 import site.androidmod.store.StoreApp
 import site.androidmod.store.generic.GenericFlow
 import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.generic.GenericRecord
 import site.androidmod.store.generic.GenericRecords
+import site.androidmod.store.generic.capabilitiesOf
 import site.androidmod.store.install.InstallOutcome
 import site.androidmod.store.patch.PatchMode
 import site.androidmod.store.patch.PatchRegistry
@@ -75,6 +77,11 @@ data class RunState(
     val label: String = "",
     /** The record's; null when nothing is under way. */
     val intent: GenericIntent? = null,
+    /**
+     * The mix the build was asked for: the record's wire names, ads-only when it carries none
+     * (a record from before choices, or none yet). Names the run screen's build step.
+     */
+    val capabilities: Set<Capability> = setOf(Capability.ADS),
     /** Null when the app has no record, or when [unchecked]. */
     val phase: GenericPhase? = null,
     /** The record lists the saved original. */
@@ -277,6 +284,9 @@ class RunViewModel(
                 loading = false,
                 label = record?.label ?: current.label,
                 intent = record?.intent ?: current.intent.takeIf { done },
+                // Written in enum order by the confirm flow; a record without names is an old (ads-only) patch.
+                capabilities = record?.let { it.capabilities?.let(::capabilitiesOf) ?: setOf(Capability.ADS) }
+                    ?: current.capabilities,
                 phase = phase.takeUnless { unchecked },
                 originalSaved = record?.original?.isNotEmpty() == true,
                 stillInstalled = removing && (afterUninstall || current.stillInstalled || (current.loading && askedBefore)),

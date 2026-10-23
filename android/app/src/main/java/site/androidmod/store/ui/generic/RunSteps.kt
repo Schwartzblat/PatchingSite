@@ -1,5 +1,6 @@
 package site.androidmod.store.ui.generic
 
+import site.androidmod.patch.Capability
 import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.patch.PatchStage
@@ -19,7 +20,8 @@ data class RunStep(val title: String, val status: StepStatus)
  * the intent's steps (Attention, say) none started. [patchState] is the job's: while it builds,
  * a PATCH is past saving the original, which [originalSaved] (the record lists the copies) also
  * says; a Failed job marks its step FAILED. Only the job's step can fail here: a removal or an
- * install is the screen's own, and says so there. Pure.
+ * install is the screen's own, and says so there. [capabilities] is the mix the build was asked
+ * for: it names the build step, at the same place in every mix. Pure.
  */
 fun runSteps(
     label: String,
@@ -27,11 +29,17 @@ fun runSteps(
     phase: GenericPhase,
     patchState: PatchState?,
     originalSaved: Boolean = false,
+    capabilities: Set<Capability> = setOf(Capability.ADS),
 ): List<RunStep> {
+    val build = when {
+        Capability.ADS in capabilities && Capability.IAP in capabilities -> "Remove the ads and bypass purchases"
+        Capability.IAP in capabilities -> "Bypass in-app purchases"
+        else -> "Remove the ads"
+    }
     val titles = when (intent) {
-        GenericIntent.PATCH -> listOf("Save the original", "Remove the ads", "Remove $label", "Install the patched copy")
+        GenericIntent.PATCH -> listOf("Save the original", build, "Remove $label", "Install the patched copy")
         GenericIntent.RESTORE -> listOf("Remove the patched copy", "Put the original back")
-        GenericIntent.REFRESH -> listOf("Remove the ads", "Install the update")
+        GenericIntent.REFRESH -> listOf(build, "Install the update")
     }
     val building = (patchState as? PatchState.Running)?.stage.let { it == PatchStage.Patching || it == PatchStage.Signing }
     // The index of the step under way; titles.size when every step is done, null when none has started.

@@ -150,7 +150,7 @@ fun RunScreen(
             else -> {
                 ErrorBanner(state.message)
                 if (state.needsInstallPermission) InstallPermissionBanner(onOpenSettings = onOpenInstallSettings)
-                runSteps(state.label, intent, phase, state.job, state.originalSaved).forEachIndexed { index, step ->
+                runSteps(state.label, intent, phase, state.job, state.originalSaved, state.capabilities).forEachIndexed { index, step ->
                     StepCard(index + 1, step) { StepActions(state, phase, viewModel, onSubscribe) }
                 }
             }

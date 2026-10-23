@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import site.androidmod.patch.Capability
 import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.patch.PatchFailure
@@ -39,8 +40,13 @@ class RunStepsTest {
 
     private val failed = PatchState.Failed(PatchFailure.NETWORK, "Network error. Check your connection and try again.")
 
-    private fun steps(intent: GenericIntent, phase: GenericPhase, state: PatchState? = null, originalSaved: Boolean = false) =
-        runSteps("Example", intent, phase, state, originalSaved)
+    private fun steps(
+        intent: GenericIntent,
+        phase: GenericPhase,
+        state: PatchState? = null,
+        originalSaved: Boolean = false,
+        capabilities: Set<Capability> = setOf(Capability.ADS),
+    ) = runSteps("Example", intent, phase, state, originalSaved, capabilities)
 
     private fun statuses(intent: GenericIntent, phase: GenericPhase, state: PatchState? = null, originalSaved: Boolean = false) =
         steps(intent, phase, state, originalSaved).map { it.status }
@@ -120,6 +126,35 @@ class RunStepsTest {
             statuses(GenericIntent.PATCH, GenericPhase.SaveAndBuild, failed, originalSaved = true),
         )
         assertEquals(listOf(FAILED, TODO), statuses(GenericIntent.REFRESH, GenericPhase.SaveAndBuild, failed))
+    }
+
+    @Test
+    fun runLabelMatchesTheMix() {
+        val ads = setOf(Capability.ADS)
+        val iap = setOf(Capability.IAP)
+        val both = setOf(Capability.ADS, Capability.IAP)
+        assertEquals(patchTitles, steps(GenericIntent.PATCH, GenericPhase.SaveAndBuild, capabilities = ads).map { it.title })
+        assertEquals(
+            listOf("Save the original", "Bypass in-app purchases", "Remove Example", "Install the patched copy"),
+            steps(GenericIntent.PATCH, GenericPhase.SaveAndBuild, capabilities = iap).map { it.title },
+        )
+        assertEquals(
+            listOf("Save the original", "Remove the ads and bypass purchases", "Remove Example", "Install the patched copy"),
+            steps(GenericIntent.PATCH, GenericPhase.SaveAndBuild, capabilities = both).map { it.title },
+        )
+        assertEquals(
+            listOf("Bypass in-app purchases", "Install the update"),
+            steps(GenericIntent.REFRESH, GenericPhase.SaveAndBuild, capabilities = iap).map { it.title },
+        )
+        assertEquals(
+            listOf("Remove the ads and bypass purchases", "Install the update"),
+            steps(GenericIntent.REFRESH, GenericPhase.SaveAndBuild, capabilities = both).map { it.title },
+        )
+        // The build step keeps its place, whatever it is called.
+        assertEquals(
+            listOf(DONE, ACTIVE, TODO, TODO),
+            steps(GenericIntent.PATCH, GenericPhase.SaveAndBuild, originalSaved = true, capabilities = iap).map { it.status },
+        )
     }
 
     @Test

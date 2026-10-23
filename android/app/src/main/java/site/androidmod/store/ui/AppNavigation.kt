@@ -376,9 +376,12 @@ fun AppNavigation() {
                 ConfirmScreen(
                     packageName = pkg,
                     lookup = container.installedApps::packageInfo,
-                    confirm = { app ->
-                        confirmPatch(app, container.genericFlow::begin) { name, label ->
-                            PatchService.start(context, name, PatchMode.GENERIC, label)
+                    confirm = { app, capabilities ->
+                        confirmPatch(
+                            app,
+                            begin = { chosen -> container.genericFlow.begin(chosen, capabilities) },
+                        ) { name, label ->
+                            PatchService.start(context, name, PatchMode.GENERIC, label, capabilities)
                         }
                     },
                     // The run screen replaces the picker and this one: back from it is where the picker was opened.

@@ -2,6 +2,7 @@ package site.androidmod.store.generic
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
+import site.androidmod.patch.Capability
 import site.androidmod.patch.GenericPatchInfo
 import site.androidmod.store.install.InstallFailure
 import site.androidmod.store.install.InstallOutcome
@@ -42,12 +43,14 @@ class GenericFlow(
     private val installing = HashSet<String>()
 
     /**
-     * Starts patching [app] with a PATCH record, which the job then fills. Refused
+     * Starts patching [app] with a PATCH record, which the job then fills. [capabilities] is the
+     * customer's confirmed mix, kept as wire names on the record from the first write; null (the
+     * default) leaves it unset, for a caller with no choice to carry. Refused
      * (IllegalStateException) while a flow is under way for the app, and when it would replace a
      * saved original whose signers the phone doesn't have installed now (our patched copy, say).
      * Otherwise a finished record goes, with its files: the original it saved is installed again.
      */
-    fun begin(app: InstalledPackage): GenericRecord = synchronized(lock) {
+    fun begin(app: InstalledPackage, capabilities: Set<Capability>? = null): GenericRecord = synchronized(lock) {
         val existing = records.get(app.packageName)
         check(existing?.intent == null) { "${app.label} is already being patched or put back." }
         // Read now, not taken from the caller's snapshot of the app.
@@ -62,6 +65,7 @@ class GenericFlow(
             originalSigners = app.signerSha256s,
             apkNames = app.apks.map { it.name },
             intent = GenericIntent.PATCH,
+            capabilities = capabilities?.let(::capabilityWires),
         )
         if (existing != null) records.remove(app.packageName)
         records.put(record)

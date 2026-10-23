@@ -27,6 +27,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import site.androidmod.patch.Capability
 import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.generic.GenericRecord
@@ -403,6 +404,26 @@ class RunViewModelTest {
         model.onReport()
         assertTrue(keptForReport.isEmpty())
         assertTrue(events.isEmpty())
+    }
+
+    @Test
+    fun runStateCarriesTheMix() = runTest {
+        val both = FakeFlow(GenericPhase.SaveAndBuild)
+        both.record = both.record!!.copy(capabilities = listOf("ads", "iap"))
+        assertEquals(setOf(Capability.ADS, Capability.IAP), model(both).state.value.capabilities)
+
+        val purchases = FakeFlow(GenericPhase.SaveAndBuild)
+        purchases.record = purchases.record!!.copy(capabilities = listOf("iap"))
+        assertEquals(setOf(Capability.IAP), model(purchases).state.value.capabilities)
+
+        // A record from before choices carries none: ads-only, as every start default is.
+        val legacy = FakeFlow(GenericPhase.SaveAndBuild)
+        assertEquals(setOf(Capability.ADS), model(legacy).state.value.capabilities)
+
+        // Nothing under way (no record) keeps the ads-only default too.
+        val none = FakeFlow(null)
+        none.record = null
+        assertEquals(setOf(Capability.ADS), model(none).state.value.capabilities)
     }
 
     @Test
