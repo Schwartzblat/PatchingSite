@@ -35,15 +35,15 @@ object IapScan {
     fun scan(dexes: List<DexFile>, iap: IapCatalogData?): IapScanResult =
         Scan(iap).apply { dexes.forEach(::add) }.result()
 
-    /** Every top-level classesN.dex of every APK, like [AdScan.scan]. */
+    /** Every top-level classesN.dex of every APK, except names in [skipInBase] (base only), like [AdScan.scan]. */
     @JvmName("scanApks")
-    fun scan(apks: List<File>, iap: IapCatalogData?): IapScanResult {
+    fun scan(apks: List<File>, iap: IapCatalogData?, skipInBase: Set<String> = emptySet()): IapScanResult {
         val scan = Scan(iap)
-        apks.forEach { apk ->
+        apks.forEachIndexed { n, apk ->
             try {
                 ZipFile.builder().setFile(apk).get().use { zip ->
                     for (entry in zip.entries) {
-                        if (DexHash.dexIndex(entry.name) == null) continue
+                        if (DexHash.dexIndex(entry.name) == null || (n == 0 && entry.name in skipInBase)) continue
                         scan.add(DexFile(zip.getInputStream(entry).use { it.readBytes() }))
                     }
                 }

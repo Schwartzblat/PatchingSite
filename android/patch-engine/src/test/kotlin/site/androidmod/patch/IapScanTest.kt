@@ -1,10 +1,14 @@
 package site.androidmod.patch
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class IapScanTest {
+    @get:Rule val tmp = TemporaryFolder()
     private val iap = genericCatalog().iap!!
 
     private val anchor = "Error generating PublicKey from encoded key: "
@@ -98,5 +102,21 @@ class IapScanTest {
             TinyMethod(TinyDex.constString(0)),
         )))
         assertEquals(mapOf("IAP_CLIENTS_PRESENT" to "") + verifierKeys(null, null, null), scan(d))
+    }
+
+    @Test fun scanReadsTopLevelDexOfEveryApkAndSkipsOnlyInBase() {
+        val play = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/android/billingclient/api/BillingClient;")))
+        val unity = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/unity/purchasing/UnityPurchasing;")))
+        val facebook = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/facebook/appevents/iap/InAppPurchaseEventManager;")))
+        val embedded = TinyDex.build(emptyList(), listOf(TinyClass("Lcom/android/vending/billing/IInAppBillingService;")))
+        val base = zip(tmp.newFile("base.apk"), listOf(
+            "classes.dex" to play, "classes2.dex" to unity, "assets/other.dex" to embedded,
+        ))
+        val split = zip(tmp.newFile("split.apk"), listOf("classes2.dex" to facebook))
+        val present = { apks: List<File>, skip: Set<String> ->
+            IapScan.scan(apks, iap, skip).artifacts["IAP_CLIENTS_PRESENT"]
+        }
+        assertEquals("Play Billing Library, Unity IAP, Facebook IAP tracker", present(listOf(base, split), emptySet()))
+        assertEquals("Play Billing Library, Facebook IAP tracker", present(listOf(base, split), setOf("classes2.dex")))
     }
 }

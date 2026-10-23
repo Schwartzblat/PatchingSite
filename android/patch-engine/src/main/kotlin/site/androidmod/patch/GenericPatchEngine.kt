@@ -13,7 +13,7 @@ enum class Capability(val wire: String) {
     ;
 
     companion object {
-        /** The capabilities named by wire name, in enum order. Unknown names are ignored, never refused. */
+        /** The capabilities named by wire name, in enum order. Unknown names are ignored, never refused. Matching is case-sensitive: callers must lowercase the names first. */
         fun of(names: Iterable<String>): Set<Capability> {
             val wanted = names.toSet()
             return entries.filterTo(LinkedHashSet()) { it.wire in wanted }
@@ -103,7 +103,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         if (Capability.ADS in r.capabilities) artifacts.putAll(scan.artifacts)
         if (Capability.IAP in r.capabilities) {
             artifacts["IAP_ENABLED"] = "true"
-            artifacts.putAll(IapScan.scan(r.apks, catalog.iap).artifacts)
+            artifacts.putAll(IapScan.scan(r.apks, catalog.iap, drop).artifacts)
         }
 
         val additions = bundle.bytes(ADDITIONS)

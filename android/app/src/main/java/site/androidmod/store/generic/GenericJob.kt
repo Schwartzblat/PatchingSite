@@ -170,6 +170,25 @@ fun genericPatchState(outcome: GenericOutcome, label: String, builtDir: File, ve
 }
 
 /**
+ * What a build patches with: [recorded] when the record has them (a confirmed choice, or one an
+ * earlier run persisted), else the installed [base]'s patch-info (an adopted patch, or a record
+ * from before choices), else ads-only. Shared so the run screen names the mix the job would patch
+ * with; reads [base]'s file, so callers run it off the main thread.
+ */
+internal fun resolveCapabilities(recorded: List<String>?, base: File?): Set<Capability> =
+    recorded?.let(::capabilitiesOf)
+        ?: base?.let(::patchInfoCapabilities)?.let(::capabilitiesOf)
+        ?: setOf(Capability.ADS)
+
+/** The installed [base]'s recorded capabilities; null when it has no generic patch-info or can't be read. */
+private fun patchInfoCapabilities(base: File): List<String>? = try {
+    GenericPatchInfo.read(base)?.capabilities
+} catch (_: PatchException) {
+    // Not a readable generic APK: nothing to inherit.
+    null
+}
+
+/**
  * Saves an installed app's original, then builds its generic patch, for the record's intent:
  * PATCH, or REFRESH of our patched copy. It never removes or installs anything; the run screen
  * does that.
@@ -507,22 +526,12 @@ class GenericJob(
             app.apks.map { it.name } == record.apkNames
 
     /**
-     * What this build patches with: the record's wire names when it has them (a confirmed choice, or
+     * What a build patches with: the record's wire names when it has them (a confirmed choice, or
      * one an earlier run persisted), else the installed base APK's patch-info (an adopted patch, or a
      * record from before choices), else ads-only.
      */
     private suspend fun resolveCapabilities(record: GenericRecord, installedBase: File?): Set<Capability> =
-        record.capabilities?.let(::capabilitiesOf)
-            ?: installedBase?.let { base -> patchInfoCapabilities(base) }?.let(::capabilitiesOf)
-            ?: setOf(Capability.ADS)
-
-    /** The installed [base]'s recorded capabilities; null when it has no generic patch-info or can't be read. */
-    private suspend fun patchInfoCapabilities(base: File): List<String>? = try {
-        blocking { GenericPatchInfo.read(base) }?.capabilities
-    } catch (_: PatchException) {
-        // Not a readable generic APK: nothing to inherit.
-        null
-    }
+        blocking { resolveCapabilities(record.capabilities, installedBase) }
 
     /** Runs blocking work off the caller's thread; cancelling the job interrupts it. */
     private suspend fun <T> blocking(block: () -> T): T = runInterruptible(Dispatchers.IO, block)

@@ -1324,6 +1324,19 @@ class GenericJobTest {
     }
 
     @Test
+    fun recordMixBeatsADifferentRequestedMixOnPatch() = runTest {
+        // A PATCH whose record already carries a mix (the confirm flow's, or a retry's): a start
+        // extra naming something else does not replace it.
+        val f = fixture()
+        f.records.put(f.record(capabilities = listOf("iap")))
+
+        assertEquals(GenericOutcome.Built, f.run(f.job(requested = setOf(Capability.ADS))))
+
+        assertEquals(setOf(Capability.IAP), f.requests.single().capabilities)
+        assertEquals(listOf("iap"), f.records.get(PKG)!!.capabilities)
+    }
+
+    @Test
     fun outcomes_map_onto_patch_states() {
         val built = File("/files/generic/$PKG/built")
         assertEquals(PatchState.Ready(built, VERSION_NAME), genericPatchState(GenericOutcome.Built, LABEL, built, VERSION_NAME))

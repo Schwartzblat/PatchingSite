@@ -715,7 +715,8 @@ patch-cli scan    --base FILE [--split FILE]... --bundle FILE --bundle-key FILE
 patch-cli generic --base FILE [--split FILE]... --bundle FILE --bundle-key FILE
                   --fastsigner FILE --keystore FILE --keystore-pass-env NAME
                   [--keystore-alias NAME] [--key-pass-env NAME]
-                  --abis A,B,... --sdk N [--token TOKEN] [--refresh] --out-dir DIR
+                  --abis A,B,... --sdk N [--token TOKEN] [--refresh]
+                  [--capabilities ads,iap] --out-dir DIR
 ```
 
 `scan` prints the artifacts as JSON (keys sorted, two-space indent), to compare with a

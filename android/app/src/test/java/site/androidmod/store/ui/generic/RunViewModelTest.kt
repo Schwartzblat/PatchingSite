@@ -6,6 +6,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.first
@@ -28,6 +30,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import site.androidmod.patch.Capability
+import site.androidmod.patch.GenericPatchInfo
 import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.generic.GenericRecord
@@ -71,6 +74,9 @@ class RunViewModelTest {
         /** Whether the user's signing key is cached; without it our own copy reads as changed. */
         var keyKnown = true
 
+        /** The installed base APK whose patch-info the run screen inherits when the record carries no mix. */
+        var installedBaseFile: File? = null
+
         /** Thrown by every record write (askedToUninstall, finish, stop, startRestore), as a full disk would. */
         var writeError: Exception? = null
 
@@ -108,6 +114,8 @@ class RunViewModelTest {
         }
 
         override fun keyKnown(): Boolean = keyKnown
+
+        override fun installedBase(packageName: String): File? = installedBaseFile
 
         override fun stop(packageName: String): Boolean {
             calls += "stop"
@@ -424,6 +432,30 @@ class RunViewModelTest {
         val none = FakeFlow(null)
         none.record = null
         assertEquals(setOf(Capability.ADS), model(none).state.value.capabilities)
+    }
+
+    @Test
+    fun runStateReadsTheInstalledPatchInfoWhenTheRecordHasNoMix() = runTest {
+        // An adopted IAP patch: the record names no mix, so the run screen reads the installed
+        // base's patch-info, as the job's resolution does.
+        val flow = FakeFlow(GenericPhase.SaveAndBuild, GenericIntent.REFRESH)
+        flow.installedBaseFile = patchInfoApk(listOf("iap"))
+
+        assertEquals(setOf(Capability.IAP), model(flow).state.value.capabilities)
+    }
+
+    /** A base APK carrying only the patch-info [capabilities] names, as an adopted patch's does. */
+    private fun patchInfoApk(capabilities: List<String>): File {
+        val info = """{"kind":"generic","patcher_version":"1","bundle_id":"${"f".repeat(64)}",""" +
+            """"catalog_format":1,"abi":"arm64-v8a","lib_dir":"lib/arm64-v8a","sdks_present":"",""" +
+            """"added":["${GenericPatchInfo.ENTRY}"],"capabilities":[${capabilities.joinToString(",") { "\"$it\"" }}]}"""
+        return File.createTempFile("base", ".apk").also { it.deleteOnExit() }.also { base ->
+            ZipOutputStream(base.outputStream()).use { zip ->
+                zip.putNextEntry(ZipEntry(GenericPatchInfo.ENTRY))
+                zip.write(info.toByteArray())
+                zip.closeEntry()
+            }
+        }
     }
 
     @Test

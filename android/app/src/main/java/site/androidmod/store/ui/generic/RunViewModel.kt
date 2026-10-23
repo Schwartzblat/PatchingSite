@@ -2,6 +2,7 @@ package site.androidmod.store.ui.generic
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +26,7 @@ import site.androidmod.store.generic.GenericIntent
 import site.androidmod.store.generic.GenericPhase
 import site.androidmod.store.generic.GenericRecord
 import site.androidmod.store.generic.GenericRecords
-import site.androidmod.store.generic.capabilitiesOf
+import site.androidmod.store.generic.resolveCapabilities
 import site.androidmod.store.install.InstallOutcome
 import site.androidmod.store.patch.PatchMode
 import site.androidmod.store.patch.PatchRegistry
@@ -45,10 +46,17 @@ interface RunFlow {
 
     /** Whether the user's signing key is cached; without it our own copy reads as changed outside the store. */
     fun keyKnown(): Boolean
+
+    /** The installed base APK's file, whose patch-info names the mix when the record has none; null when none. */
+    fun installedBase(packageName: String): File?
 }
 
-/** The store's [GenericFlow], with the record read from [records]. */
-fun runFlowOf(flow: GenericFlow, records: GenericRecords): RunFlow = object : RunFlow {
+/** The store's [GenericFlow], with the record read from [records] and the installed base from [installedBaseOf]. */
+fun runFlowOf(
+    flow: GenericFlow,
+    records: GenericRecords,
+    installedBaseOf: (String) -> File?,
+): RunFlow = object : RunFlow {
     override fun record(packageName: String) = records.get(packageName)
     override fun phase(packageName: String) = flow.phase(packageName)
     override fun askedToUninstall(packageName: String) = flow.askedToUninstall(packageName)
@@ -58,6 +66,7 @@ fun runFlowOf(flow: GenericFlow, records: GenericRecords): RunFlow = object : Ru
     override fun stop(packageName: String) = flow.stop(packageName)
     override fun startRestore(packageName: String) = flow.startRestore(packageName)
     override fun keyKnown() = flow.keyKnown()
+    override fun installedBase(packageName: String) = installedBaseOf(packageName)
 }
 
 sealed interface RunEvent {
@@ -78,8 +87,9 @@ data class RunState(
     /** The record's; null when nothing is under way. */
     val intent: GenericIntent? = null,
     /**
-     * The mix the build was asked for: the record's wire names, ads-only when it carries none
-     * (a record from before choices, or none yet). Names the run screen's build step.
+     * The mix the build was asked for, as the job resolves it: the record's wire names, else the
+     * installed base's patch-info, else ads-only (a record from before choices, or none yet).
+     * Names the run screen's build step.
      */
     val capabilities: Set<Capability> = setOf(Capability.ADS),
     /** Null when the app has no record, or when [unchecked]. */
@@ -117,7 +127,11 @@ data class RunState(
  */
 class RunViewModel(
     val packageName: String,
-    private val flow: RunFlow = StoreApp.instance.container.let { runFlowOf(it.genericFlow, it.genericRecords) },
+    private val flow: RunFlow = StoreApp.instance.container.let { container ->
+        runFlowOf(container.genericFlow, container.genericRecords) { packageName ->
+            container.installedApps.packageInfo(packageName)?.apks?.firstOrNull()
+        }
+    },
     private val jobs: StateFlow<Map<String, PatchState>> = PatchRegistry.states,
     /** Starts the job; false when Android refused (see PatchService.start). */
     private val startJob: (pkg: String, label: String) -> Boolean = { pkg, label ->
@@ -272,6 +286,10 @@ class RunViewModel(
             }
             Triple(record, phase, keyBefore && flow.keyKnown())
         }
+        // The mix the job would patch with: the record's, else the installed base's patch-info, else ads.
+        val capabilities = withContext(io) {
+            record?.let { resolveCapabilities(it.capabilities, if (it.capabilities == null) flow.installedBase(packageName) else null) }
+        }
         // The Library's rule (GenericLibrarySource): Attention without the key isn't shown.
         val unchecked = phase is GenericPhase.Attention && !keyKnown
         _state.update { current ->
@@ -284,9 +302,8 @@ class RunViewModel(
                 loading = false,
                 label = record?.label ?: current.label,
                 intent = record?.intent ?: current.intent.takeIf { done },
-                // Written in enum order by the confirm flow; a record without names is an old (ads-only) patch.
-                capabilities = record?.let { it.capabilities?.let(::capabilitiesOf) ?: setOf(Capability.ADS) }
-                    ?: current.capabilities,
+                // Written in enum order by the confirm flow; resolved like the engine's request.
+                capabilities = capabilities ?: current.capabilities,
                 phase = phase.takeUnless { unchecked },
                 originalSaved = record?.original?.isNotEmpty() == true,
                 stillInstalled = removing && (afterUninstall || current.stillInstalled || (current.loading && askedBefore)),
