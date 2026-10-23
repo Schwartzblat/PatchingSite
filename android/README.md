@@ -693,6 +693,20 @@ is kept as `assets/patcher/original-manifest.axml`, and `assets/patcher/patch-in
 added) says what was done and marks the copy as ours. A Refresh ends with the same
 entries as patching the original.
 
+**What gets patched.** The confirm screen (`ConfirmScreen`, `ui/generic`) asks "Patch <App>?"
+before the build and carries two switches, "Remove ads" (on) and "Bypass in-app purchases"
+(off); each visit starts from those defaults and keeps no state. With both off the Patch button
+stays disabled and the screen's first bullet reads "Nothing will be patched."; otherwise that
+bullet follows the mix — ads only: the phone removes its ads; purchases only: the app's
+purchases succeed without paying; both: the phone removes its ads and makes its purchases
+succeed without paying — and every version ends "Nothing is uploaded." A bundle whose catalog
+has no `iap` section still patches: the run writes `IAP_ENABLED` with an empty census and no
+verifier keys, so purchases do nothing while the ads still come off. The confirmed mix is
+recorded on the patch record: the run screen shows it, a Refresh rebuilds with it, and a later
+start that carries no choice never resets it. `patch-cli` takes `--capabilities` on both
+`generic` and `scan`: comma-separated `ads` and `iap`, case-insensitive, `ads` alone when it is
+absent, an unknown name a usage error (exit 2).
+
 **On a desktop** `patch-cli` has two commands (WhatsApp's flags with no command are
 unchanged). Passwords come from environment variables named by flags, never from flags:
 
