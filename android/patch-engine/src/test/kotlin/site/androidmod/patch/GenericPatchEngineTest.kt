@@ -7,6 +7,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.apache.commons.compress.archivers.zip.ZipFile
@@ -56,6 +57,28 @@ class GenericPatchEngineTest {
         baseExtra: List<Pair<String, ByteArray>> = emptyList(),
     ) = fx.app(classes, baseExtra)
 
+    /** A generic bundle whose catalog is [catalog], for the catalog-shape variants. */
+    private fun bundleWithCatalog(catalog: ByteArray): PatchBundle {
+        val files = mapOf(
+            "module.apk" to fx.moduleApk(),
+            "paywall.apk" to fx.paywallApk(),
+            "manifest-additions.xml" to GenericFixtures::class.java.getResource("/generic/manifest-additions.xml")!!.readBytes(),
+            "catalog.json" to catalog,
+        )
+        val meta = mapOf(
+            "format" to 1, "package" to PatchBundle.GENERIC_PACKAGE, "patcher_version" to "1.0.0", "min_sdk" to 33,
+            "min_store_version_code" to 0, "dex_order" to listOf("module.apk", "paywall.apk"),
+        )
+        return PatchBundle.open(bundleZip(tmp.newFile(), files, meta, fx.ec.private), fx.ec.public)
+    }
+
+    /** The real fixture catalog with its `iap` section removed, as an old bundle would carry it. */
+    private fun bundleWithoutIap(): PatchBundle {
+        val catalog = GenericFixtures::class.java.getResource("/generic/catalog.json")!!.readText()
+            .let(Json::parseToJsonElement).jsonObject.toMutableMap().apply { remove("iap") }
+        return bundleWithCatalog(JsonObject(catalog).toString().toByteArray())
+    }
+
     private fun request(
         apks: List<File>,
         out: File = tmp.newFolder(),
@@ -65,13 +88,18 @@ class GenericPatchEngineTest {
         cert: String = sha(user.cert.encoded),
         sdk: Int = 36,
         abis: List<String> = listOf("arm64-v8a", "armeabi-v7a"),
+        capabilities: Set<Capability> = setOf(Capability.ADS),
         refused: Set<String> = emptySet(),
-    ) = GenericPatchRequest(apks, source, bundle, token, cert, sdk, abis, work, out, refused)
+    ) = GenericPatchRequest(apks, source, bundle, token, cert, sdk, abis, capabilities, work, out, refused)
 
     private fun <T> open(f: File, block: (ZipFile) -> T): T = ZipFile.builder().setFile(f).get().use(block)
     private fun read(f: File, name: String): ByteArray? =
         open(f) { z -> z.getEntry(name)?.let { z.getInputStream(it).readBytes() } }
     private fun names(f: File) = open(f) { z -> z.entries.asSequence().map { it.name }.toList() }
+
+    private fun artifacts(apk: File): Map<String, String> =
+        Json.parseToJsonElement(String(read(apk, "assets/patcher/artifactory.json")!!)).jsonObject
+            .mapValues { it.value.jsonPrimitive.content }
 
     private fun authorities(manifest: ByteArray): List<String> =
         AndroidManifestBlock.load(ByteArrayInputStream(manifest)).applicationElement.elements.asSequence()
@@ -209,6 +237,135 @@ class GenericPatchEngineTest {
         assertEquals(first.facts, second.facts)
         for (i in 1 until first.apks.size) assertSameBesidesSignature(first.apks[i], second.apks[i])
         second.apks.forEach { assertSignedBy(it, user) }
+    }
+
+    @Test fun adsOnlyArtifactsEqualTheScan() {
+        val apks = app()
+        val result = engine.patch(request(apks, capabilities = setOf(Capability.ADS)))
+        val scan = AdScan.scan(apks, genericCatalog()).artifacts
+        assertEquals(scan, result.artifacts)
+        assertEquals(
+            setOf(
+                "AD_SDKS_PRESENT", "AD_SDK_PACKAGES", "AD_APP_FRAME_PACKAGES", "AD_HOST_SUFFIXES",
+                "AD_HOSTS_HARVESTED", "AD_PROTECTED_SUFFIXES", "AD_URL_RULES", "AD_CALLER_BLOCK",
+            ),
+            result.artifacts.keys,
+        )
+        assertEquals("AppLovin", result.artifacts.getValue("AD_SDKS_PRESENT"))
+        assertEquals("true", result.artifacts.getValue("AD_CALLER_BLOCK"))
+        assertEquals("", result.artifacts.getValue("AD_HOSTS_HARVESTED"))
+        assertTrue(result.artifacts.keys.none { it.startsWith("IAP_") })
+        assertEquals(result.artifacts, artifacts(result.apks[0]))
+        // The defaulted capability is still written: the key is present, not merely implied on read.
+        val written = Json.parseToJsonElement(String(read(result.apks[0], GenericPatchInfo.ENTRY)!!)).jsonObject
+        assertEquals("""["ads"]""", written.getValue("capabilities").toString())
+    }
+
+    @Test fun bothCapabilitiesWriteBothPrefixes() {
+        val apks = app()
+        val caps = setOf(Capability.ADS, Capability.IAP)
+        val result = engine.patch(request(apks, capabilities = caps))
+        assertEquals("true", result.artifacts.getValue("IAP_ENABLED"))
+        assertEquals("", result.artifacts.getValue("IAP_CLIENTS_PRESENT"))
+        assertEquals("AppLovin", result.artifacts.getValue("AD_SDKS_PRESENT"))
+        assertEquals(
+            IapScan.scan(apks, genericCatalog().iap).artifacts,
+            result.artifacts.filterKeys { it.startsWith("IAP_") && it != "IAP_ENABLED" },
+        )
+        assertEquals(listOf("ads", "iap"), result.info.capabilities)
+        assertEquals(listOf("ads", "iap"), GenericPatchInfo.read(result.apks[0])!!.capabilities)
+        assertEquals(result.artifacts, artifacts(result.apks[0]))
+    }
+
+    @Test fun iapOnlyWritesNoAdKeys() {
+        val apks = app()
+        val result = engine.patch(request(apks, capabilities = setOf(Capability.IAP)))
+        assertTrue(result.artifacts.toString(), result.artifacts.keys.none { it.startsWith("AD_") })
+        assertEquals("true", result.artifacts.getValue("IAP_ENABLED"))
+        val scan = IapScan.scan(apks, genericCatalog().iap).artifacts
+        assertEquals(mapOf("IAP_ENABLED" to "true") + scan, result.artifacts)
+        assertEquals(scan, result.artifacts - "IAP_ENABLED")
+        assertEquals(result.artifacts, artifacts(result.apks[0]))
+        assertEquals(listOf("iap"), result.info.capabilities)
+        assertEquals(listOf("iap"), GenericPatchInfo.read(result.apks[0])!!.capabilities)
+    }
+
+    @Test fun iapOnlyStillDetectsPairip() {
+        val out = tmp.newFolder()
+        val e = refused<PatchException.Unpatchable>(
+            request(
+                app(baseExtra = listOf("lib/arm64-v8a/libpairipcore.so" to ByteArray(8))),
+                out,
+                capabilities = setOf(Capability.IAP),
+            ),
+        )
+        assertEquals(listOf(CantPatch.PAIRIP), e.reasons)
+        assertNothingLeft(out)
+    }
+
+    @Test fun refreshFlowsUnchanged() {
+        val caps = setOf(Capability.ADS, Capability.IAP)
+        val first = engine.patch(request(app(), capabilities = caps))
+        val second = engine.patch(request(first.apks, source = GenericSource.PATCHED, token = "new-token", capabilities = caps))
+        assertEquals(listOf("ads", "iap"), first.info.capabilities)
+        assertEquals(listOf("ads", "iap"), second.info.capabilities)
+        assertEquals(listOf("ads", "iap"), GenericPatchInfo.read(first.apks[0])!!.capabilities)
+        assertEquals(listOf("ads", "iap"), GenericPatchInfo.read(second.apks[0])!!.capabilities)
+        assertEquals(first.info, second.info)
+        assertEquals(first.artifacts, second.artifacts)
+        assertEquals("true", second.artifacts["IAP_ENABLED"])
+    }
+
+    @Test fun emptyCapabilitySetRefused() {
+        val out = tmp.newFolder()
+        val e = refused<PatchException.Unsupported>(request(app(), out, capabilities = emptySet()))
+        assertEquals("nothing to patch", e.message)
+        assertNothingLeft(out)
+        // The store's junk-name path ends at the same refusal: of() drops what it doesn't know, and empty is refused.
+        assertEquals(emptySet<Capability>(), Capability.of(emptyList()))
+        val throughOf = refused<PatchException.Unsupported>(
+            request(app(), tmp.newFolder(), capabilities = Capability.of(listOf("junk"))),
+        )
+        assertEquals("nothing to patch", throughOf.message)
+    }
+
+    @Test fun activityEntersTheManifest() {
+        val result = engine.patch(request(app()))
+        val merged = ManifestPatcher.facts(read(result.apks[0], "AndroidManifest.xml")!!).componentNames
+        assertTrue(merged.toString(), "com.smali_generator.PurchaseResultActivity" in merged)
+    }
+
+    @Test fun iapWithoutCatalogSectionIsInert() {
+        val result = engine.patch(request(app(), bundle = bundleWithoutIap(), capabilities = setOf(Capability.ADS, Capability.IAP)))
+        assertEquals("true", result.artifacts.getValue("IAP_ENABLED"))
+        assertEquals("", result.artifacts.getValue("IAP_CLIENTS_PRESENT"))
+        assertEquals(
+            mapOf("IAP_CLIENTS_PRESENT" to ""),
+            result.artifacts.filterKeys { it.startsWith("IAP_") && it != "IAP_ENABLED" },
+        )
+        assertEquals("AppLovin", result.artifacts.getValue("AD_SDKS_PRESENT"))
+    }
+
+    /** Not one of the brief's eight: an old patch-info with no capabilities key still opens as ads-only. */
+    @Test fun absentCapabilitiesReadAsAds() {
+        val apk = zip(
+            tmp.newFile(),
+            listOf(
+                "AndroidManifest.xml" to baseManifest,
+                GenericPatchInfo.ENTRY to (
+                    """{"kind":"generic","patcher_version":"1.0.0","bundle_id":"b","catalog_format":1,""" +
+                        """"abi":"arm64-v8a","lib_dir":"lib/arm64-v8a","sdks_present":"AppLovin","added":[]}"""
+                    ).toByteArray(),
+            ),
+        )
+        assertEquals(listOf("ads"), GenericPatchInfo.read(apk)!!.capabilities)
+    }
+
+    /** Also beyond the eight: the store may name capabilities this engine doesn't know; they are dropped, not refused. */
+    @Test fun capabilityOfIgnoresUnknownNames() {
+        assertEquals(setOf(Capability.ADS, Capability.IAP), Capability.of(listOf("iap", "unknown", "ads", "iap")))
+        assertEquals(emptySet<Capability>(), Capability.of(listOf("ads2", "")))
+        assertEquals(listOf(Capability.ADS, Capability.IAP), Capability.of(listOf("iap", "ads")).toList())
     }
 
     @Test fun refreshFromSavedOriginal() {

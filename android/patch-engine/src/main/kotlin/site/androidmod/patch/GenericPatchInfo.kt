@@ -25,12 +25,14 @@ data class GenericPatchInfo(
     @SerialName("lib_dir") val libDir: String,
     @SerialName("sdks_present") val sdksPresent: String,
     val added: List<String>,
+    /** The wire names of what the patch did, in [Capability] order; a patch-info from before capabilities reads as ads-only. */
+    @SerialName("capabilities") val capabilities: List<String> = listOf(Capability.ADS.wire),
 ) {
     companion object {
         const val KIND = "generic"
         const val ENTRY = "assets/patcher/patch-info.json"
         const val ORIGINAL_MANIFEST = "assets/patcher/original-manifest.axml"
-        private val json = Json { ignoreUnknownKeys = true }
+        private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
         /**
          * The generic patch-info in [apk], or null when it has none or another kind (e.g. a WhatsApp patch's).
@@ -57,6 +59,6 @@ data class GenericPatchInfo(
             }
         }
 
-        internal fun encode(info: GenericPatchInfo): ByteArray = Json.encodeToString(serializer(), info).toByteArray()
+        internal fun encode(info: GenericPatchInfo): ByteArray = json.encodeToString(serializer(), info).toByteArray()
     }
 }

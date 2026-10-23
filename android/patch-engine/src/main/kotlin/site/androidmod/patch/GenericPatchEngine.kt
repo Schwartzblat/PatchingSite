@@ -6,11 +6,27 @@ import java.io.IOException
 import java.security.MessageDigest
 import org.apache.commons.compress.archivers.zip.ZipFile
 
+/** What a generic patch is asked to do; each contributes its own artifacts to the patch. */
+enum class Capability(val wire: String) {
+    ADS("ads"),
+    IAP("iap"),
+    ;
+
+    companion object {
+        /** The capabilities named by wire name, in enum order. Unknown names are ignored, never refused. */
+        fun of(names: Iterable<String>): Set<Capability> {
+            val wanted = names.toSet()
+            return entries.filterTo(LinkedHashSet()) { it.wire in wanted }
+        }
+    }
+}
+
 /**
  * One generic patch run. [apks] are the base, then its splits; [source] says whether they are the app as
  * installed from elsewhere or our own patched copy (a Refresh). Every output must be signed by the cert whose
- * SHA-256 is [signerCertSha256] and verify on [deviceSdk]. Intermediates go in [workDir]; the outputs go in
- * [outputDir], each named as its input. An app in [refusedPackages] (our own store's apps) is refused. [paywallToken] is a secret: [toString] leaves it out.
+ * SHA-256 is [signerCertSha256] and verify on [deviceSdk]. [capabilities] chooses what the patch does.
+ * Intermediates go in [workDir]; the outputs go in [outputDir], each named as its input. An app in
+ * [refusedPackages] (our own store's apps) is refused. [paywallToken] is a secret: [toString] leaves it out.
  */
 data class GenericPatchRequest(
     val apks: List<File>,
@@ -20,6 +36,7 @@ data class GenericPatchRequest(
     val signerCertSha256: String,
     val deviceSdk: Int,
     val deviceAbis: List<String>,
+    val capabilities: Set<Capability> = setOf(Capability.ADS),
     val workDir: File,
     val outputDir: File,
     val refusedPackages: Set<String> = emptySet(),
@@ -29,7 +46,7 @@ data class GenericPatchRequest(
             "deviceSdk=$deviceSdk, deviceAbis=$deviceAbis, workDir=$workDir, outputDir=$outputDir)"
 }
 
-/** [apks] are the signed, verified outputs in input order; [artifacts] are the scan's, as `artifactory.json` holds them. */
+/** [apks] are the signed, verified outputs in input order; [artifacts] are the chosen capabilities' composed artifacts, as `artifactory.json` holds them. */
 data class GenericPatchResult(
     val apks: List<File>,
     val facts: ApkFacts,
@@ -51,6 +68,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
     }
 
     private fun run(r: GenericPatchRequest): GenericPatchResult {
+        if (r.capabilities.isEmpty()) throw PatchException.Unsupported("nothing to patch")
         val bundle = r.bundle
         if (!bundle.isGeneric) throw PatchException.BadBundle("a ${bundle.meta.packageName} bundle is not the generic bundle")
         val catalog = bundle.catalog ?: throw PatchException.BadBundle("the generic bundle has no catalog")
@@ -80,6 +98,14 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         if (reasons.isNotEmpty()) throw PatchException.Unpatchable(reasons)
         val libs = checkNotNull(facts.libTarget) { "no hook ABI without a reason" }
 
+        // The artifacts are what the chosen capabilities found: no key of an unchosen capability appears at all.
+        val artifacts = LinkedHashMap<String, String>()
+        if (Capability.ADS in r.capabilities) artifacts.putAll(scan.artifacts)
+        if (Capability.IAP in r.capabilities) {
+            artifacts["IAP_ENABLED"] = "true"
+            artifacts.putAll(IapScan.scan(r.apks, catalog.iap).artifacts)
+        }
+
         val additions = bundle.bytes(ADDITIONS)
         val newPrefix = "${facts.packageName}."
         val manifest = ManifestPatcher.merge(appManifest, ManifestPatcher.rewriteAuthorities(additions, AUTHORITY_PREFIX, newPrefix))
@@ -96,7 +122,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
             manifest = manifest,
             modules = bundle.meta.dexOrder.map(bundle::bytes),
             jsonAssets = mapOf(
-                JsonAssets.ARTIFACTORY to JsonAssets.artifactory(scan.artifacts),
+                JsonAssets.ARTIFACTORY to JsonAssets.artifactory(artifacts),
                 JsonAssets.PAYWALL to JsonAssets.paywall(r.paywallToken),
                 GenericPatchInfo.ORIGINAL_MANIFEST to appManifest,
             ),
@@ -111,6 +137,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
                 val described = GenericPatchInfo(
                     GenericPatchInfo.KIND, bundle.meta.patcherVersion, bundle.id, catalog.format,
                     libs.hookAbi, libs.libDir, scan.artifacts.getValue(SDKS_PRESENT), added,
+                    Capability.entries.filter { it in r.capabilities }.map { it.wire },
                 )
                 info = described
                 GenericPatchInfo.ENTRY to GenericPatchInfo.encode(described)
@@ -126,7 +153,7 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         } finally {
             unsigned.delete()
         }
-        return GenericPatchResult(outputs, facts, checkNotNull(info), scan.artifacts)
+        return GenericPatchResult(outputs, facts, checkNotNull(info), artifacts)
     }
 
     private fun checkInputs(r: GenericPatchRequest) {
