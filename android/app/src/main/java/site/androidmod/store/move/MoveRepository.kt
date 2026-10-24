@@ -238,9 +238,18 @@ class MoveRepository(
     /** "My chats are back", into the move's record so it outlives the process. */
     fun confirmChats(): Result = oneAtATime.run { migration.confirmChats() }
 
-    /** Cancels a move at its start: the saved copy and the record go, and WhatsApp keeps its chats. */
+    /**
+     * Cancels the move at any step but Finish up: the engine puts the backup back where
+     * WhatsApp looks for it and ends the move (Migration.cancel). With nothing on disk
+     * yet, only a Start, there is nothing for the engine to do, and the Start alone is
+     * forgotten.
+     */
     fun cancelMove(): Result = oneAtATime.run {
-        val result = migration.cancel()
+        val result = if (nothingOnDisk(migration.status(), settings.whatsAppMoveActive)) {
+            Result.ok("Nothing was saved yet.")
+        } else {
+            migration.cancel()
+        }
         if (result.ok) endMove()
         result
     }

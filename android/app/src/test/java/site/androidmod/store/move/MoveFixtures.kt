@@ -102,8 +102,9 @@ fun manifest(
     versionCode: Long = 263970L,
     crypt: String = "crypt14",
     backupMs: Long = NOW - 5 * 60_000L,
+    parkedAt: Long = NOW - 4 * 60_000L,
 ): ParkManifest = ParkManifest(
-    state, NOW - 4 * 60_000L, versionName, versionCode, from, crypt, 120, 50L * 1024 * 1024,
+    state, parkedAt, versionName, versionCode, from, crypt, 120, 50L * 1024 * 1024,
     listOf(ParkManifest.Db("msgstore.db.$crypt", 1_000_000L, backupMs, "c".repeat(64))),
 )
 

@@ -61,13 +61,16 @@ class MoveGuideSavedCopyTest {
     }
 
     @Test
-    fun `cancel is offered only where the engine allows it`() {
+    fun `cancel is offered where the engine allows it, and with only a Start`() {
         assertTrue(guide(facts(record = record())).canCancel)
-        assertFalse(guide(facts()).canCancel)
+        // Nothing on disk: cancelling forgets the Start (MoveGuideCancelTest).
+        assertTrue(guide(facts()).canCancel)
+        assertFalse(guide(facts(), startedAt = 0L).canCancel)
+        // Since 2026-10-24 a park can be cancelled too.
         val parked = facts(waFolder = false, parkFolder = true, manifest = manifest(backupMs = FRESH_BACKUP),
             record = record())
         assertEquals(Step.UNINSTALL_WHATSAPP, status(parked).step)
-        assertFalse(guide(parked).canCancel)
+        assertTrue(guide(parked).canCancel)
     }
 
     @Test

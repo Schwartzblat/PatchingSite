@@ -381,14 +381,51 @@ even notice it, so the move now keeps its own copy.
     backup (`Finishing.findEvidence`). That backup must be written after the put-back, be at least
     3/4 the size of the one put back, and not be a copy of it.
   - `Migration.finish()` is the only delete of a copy the move still depends on. It removes all of
-    `WAMigrate`, and only in DONE. Cancel (at the start, while WhatsApp still holds the backup) and
-    the copy's own temp-folder cleanups are the only other deletes.
-  - Cancel, at the start, deletes the copy only while WhatsApp still holds the same backup.
+    `WAMigrate`, and only in DONE. Cancel (while WhatsApp still holds the backup) and the copy's own
+    temp-folder cleanups are the only other deletes.
+  - Cancel deletes the saved copy only while WhatsApp still holds the same backup, and sets it
+    aside otherwise (see "Cancelling at any step").
   - Anything else in the way is set aside into `previous-<date>/`.
 - **One write at a time.** `OneAtATime` serialises every write the store makes to the move, so
   step 4's park waits for a copy that is still running.
 - **Not covered:** a user who makes the backup and removes WhatsApp without opening the store in
   between. Steps 2–4 tell them not to.
+
+### Cancelling at any step
+
+On 2026-10-24 the owner's Pixel showed the gap. Step 4 had parked the backup on the 22nd, the
+uninstall dialog was declined, and WhatsApp kept running and filled a new folder. The guide had no
+way back: cancel existed only before the park. It still said "Your backup is saved… Now remove the
+old WhatsApp", which would have lost two days of messages. Now "Cancel the move" is under every
+step except Finish up (`Cancelling` in `:migrate`):
+
+- **Before the park:** the saved copy and `move.txt` go, as before. They are set aside instead
+  when WhatsApp no longer holds the saved backup.
+- **Parked, the original still installed:** `Parking.unpark` merges the parked folder back. Into
+  an empty folder it is one rename. Otherwise each parked file whose place is free goes back, and
+  one whose place is taken stays, because the same install wrote the newer one. What stays is set
+  aside with the manifest. The move then ends as before the park.
+- **Once the original is gone:** the backup goes back as the install gate would put it. Every file
+  of the move is set aside (`Leftovers.setAsideMove`), and the guide ends. The user installs any
+  WhatsApp, which finds the backup.
+- **Not offered:**
+  - on Attention;
+  - on "kept its data" (reinstall first);
+  - on "installed again during the move";
+  - in front of a WhatsApp older than the backup;
+  - into a WhatsApp removed and installed again after the park (`Facts.reinstalledSincePark`),
+    whose folder belongs to a fresh install.
+- **WhatsApp ran on after the park** (`StepVariant.USED_SINCE_PARK`): step 4 shows "Don't remove
+  WhatsApp" and only "Put my backup back and start again". This applies when WhatsApp's folder
+  filled again or the park is over an hour old, since messages go into WhatsApp's database and
+  not its folder. `removeOldWhatsApp` checks this again before it opens the uninstall dialog.
+- **A cancel that stopped part-way** (`Facts.unparkInterrupted`) reads as the same step, and the
+  same button finishes it.
+
+Run on the owner's Pixel the same day, with a copy of both folders on a computer first. All 67
+parked-only files came back, and all 41 files WhatsApp wrote after the park were left untouched,
+each checked by SHA-256. The 31 files in both folders went to `previous-*`, byte-identical apart
+from the `.nomedia` files, whose folder path Android rewrites.
 
 ### Going back to the regular WhatsApp
 

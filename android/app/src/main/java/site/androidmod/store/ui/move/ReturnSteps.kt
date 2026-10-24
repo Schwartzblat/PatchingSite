@@ -109,6 +109,10 @@ private fun RemoveOurs(
         }
         return
     }
+    if (variant == StepVariant.USED_SINCE_PARK) {
+        UsedSinceParkBody(guide, viewModel)
+        return
+    }
     if (variant == StepVariant.BACKUP_SAVED) {
         StatusLine("Your backup is saved in a safe place ✓", PapSuccess)
         Lead("Now remove $current. Android will ask you to confirm.")

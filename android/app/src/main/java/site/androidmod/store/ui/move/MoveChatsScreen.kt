@@ -54,6 +54,7 @@ import site.androidmod.store.download.DownloadRegistry
 import site.androidmod.store.download.DownloadService
 import site.androidmod.store.download.DownloadState
 import site.androidmod.store.move.BackupAge
+import site.androidmod.store.move.CancelOutcome
 import site.androidmod.store.move.GuideStep
 import site.androidmod.store.move.MoveDirection
 import site.androidmod.store.move.MoveGuide
@@ -139,7 +140,10 @@ fun MoveChatsScreen(
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         val finished = guide.finished
-        if (finished != null) {
+        val cancelled = guide.cancelled
+        if (finished == null && cancelled != null) {
+            CancelledPanel(cancelled, onStartAgain = viewModel::markStarted, onContact = contact, onBack = onBack)
+        } else if (finished != null) {
             if (finished == MoveDirection.TO_OFFICIAL) {
                 Panel(
                     title = "All done",
@@ -225,6 +229,10 @@ fun MoveChatsScreen(
                             onSubscribe = onSubscribe,
                             onContact = contact,
                         )
+                        // That step's own button is the way back already.
+                        if (guide.canCancel && phase.variant != StepVariant.USED_SINCE_PARK) {
+                            CancelMove(guide, viewModel)
+                        }
                     }
                 }
             }
@@ -349,6 +357,7 @@ private fun StepBody(
                 )
                 MainButton("Open Play Store") { openPlayStore(context) }
             }
+            StepVariant.USED_SINCE_PARK -> UsedSinceParkBody(guide, viewModel)
             else -> {
                 if (variant == StepVariant.BACKUP_SAVED) {
                     StatusLine("Your backup is saved in a safe place ✓", PapSuccess)
@@ -637,6 +646,49 @@ private fun RemovedBeforeSavedPanel(onContact: () -> Unit, onBack: () -> Unit) {
         onAction = onContact,
     )
     TextButton(onClick = onBack) { Text("Back") }
+}
+
+/**
+ * After "Cancel the move" (MoveAcks.cancelled), until the user starts again: what
+ * became of the backup, which the steps could no longer say, since with the move
+ * over the phone alone reads as a move not yet begun - or, with no WhatsApp, as
+ * nothing to move.
+ */
+@Composable
+private fun CancelledPanel(outcome: CancelOutcome, onStartAgain: () -> Unit, onContact: () -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    when (outcome) {
+        CancelOutcome.CHATS_STAY -> {
+            Panel(
+                title = "Move cancelled",
+                text = "Your chats stay in your WhatsApp. You can start again whenever you like.",
+                action = "Start again",
+                onAction = onStartAgain,
+            )
+            TextButton(onClick = onBack) { Text("Done") }
+        }
+        CancelOutcome.BACKUP_BACK -> {
+            Panel(
+                title = "Move cancelled",
+                text = "Your backup is back where WhatsApp looks for it. Install WhatsApp from the Play Store, " +
+                    "and when you set it up, tap **Restore**. If WhatsApp doesn't offer your backup, don't tap " +
+                    "**Skip**. Contact us: we keep a spare copy on this phone.",
+                action = "Open Play Store",
+                onAction = { openPlayStore(context) },
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onContact) { Text("Contact us") }
+                TextButton(onClick = onBack) { Text("Done") }
+            }
+        }
+        CancelOutcome.BACKUP_IN_NEW -> Panel(
+            title = "Move cancelled",
+            text = "Your backup is in WhatsApp's folder. If your chats aren't back yet, WhatsApp offers the " +
+                "backup when you set it up.",
+            action = "Done",
+            onAction = onBack,
+        )
+    }
 }
 
 @Composable

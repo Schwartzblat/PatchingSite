@@ -31,8 +31,11 @@ import site.androidmod.store.download.DownloadRegistry
 import site.androidmod.store.move.MoveAcks
 import site.androidmod.store.move.MoveGuide
 import site.androidmod.store.move.SaveProblem
+import site.androidmod.store.move.CancelOutcome
 import site.androidmod.store.move.WHATSAPP_PACKAGE
+import site.androidmod.store.move.cancelOutcome
 import site.androidmod.store.move.moveGuide
+import site.androidmod.store.move.usedSincePark
 import site.androidmod.store.update.StoreSelfUpdate
 
 /** A step that stopped, in the guide's words, with the engine's for the Details fold. */
@@ -300,8 +303,8 @@ class MoveViewModel(
      */
     fun markStarted() {
         if (guide.value.inProgress) return
-        // A new visit: "All done" belonged to the move that just ended.
-        updateAcks { it.copy(finished = null) }
+        // A new visit: "All done" and "Move cancelled" belonged to the move that just ended.
+        updateAcks { it.copy(finished = null, cancelled = null) }
         val now = System.currentTimeMillis()
         container.move.markStarted(now)
         _state.value = _state.value.copy(startedAt = container.move.startedAt)
@@ -373,6 +376,12 @@ class MoveViewModel(
         if (_state.value.busy != null) return
         viewModelScope.launch {
             val status = withContext(Dispatchers.IO) { container.move.status() }
+            // A screen drawn before WhatsApp ran on after the park: the removal would lose
+            // what came in since. The read shows "Don't remove WhatsApp" instead.
+            if (status.step == Step.UNINSTALL_WHATSAPP && usedSincePark(status.facts, System.currentTimeMillis())) {
+                refresh()
+                return@launch
+            }
             if (status.step == Step.BACK_UP_AND_PARK) {
                 if (!status.canPark) {
                     refresh()
@@ -434,15 +443,23 @@ class MoveViewModel(
     }
 
     /**
-     * Steps 2-4's "Cancel the move": the saved copy and the record go, and WhatsApp
-     * keeps its chats. The engine refuses unless WhatsApp still holds the same backup.
+     * "Cancel the move", at any step but Finish up, and step 4's "Put my backup back and
+     * start again": the backup goes back where WhatsApp looks for it and the move ends
+     * (MoveRepository.cancelMove). The guide then says what became of the backup
+     * ([MoveAcks.cancelled]) until the user starts again.
      */
     fun cancelMove() {
         if (_state.value.busy != null) return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = "Cancelling the move…", failure = null)
-            val result = withContext(Dispatchers.IO) {
-                try {
+            val (outcome, result) = withContext(Dispatchers.IO) {
+                // Read before the cancel: afterwards the phone alone can't say what it undid.
+                val outcome = try {
+                    cancelOutcome(container.move.status())
+                } catch (error: Throwable) {
+                    CancelOutcome.CHATS_STAY
+                }
+                outcome to try {
                     container.move.cancelMove()
                 } catch (error: Throwable) {
                     com.patcher.migrate.Result.failed("The cancel threw: ${error.message}")
@@ -451,17 +468,15 @@ class MoveViewModel(
             _state.value = _state.value.copy(busy = null)
             if (result.ok) {
                 // A new Start begins from nothing: the older-backup choice belonged to this move.
-                updateAcks { MoveAcks() }
-                // Cancel clears the Start. With no Start any backup under an hour reads as
-                // fresh and nothing is saved, so a move continued in the still-open guide
-                // would be unprotected; a new Start makes it ask for a fresh backup and save it.
-                container.move.markStarted(System.currentTimeMillis())
+                // Cancel cleared the Start, and the panel stands in for the steps until
+                // "Start again" (markStarted) makes a new one, so no backup is taken unasked.
+                updateAcks { MoveAcks(cancelled = outcome) }
                 _state.value = _state.value.copy(startedAt = container.move.startedAt)
             } else {
                 _state.value = _state.value.copy(
                     failure = MoveFailure(
-                        "The move couldn't be cancelled. Your chats are still in your WhatsApp. Try again, " +
-                            "or contact us.",
+                        "The move couldn't be cancelled. Your backup is still safe on this phone. Try " +
+                            "again, or contact us.",
                         listOf(result.summary) + result.details,
                     ),
                 )

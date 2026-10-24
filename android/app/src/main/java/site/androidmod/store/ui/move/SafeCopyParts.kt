@@ -17,12 +17,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.patcher.migrate.SpareCopy
+import site.androidmod.store.move.CancelOutcome
 import site.androidmod.store.move.GuideStep
 import site.androidmod.store.move.MoveDirection
 import site.androidmod.store.move.MoveGuide
 import site.androidmod.store.move.SaveProblem
 import site.androidmod.store.move.StepVariant
 import site.androidmod.store.move.backupTime
+import site.androidmod.store.move.cancelOutcome
 import site.androidmod.store.ui.formatBytes
 import site.androidmod.store.ui.theme.PapSuccess
 
@@ -76,25 +78,63 @@ internal fun SavedCopyNotes(guide: MoveGuide, viewModel: MoveViewModel) {
             )
         }
     }
-    if (guide.canCancel) CancelMove(viewModel)
 }
 
-/** Cancel at the start: only offered while the engine allows it (Status.canCancel). */
+/**
+ * "Cancel the move", under the current step wherever the guide offers it
+ * (MoveGuide.canCancel: every step but Finish up, since 2026-10-24). The confirmation
+ * says what happens to the backup from where the move stands.
+ */
 @Composable
-private fun CancelMove(viewModel: MoveViewModel) {
+internal fun CancelMove(guide: MoveGuide, viewModel: MoveViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf(false) }
     TextButton(onClick = { confirm = true }, modifier = Modifier.padding(top = 4.dp)) { Text("Cancel the move") }
     if (confirm) {
+        val text = when (state.status?.let(::cancelOutcome) ?: CancelOutcome.CHATS_STAY) {
+            CancelOutcome.CHATS_STAY -> if (guide.parkedAtMs > 0) {
+                "We'll put your backup back in your WhatsApp. Your chats stay in it, and you can start again " +
+                    "whenever you like."
+            } else {
+                "Your chats stay in your WhatsApp, and you can start again whenever you like."
+            }
+            CancelOutcome.BACKUP_BACK ->
+                "Your old WhatsApp is already removed, so it can't come back. We'll put your backup back where " +
+                    "WhatsApp looks for it and stop the guide. Then install WhatsApp, and it will find your " +
+                    "backup when you set it up."
+            CancelOutcome.BACKUP_IN_NEW ->
+                "We'll stop the guide. Your backup stays in WhatsApp's folder, and we keep a spare copy on " +
+                    "this phone."
+        }
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Cancel the move?") },
-            text = { Text("Your chats stay in your WhatsApp. We'll delete the copy we saved.") },
+            text = { Text(text) },
             confirmButton = {
                 Button(onClick = { confirm = false; viewModel.cancelMove() }) { Text("Cancel the move") }
             },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Keep going") } },
         )
     }
+}
+
+/**
+ * Step 4 once WhatsApp ran on after the park (StepVariant.USED_SINCE_PARK), in either
+ * direction. The parked backup is missing everything since, and removing WhatsApp
+ * would delete the newer folder, so the only way offered is back: the folder goes back
+ * beside WhatsApp's newer files (Parking.unpark), and the user starts again.
+ */
+@Composable
+internal fun UsedSinceParkBody(guide: MoveGuide, viewModel: MoveViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val parked = if (guide.parkedAtMs > 0) " (${backupTime(guide.parkedAtMs, state.readAt)})" else ""
+    WarningBox(
+        title = "Don't remove WhatsApp",
+        text = "WhatsApp has kept running since we saved your backup$parked, so that backup may not have " +
+            "your newest messages. Removing WhatsApp now would lose them.",
+    )
+    Lead("Put your backup back, then start again with a fresh backup. Nothing is deleted.")
+    MainButton("Put my backup back and start again", onClick = viewModel::cancelMove)
 }
 
 /**

@@ -142,6 +142,13 @@ enum class StepVariant {
     /** Removing the old app after an uninstall with "Keep app data" ticked. */
     DATA_KEPT,
 
+    /**
+     * Parked, but the WhatsApp being left kept running and made a new folder: the
+     * parked backup is missing everything since, and removing WhatsApp would lose it.
+     * Only the way back is offered (2026-10-24, the owner's Pixel).
+     */
+    USED_SINCE_PARK,
+
     /** Installing ours when the build is no longer on disk (the store forgets downloads when its process dies). */
     NEEDS_DOWNLOAD,
 
@@ -200,6 +207,30 @@ sealed interface MovePhase {
 
 enum class BackupAge { NONE, FRESH, STALE }
 
+/** What a cancel left, for the panel the guide shows after it; see [cancelOutcome]. */
+enum class CancelOutcome {
+    /** The WhatsApp being left is still installed and holds its chats. */
+    CHATS_STAY,
+
+    /** It had been removed: the backup is back in WhatsApp's folder, and no WhatsApp is installed. */
+    BACKUP_BACK,
+
+    /** Another WhatsApp is installed, with the backup in its folder. */
+    BACKUP_IN_NEW,
+}
+
+/**
+ * What cancelling at [status] leaves, read before the cancel runs: until the removal
+ * the WhatsApp being left is still there; after it, the backup goes back into
+ * whichever WhatsApp is installed, or none (Cancelling in :migrate).
+ */
+fun cancelOutcome(status: Status): CancelOutcome = when {
+    status.step == Step.BACK_UP_AND_PARK || status.step == Step.UNINSTALL_WHATSAPP ||
+        status.step == Step.NOTHING_TO_MIGRATE -> CancelOutcome.CHATS_STAY
+    status.facts.whatsAppInstalled -> CancelOutcome.BACKUP_IN_NEW
+    else -> CancelOutcome.BACKUP_BACK
+}
+
 /**
  * What the user has told the guide; memory only, so a dead process just asks again.
  * "My chats are back" is not here: the engine's record holds it (MoveRecord), so it
@@ -214,6 +245,8 @@ data class MoveAcks(
      * is gone, and the phone alone reads as the start of the opposite move.
      */
     val finished: MoveDirection? = null,
+    /** What the cancel in this session left, for its panel; cleared by the next Start. */
+    val cancelled: CancelOutcome? = null,
 )
 
 /** The saved copy of the backup, for "Your backup is saved in a safe place ✓". */
@@ -260,7 +293,12 @@ data class MoveGuide(
     val mediaLost: Boolean = false,
     /** The original WhatsApp was removed and installed again during the move. */
     val reinstalled: Boolean = false,
+    /** "Cancel the move" is offered: at every step but Finish up, where the engine or a bare Start allows it. */
     val canCancel: Boolean = false,
+    /** Set once a move was cancelled in this session: the guide shows what became of the backup. */
+    val cancelled: CancelOutcome? = null,
+    /** When the backup was parked, for "used since"; 0 when nothing is. */
+    val parkedAtMs: Long = 0L,
     /** The backup put back, and the new WhatsApp's own: Finish up's sizes. */
     val putBackSize: Long = 0,
     val newBackupSize: Long = 0,
@@ -509,8 +547,8 @@ fun moveGuide(
     val phase = when {
         removedBeforeSaved(status, now, startedAt, seenInstalledAt) -> MovePhase.RemovedBeforeSaved
         direction == MoveDirection.TO_OURS ->
-            toOursPhase(status, ours, official, moveActive, newestVersion, downloaded, backupDone, acks)
-        else -> toOfficialPhase(status, moveActive, backupDone, acks)
+            toOursPhase(status, ours, official, moveActive, newestVersion, downloaded, backupDone, acks, now)
+        else -> toOfficialPhase(status, moveActive, backupDone, acks, now)
     }
     val putBack = f.putBackBackup()
 
@@ -540,11 +578,52 @@ fun moveGuide(
         mediaLost = (status.step == Step.PUT_BACK && !f.parkFolderPresent) ||
             record?.restoredFrom == MoveRecord.Source.SAVED || record?.restoredFrom == MoveRecord.Source.KEPT,
         reinstalled = manifest == null && f.originalReinstalled(),
-        canCancel = status.canCancel,
+        canCancel = offersCancel(phase, status, startedAt, moveActive),
+        cancelled = acks.cancelled?.takeIf { !inProgress },
+        parkedAtMs = if (f.parkFolderPresent) manifest?.parkedAtMs ?: 0L else 0L,
         putBackSize = putBack?.size ?: 0L,
         newBackupSize = record?.evidenceSize?.takeIf { it > 0 } ?: f.newestBackupSize,
         fromPreviousBuild = if (hasMoveCertificate) parkedFromPrevious else previous,
     )
+}
+
+/**
+ * Parked from the original, which has run on since: messages may have come in that the
+ * parked backup lacks, and removing it now would lose them; see StepVariant.USED_SINCE_PARK.
+ * Told by WhatsApp's own folder filling again, or by the park being over an hour old,
+ * since messages go into WhatsApp's database, not its folder. Also a cancel that stopped
+ * part-way (Facts.unparkInterrupted), which the same button finishes. Never a WhatsApp
+ * removed and installed again since: its folder is a fresh install's, there is no
+ * cancel into it, and the removal stays the way on, as before.
+ */
+fun usedSincePark(f: Facts, now: Long): Boolean {
+    if (f.unparkInterrupted()) return true
+    val manifest = f.manifest ?: return false
+    if (!f.parkFolderPresent || f.originalReinstalled() || f.reinstalledSincePark()) return false
+    return f.waFolderPresent || now - manifest.parkedAtMs > FRESH_BACKUP_MILLIS
+}
+
+/**
+ * Whether the guide offers "Cancel the move" (2026-10-24: at any step). Never on
+ * Finish up, where the owner left it off, nor where a person has to look. Otherwise
+ * where the engine can cancel (Status.canCancel), or where nothing is on disk yet
+ * and cancelling only forgets the Start (MoveRepository.cancelMove).
+ */
+private fun offersCancel(phase: MovePhase, status: Status, startedAt: Long, moveActive: Boolean): Boolean {
+    val at = phase as? MovePhase.AtStep ?: return false
+    if (at.step == GuideStep.FINISH) return false
+    if (status.canCancel) return true
+    return startedAt > 0 && nothingOnDisk(status, moveActive)
+}
+
+/**
+ * No record, no manifest and nothing parked: a Start is all there is. Without
+ * access the disk can't be read, and only the stored hint says a move began.
+ */
+fun nothingOnDisk(status: Status, moveActive: Boolean): Boolean {
+    val f = status.facts
+    if (!f.hasAllFilesAccess) return !moveActive
+    return f.record == null && f.manifest == null && !f.parkFolderPresent && !f.recordUnreadable
 }
 
 /**
@@ -593,6 +672,7 @@ private fun toOursPhase(
     downloaded: Boolean,
     backupDone: Boolean,
     acks: MoveAcks,
+    now: Long,
 ): MovePhase {
     val f = status.facts
     val signatureReadable = !f.installedSignatureSha256.isNullOrEmpty()
@@ -628,6 +708,7 @@ private fun toOursPhase(
         Step.UNINSTALL_WHATSAPP -> when {
             f.whatsAppDataKept -> MovePhase.AtStep(GuideStep.REMOVE_OLD, StepVariant.DATA_KEPT)
             !signatureReadable -> MovePhase.Attention
+            usedSincePark(f, now) -> MovePhase.AtStep(GuideStep.REMOVE_OLD, StepVariant.USED_SINCE_PARK)
             else -> MovePhase.AtStep(GuideStep.REMOVE_OLD, StepVariant.BACKUP_SAVED)
         }
         // Something already sits where the backup has to go. The engine refuses to
@@ -658,7 +739,7 @@ private fun toOursPhase(
  * rule (Migration.checkCompatible) against the move's backup version, compared
  * here so this file never loads Migration, which needs Android.
  */
-private fun toOfficialPhase(status: Status, moveActive: Boolean, backupDone: Boolean, acks: MoveAcks): MovePhase {
+private fun toOfficialPhase(status: Status, moveActive: Boolean, backupDone: Boolean, acks: MoveAcks, now: Long): MovePhase {
     val f = status.facts
     if (!f.hasAllFilesAccess) {
         return MovePhase.AtStep(
@@ -678,6 +759,7 @@ private fun toOfficialPhase(status: Status, moveActive: Boolean, backupDone: Boo
         Step.UNINSTALL_WHATSAPP -> when {
             f.whatsAppDataKept -> MovePhase.AtStep(GuideStep.REMOVE_OLD, StepVariant.DATA_KEPT)
             f.installedSignatureSha256.isNullOrEmpty() -> MovePhase.Attention
+            usedSincePark(f, now) -> MovePhase.AtStep(GuideStep.REMOVE_OLD, StepVariant.USED_SINCE_PARK)
             else -> MovePhase.AtStep(GuideStep.REMOVE_OLD, StepVariant.BACKUP_SAVED)
         }
         Step.PUT_BACK -> when {
