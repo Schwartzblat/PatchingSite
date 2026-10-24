@@ -20,7 +20,9 @@ internal object OriginalCert {
         if (!result.isVerified) {
             null
         } else {
-            val certs = listOf(
+            // Android reports the oldest certificate of a rotation lineage as signatures[0]; so does Google.
+            val oldest = result.signingCertificateLineage?.certificatesInLineage?.firstOrNull()
+            val certs = if (oldest != null) listOf(oldest) else listOf(
                 result.v31SchemeSigners.map { it.certificate },
                 result.v3SchemeSigners.map { it.certificate },
                 result.v2SchemeSigners.map { it.certificate },

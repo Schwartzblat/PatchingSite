@@ -37,6 +37,21 @@ class OriginalCertTest {
         assertNull(OriginalCert.of(signed, 36))
     }
 
+    @Test fun rotatedKeyGivesTheOldestCertificate() {
+        val old = GenericFixtures.dev
+        val new = TestKeys.generate("rotated")
+        val lineage = com.android.apksig.SigningCertificateLineage.Builder(
+            com.android.apksig.SigningCertificateLineage.SignerConfig.Builder(old.privateKey, old.cert).build(),
+            com.android.apksig.SigningCertificateLineage.SignerConfig.Builder(new.privateKey, new.cert).build(),
+        ).build()
+        val signed = File(tmp.newFolder(), "rotated.apk")
+        com.android.apksig.ApkSigner.Builder(
+            listOf(com.android.apksig.ApkSigner.SignerConfig.Builder("new", new.privateKey, listOf(new.cert)).build()),
+        ).setInputApk(zip(tmp.newFile(), entries)).setOutputApk(signed).setMinSdkVersion(33)
+            .setV1SigningEnabled(false).setV2SigningEnabled(false).setV3SigningEnabled(true).setSigningCertificateLineage(lineage).build().sign()
+        assertEquals(sha1Upper(old.cert.encoded), OriginalCert.of(signed, 36))
+    }
+
     @Test fun unsignedGivesNull() {
         assertNull(OriginalCert.of(zip(tmp.newFile(), entries), 36))
     }
