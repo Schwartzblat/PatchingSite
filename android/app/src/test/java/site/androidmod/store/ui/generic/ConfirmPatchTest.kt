@@ -1,5 +1,6 @@
 package site.androidmod.store.ui.generic
 
+import androidx.compose.runtime.saveable.SaverScope
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -34,6 +35,17 @@ class ConfirmPatchTest {
         // Each switch is the customer's to flip; the screen renders whatever the pair says.
         assertEquals(setOf(Capability.IAP), fresh.copy(ads = false, iap = true).capabilities())
         assertEquals(setOf(Capability.ADS, Capability.IAP), fresh.copy(iap = true).capabilities())
+    }
+
+    /** The screen keeps the switches through a rotation with this saver, so every pair must come back as it went in. */
+    @Test
+    fun choiceSurvivesSaveAndRestore() {
+        val scope = SaverScope { true }
+        for (ads in listOf(true, false)) for (iap in listOf(true, false)) {
+            val choice = PatchChoice(ads, iap)
+            val saved = with(PatchChoice.Saver) { scope.save(choice) }!!
+            assertEquals(choice, PatchChoice.Saver.restore(saved))
+        }
     }
 
     @Test

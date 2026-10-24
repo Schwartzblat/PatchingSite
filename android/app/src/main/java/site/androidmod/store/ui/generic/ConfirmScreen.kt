@@ -16,6 +16,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,7 +36,7 @@ import site.androidmod.store.ui.move.MainButton
 
 /**
  * The confirm screen's two switches: remove ads on, bypass purchases off, and no state kept
- * beyond this visit. Both off leaves nothing to patch, so [canPatch] is false and the Patch
+ * beyond this visit ([Saver] only carries it through a rotation). Both off leaves nothing to patch, so [canPatch] is false and the Patch
  * button waits. Pure, so the screen is a thin renderer over it.
  */
 data class PatchChoice(val ads: Boolean = true, val iap: Boolean = false) {
@@ -59,6 +61,11 @@ data class PatchChoice(val ads: Boolean = true, val iap: Boolean = false) {
         iap -> "$label's purchases will succeed without paying. Nothing is uploaded."
         ads -> "Your phone removes its ads. Nothing is uploaded."
         else -> "Nothing will be patched."
+    }
+
+    companion object {
+        /** Keeps a choice through a rotation or a recreated activity, as the pair of switches. */
+        val Saver = listSaver<PatchChoice, Boolean>(save = { listOf(it.ads, it.iap) }, restore = { PatchChoice(it[0], it[1]) })
     }
 }
 
@@ -102,8 +109,8 @@ suspend fun confirmMessage(app: InstalledPackage, confirm: suspend (InstalledPac
 /**
  * "Patch <App>?", with what happens to it, before anything does. Reads the app from the phone
  * ([lookup], PackageManager); nothing here reaches the network. [confirm] is [confirmPatch], given
- * the chosen mix; [onStarted] opens the run screen. The switches start as [PatchChoice]'s defaults
- * and keep nothing between visits.
+ * the chosen mix; [onStarted] opens the run screen. The switches start as [PatchChoice]'s defaults,
+ * survive a rotation, and keep nothing between visits.
  */
 @Composable
 fun ConfirmScreen(
@@ -118,8 +125,8 @@ fun ConfirmScreen(
     val scope = rememberCoroutineScope()
     var working by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    // A fresh choice every time the screen opens: no saved state to restore.
-    var choice by remember { mutableStateOf(PatchChoice()) }
+    // A fresh choice every time the screen opens, kept through a rotation: Patch must build what the switches show.
+    var choice by rememberSaveable(stateSaver = PatchChoice.Saver) { mutableStateOf(PatchChoice()) }
 
     val found = looked as? Lookup.Found
     if (found == null) {
