@@ -109,6 +109,12 @@ class GenericPatchEngine(private val signer: ApkSigner) {
             artifacts["IAP_ENABLED"] = "true"
             artifacts.putAll(IapScan.scan(r.apks, catalog.iap, drop).artifacts)
         }
+        // The original signer belongs to no capability: our re-signing hides it from the patched app, so every patch records it.
+        val originalCert = when (r.source) {
+            GenericSource.ORIGINAL -> OriginalCert.of(base, r.deviceSdk)
+            GenericSource.PATCHED -> OriginalCert.carried(base)
+        }
+        if (originalCert != null) artifacts[OriginalCert.KEY] = originalCert
 
         val additions = bundle.bytes(ADDITIONS)
         val newPrefix = "${facts.packageName}."

@@ -243,13 +243,14 @@ class GenericPatchEngineTest {
         val apks = app()
         val result = engine.patch(request(apks, capabilities = setOf(Capability.ADS)))
         val scan = AdScan.scan(apks, genericCatalog()).artifacts
-        assertEquals(scan, result.artifacts)
+        assertEquals(scan, result.artifacts - OriginalCert.KEY)
+        assertTrue(OriginalCert.KEY in result.artifacts)
         assertEquals(
             setOf(
                 "AD_SDKS_PRESENT", "AD_SDK_PACKAGES", "AD_APP_FRAME_PACKAGES", "AD_HOST_SUFFIXES",
                 "AD_HOSTS_HARVESTED", "AD_PROTECTED_SUFFIXES", "AD_URL_RULES", "AD_CALLER_BLOCK",
             ),
-            result.artifacts.keys,
+            result.artifacts.keys - OriginalCert.KEY,
         )
         assertEquals("AppLovin", result.artifacts.getValue("AD_SDKS_PRESENT"))
         assertEquals("true", result.artifacts.getValue("AD_CALLER_BLOCK"))
@@ -283,8 +284,9 @@ class GenericPatchEngineTest {
         assertTrue(result.artifacts.toString(), result.artifacts.keys.none { it.startsWith("AD_") })
         assertEquals("true", result.artifacts.getValue("IAP_ENABLED"))
         val scan = IapScan.scan(apks, genericCatalog().iap).artifacts
-        assertEquals(mapOf("IAP_ENABLED" to "true") + scan, result.artifacts)
-        assertEquals(scan, result.artifacts - "IAP_ENABLED")
+        assertTrue(OriginalCert.KEY in result.artifacts)
+        assertEquals(mapOf("IAP_ENABLED" to "true") + scan, result.artifacts - OriginalCert.KEY)
+        assertEquals(scan, result.artifacts - "IAP_ENABLED" - OriginalCert.KEY)
         assertEquals(result.artifacts, artifacts(result.apks[0]))
         assertEquals(listOf("iap"), result.info.capabilities)
         assertEquals(listOf("iap"), GenericPatchInfo.read(result.apks[0])!!.capabilities)
@@ -314,6 +316,28 @@ class GenericPatchEngineTest {
         assertEquals(first.info, second.info)
         assertEquals(first.artifacts, second.artifacts)
         assertEquals("true", second.artifacts["IAP_ENABLED"])
+    }
+
+    private fun sha1Upper(b: ByteArray) = MessageDigest.getInstance("SHA-1").digest(b).joinToString("") { "%02X".format(it) }
+
+    @Test fun originalCertFromTheOriginal() {
+        val result = engine.patch(request(app()))
+        val want = sha1Upper(GenericFixtures.dev.cert.encoded)
+        assertEquals(want, artifacts(result.apks[0])["ORIGINAL_CERT_SHA1"])
+        assertEquals(want, result.artifacts["ORIGINAL_CERT_SHA1"])
+    }
+
+    @Test fun originalCertCarriedOnRefresh() {
+        val first = engine.patch(request(app()))
+        assertSignedBy(first.apks[0], user)
+        val second = engine.patch(request(first.apks, source = GenericSource.PATCHED, token = "new-token"))
+        assertEquals(sha1Upper(GenericFixtures.dev.cert.encoded), artifacts(second.apks[0])["ORIGINAL_CERT_SHA1"])
+        assertEquals(first.artifacts["ORIGINAL_CERT_SHA1"], second.artifacts["ORIGINAL_CERT_SHA1"])
+    }
+
+    @Test fun originalCertWhateverTheCapabilities() {
+        val result = engine.patch(request(app(), capabilities = setOf(Capability.IAP)))
+        assertEquals(sha1Upper(GenericFixtures.dev.cert.encoded), artifacts(result.apks[0])["ORIGINAL_CERT_SHA1"])
     }
 
     @Test fun emptyCapabilitySetRefused() {
