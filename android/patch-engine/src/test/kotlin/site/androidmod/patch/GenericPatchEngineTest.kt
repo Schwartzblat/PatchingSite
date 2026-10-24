@@ -335,15 +335,16 @@ class GenericPatchEngineTest {
         assertTrue(merged.toString(), "com.smali_generator.PurchaseResultActivity" in merged)
     }
 
-    @Test fun iapWithoutCatalogSectionIsInert() {
-        val result = engine.patch(request(app(), bundle = bundleWithoutIap(), capabilities = setOf(Capability.ADS, Capability.IAP)))
-        assertEquals("true", result.artifacts.getValue("IAP_ENABLED"))
-        assertEquals("", result.artifacts.getValue("IAP_CLIENTS_PRESENT"))
-        assertEquals(
-            mapOf("IAP_CLIENTS_PRESENT" to ""),
-            result.artifacts.filterKeys { it.startsWith("IAP_") && it != "IAP_ENABLED" },
-        )
-        assertEquals("AppLovin", result.artifacts.getValue("AD_SDKS_PRESENT"))
+    /** A bundle without the `iap` section predates the purchase classes: a purchases patch from it would do nothing. */
+    @Test fun iapWithoutCatalogSectionRefused() {
+        for (caps in listOf(setOf(Capability.IAP), setOf(Capability.ADS, Capability.IAP))) {
+            val out = tmp.newFolder()
+            val e = refused<PatchException.Unsupported>(request(app(), out, bundle = bundleWithoutIap(), capabilities = caps))
+            assertEquals("this bundle can't bypass in-app purchases", e.message)
+            assertNothingLeft(out)
+        }
+        val adsOnly = engine.patch(request(app(), bundle = bundleWithoutIap()))
+        assertEquals("AppLovin", adsOnly.artifacts.getValue("AD_SDKS_PRESENT"))
     }
 
     /** Not one of the brief's eight: an old patch-info with no capabilities key still opens as ads-only. */

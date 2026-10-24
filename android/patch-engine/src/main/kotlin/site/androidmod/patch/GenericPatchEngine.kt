@@ -72,6 +72,10 @@ class GenericPatchEngine(private val signer: ApkSigner) {
         val bundle = r.bundle
         if (!bundle.isGeneric) throw PatchException.BadBundle("a ${bundle.meta.packageName} bundle is not the generic bundle")
         val catalog = bundle.catalog ?: throw PatchException.BadBundle("the generic bundle has no catalog")
+        // A bundle without the iap section predates the purchase classes: its module would ignore IAP_ENABLED.
+        if (Capability.IAP in r.capabilities && catalog.iap == null) {
+            throw PatchException.Unsupported("this bundle can't bypass in-app purchases")
+        }
         checkInputs(r)
         val base = r.apks.first()
 
