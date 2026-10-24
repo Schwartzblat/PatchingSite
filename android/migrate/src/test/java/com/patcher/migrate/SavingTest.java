@@ -280,7 +280,7 @@ public class SavingTest {
     @Test
     public void cancel_removes_the_copy_and_the_record_while_WhatsApp_holds_the_backup() {
         assertTrue(save().ok);
-        Result r = saving.cancel(record());
+        Result r = saving.cancel(record(), NOW);
         assertTrue(r.summary, r.ok);
         assertFalse(new File(parkRoot, "Saved").exists());
         assertFalse(MoveRecord.fileIn(parkRoot).exists());
@@ -288,13 +288,18 @@ public class SavingTest {
     }
 
     @Test
-    public void cancel_is_refused_once_WhatsApp_no_longer_holds_the_backup() {
+    public void cancel_sets_the_copy_aside_once_WhatsApp_no_longer_holds_the_backup() {
         assertTrue(save().ok);
         assertTrue(Parking.deleteTree(new File(wa, "Databases")));
-        Result r = saving.cancel(record());
-        assertFalse(r.ok);
-        assertTrue(saved("Databases/msgstore.db.crypt14").isFile());
-        assertNotNull(record());
+        Result r = saving.cancel(record(), NOW);
+        assertTrue(r.summary, r.ok);
+        assertFalse(new File(parkRoot, "Saved").exists());
+        assertNull(record());
+        // The copy may be the only one left, so it is kept, not deleted.
+        java.util.List<File> previous = Leftovers.previousCopies(parkRoot);
+        assertEquals(1, previous.size());
+        assertTrue(new File(previous.get(0), "Saved/Databases/msgstore.db.crypt14").isFile());
+        assertTrue(new File(previous.get(0), MoveRecord.FILE_NAME).isFile());
     }
 
     @Test
@@ -304,7 +309,7 @@ public class SavingTest {
         File current = new File(wa, "Databases/msgstore.db.crypt14");
         assertTrue(current.renameTo(new File(wa, "Databases/msgstore-2026-10-10.1.db.crypt14")));
         backup("msgstore.db.crypt14", 1050, NOW - 1_000L);
-        assertTrue(saving.cancel(record()).ok);
+        assertTrue(saving.cancel(record(), NOW).ok);
     }
 
     @Test
@@ -312,7 +317,7 @@ public class SavingTest {
         File earlier = file(new File(parkRoot, "previous-2026-10-01-1200/Saved/Databases/msgstore.db.crypt14"),
                 10, NOW);
         assertTrue(save().ok);
-        assertTrue(saving.cancel(record()).ok);
+        assertTrue(saving.cancel(record(), NOW).ok);
         assertTrue(earlier.isFile());
     }
 }

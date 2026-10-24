@@ -13,6 +13,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -433,5 +434,109 @@ public class ParkingTest {
         assertTrue(parking.putBack().ok);
         assertEquals(1_700_000_000_000L,
                 new File(parkRoot, "Databases-kept/msgstore.db.crypt14").lastModified());
+    }
+
+    // --- unpark: cancel with the original still installed (2026-10-24) ---
+
+    private static final long NOW = 1_800_000_000_000L;
+
+    private static String text(File f) throws Exception {
+        return new String(Files.readAllBytes(f.toPath()), "UTF-8");
+    }
+
+    @Test
+    public void unpark_into_an_empty_folder_puts_the_whole_tree_back_and_forgets_the_park() throws Exception {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        Result r = parking.unpark(NOW);
+        assertTrue(r.summary, r.ok);
+        assertEquals("abc", text(new File(wa, "Databases/msgstore.db.crypt14")));
+        assertEquals(500L, new File(wa, "Media/WhatsApp Images/IMG-1.jpg").length());
+        assertTrue(new File(wa, ".Shared/s.bin").isFile());
+        assertFalse(new File(parkRoot, "WhatsApp").exists());
+        assertFalse(new File(parkRoot, ParkManifest.FILE_NAME).exists());
+        assertTrue(Leftovers.previousCopies(parkRoot).isEmpty());
+    }
+
+    @Test
+    public void unpark_after_whatsapp_made_a_new_folder_merges_and_never_overwrites() throws Exception {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        // WhatsApp kept running: a newer backup, and a photo that arrived after the park.
+        write(new File(wa, "Databases/msgstore.db.crypt14"), "newer".getBytes("UTF-8"));
+        write(new File(wa, "Media/WhatsApp Images/IMG-2.jpg"), new byte[7]);
+
+        Result r = parking.unpark(NOW);
+
+        assertTrue(r.summary, r.ok);
+        assertEquals("newer", text(new File(wa, "Databases/msgstore.db.crypt14")));
+        assertEquals(500L, new File(wa, "Media/WhatsApp Images/IMG-1.jpg").length());
+        assertEquals(7L, new File(wa, "Media/WhatsApp Images/IMG-2.jpg").length());
+        assertTrue(new File(wa, ".Shared/s.bin").isFile());
+        // The parked file whose place was taken is set aside with the manifest, not deleted.
+        assertFalse(new File(parkRoot, "WhatsApp").exists());
+        assertFalse(new File(parkRoot, ParkManifest.FILE_NAME).exists());
+        List<File> previous = Leftovers.previousCopies(parkRoot);
+        assertEquals(1, previous.size());
+        assertEquals("abc", text(new File(previous.get(0), "WhatsApp/Databases/msgstore.db.crypt14")));
+        assertTrue(new File(previous.get(0), ParkManifest.FILE_NAME).isFile());
+        assertFalse(new File(previous.get(0), "WhatsApp/Media/WhatsApp Images/IMG-1.jpg").exists());
+    }
+
+    @Test
+    public void unpark_carries_on_after_an_interruption() throws Exception {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        // Stopped after moving one file back.
+        File shared = new File(wa, ".Shared/s.bin");
+        shared.getParentFile().mkdirs();
+        assertTrue(new File(parkRoot, "WhatsApp/.Shared/s.bin").renameTo(shared));
+
+        Result r = parking.unpark(NOW);
+
+        assertTrue(r.summary, r.ok);
+        assertTrue(shared.isFile());
+        assertEquals("abc", text(new File(wa, "Databases/msgstore.db.crypt14")));
+        assertFalse(new File(parkRoot, "WhatsApp").exists());
+        assertTrue(Leftovers.previousCopies(parkRoot).isEmpty());
+    }
+
+    @Test
+    public void unpark_brings_back_a_park_that_was_interrupted() throws Exception {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        File manifest = new File(parkRoot, ParkManifest.FILE_NAME);
+        Parking.atomicWriteText(manifest, parking.readManifest().withState(ParkManifest.State.PARKING).render());
+        assertTrue(parking.unpark(NOW).ok);
+        assertEquals("abc", text(new File(wa, "Databases/msgstore.db.crypt14")));
+    }
+
+    @Test
+    public void unpark_with_nothing_parked_is_refused() {
+        Result r = parking.unpark(NOW);
+        assertFalse(r.ok);
+        assertTrue(new File(wa, "Databases/msgstore.db.crypt14").isFile());
+    }
+
+    @Test
+    public void unpark_after_a_put_back_is_refused() {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        assertTrue(parking.putBack().ok);
+        assertFalse(parking.unpark(NOW).ok);
+    }
+
+    @Test
+    public void unpark_finishes_when_only_the_manifest_was_left() throws Exception {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        // Stopped between the rename back and removing the manifest.
+        assertTrue(new File(parkRoot, "WhatsApp").renameTo(wa));
+        Result r = parking.unpark(NOW);
+        assertTrue(r.summary, r.ok);
+        assertFalse(new File(parkRoot, ParkManifest.FILE_NAME).exists());
+        assertEquals("abc", text(new File(wa, "Databases/msgstore.db.crypt14")));
+    }
+
+    @Test
+    public void unpark_with_only_a_manifest_and_an_empty_whatsapp_folder_is_refused() throws Exception {
+        assertTrue(parking.park("v", 1L, SIG).ok);
+        assertTrue(Parking.deleteTree(new File(parkRoot, "WhatsApp")));
+        assertFalse(parking.unpark(NOW).ok);
+        assertTrue(new File(parkRoot, ParkManifest.FILE_NAME).isFile());
     }
 }

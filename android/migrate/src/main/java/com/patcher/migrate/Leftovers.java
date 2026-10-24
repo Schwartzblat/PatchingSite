@@ -56,6 +56,23 @@ final class Leftovers {
         return folder;
     }
 
+    /**
+     * A move cancelled after the original was removed (Cancelling): every file of it,
+     * into one previous-<date> folder, copies first and the two records last, so a
+     * set-aside that stops part-way leaves the records describing what is left. An
+     * earlier move's previous-* folders stay where they are. Null when there was nothing.
+     */
+    static File setAsideMove(File parkRoot, long nowMs) throws IOException {
+        return setAside(parkRoot, nowMs,
+                new File(parkRoot, Saving.SAVED_TMP),
+                new File(parkRoot, Saving.SAVED_OLD),
+                new File(parkRoot, Saving.SAVED),
+                new File(parkRoot, Parking.KEPT_DIR_NAME),
+                new File(parkRoot, Parking.PARKED_DIR_NAME),
+                new File(parkRoot, ParkManifest.FILE_NAME),
+                MoveRecord.fileIn(parkRoot));
+    }
+
     /** The set-aside folders in [parkRoot], oldest name first. */
     static List<File> previousCopies(File parkRoot) {
         List<File> out = new ArrayList<>();

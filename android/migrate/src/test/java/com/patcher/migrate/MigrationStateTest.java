@@ -438,11 +438,12 @@ public class MigrationStateTest {
     }
 
     @Test
-    public void cancel_is_refused_when_WhatsApp_no_longer_holds_the_saved_backup() {
+    public void cancel_is_allowed_when_WhatsApp_no_longer_holds_the_saved_backup() {
         // Its newest backup is older than the saved one, so the saved one is gone from it.
+        // Cancel then sets the copy aside rather than deleting it (Saving.cancel).
         Status s = MigrationState.of(moved(true, STOCK_SIG, false, true, false, false, null,
                 record(STOCK_SIG), true, true, INSTALLED_AT, SAVED_BACKUP_MS - 60_000L, 1000L));
-        assertFalse(s.canCancel);
+        assertTrue(s.canCancel);
     }
 
     @Test
@@ -470,7 +471,8 @@ public class MigrationStateTest {
         assertEquals(Step.PUT_BACK, s.step);
         assertTrue(s.canPutBack);
         assertFalse(s.canFinish);
-        assertFalse(s.canCancel);
+        // Cancel puts it back too, then ends the move.
+        assertTrue(s.canCancel);
     }
 
     @Test
@@ -630,5 +632,178 @@ public class MigrationStateTest {
                 parked(ParkManifest.State.RESTORED)));
         assertEquals(Step.VERIFY_AND_RESTORE, s.step);
         assertFalse(s.canFinish);
+    }
+
+    // --- cancel at any step (2026-10-24) ---
+
+    @Test
+    public void parked_with_the_original_still_installed_can_be_cancelled() {
+        // The 2026-10-24 report: the user backed out of the uninstall dialog.
+        Status s = MigrationState.of(facts(true, true, STOCK_SIG, false, true, false,
+                parked(ParkManifest.State.PARKED)));
+        assertEquals(Step.UNINSTALL_WHATSAPP, s.step);
+        assertTrue(s.canCancel);
+    }
+
+    @Test
+    public void parked_and_whatsapp_used_since_can_be_cancelled_and_still_says_uninstall() {
+        // WhatsApp made a new folder after the park. The step is unchanged, so the
+        // install gate reads it as before; the guide words it (USED_SINCE_PARK).
+        Status s = MigrationState.of(facts(true, true, STOCK_SIG, true, true, false,
+                parked(ParkManifest.State.PARKED)));
+        assertEquals(Step.UNINSTALL_WHATSAPP, s.step);
+        assertTrue(s.canCancel);
+        assertFalse(s.canPutBack);
+    }
+
+    @Test
+    public void parked_and_removed_with_its_data_kept_cannot_be_cancelled() {
+        Status s = MigrationState.of(moved(true, STOCK_SIG, true, false, true, false,
+                parkedWith(ParkManifest.State.PARKED, SAVED_BACKUP_MS, 1000L),
+                record(STOCK_SIG), true, true, INSTALLED_AT, 0L, 0L));
+        assertEquals(Step.UNINSTALL_WHATSAPP, s.step);
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void parked_with_the_original_gone_can_be_cancelled() {
+        Status s = MigrationState.of(facts(true, false, null, false, true, false,
+                parked(ParkManifest.State.PARKED)));
+        assertEquals(Step.PUT_BACK, s.step);
+        assertTrue(s.canCancel);
+    }
+
+    @Test
+    public void parked_with_something_in_the_way_cannot_be_cancelled() {
+        Status s = MigrationState.of(facts(true, true, PATCHED_SIG, true, true, false,
+                parked(ParkManifest.State.PARKED)));
+        assertEquals(Step.PUT_BACK, s.step);
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void no_cancel_puts_the_backup_in_front_of_an_older_whatsapp() {
+        // Going back, the Play Store's WhatsApp is older than the backup (PLAY_TOO_OLD).
+        Facts f = new Facts(true, true, "2.26.30.1", 263000000L, PATCHED_SIG, false, true, false,
+                parked(ParkManifest.State.PARKED));
+        Status s = MigrationState.of(f);
+        assertEquals(Step.PUT_BACK, s.step);
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void nothing_can_be_cancelled_without_the_grant() {
+        Status s = MigrationState.of(facts(false, true, STOCK_SIG, false, true, false,
+                parked(ParkManifest.State.PARKED)));
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void put_back_with_nothing_installed_can_be_cancelled() {
+        Status s = MigrationState.of(facts(true, false, null, true, false, true,
+                parked(ParkManifest.State.RESTORED)));
+        assertEquals(Step.INSTALL_PATCHED, s.step);
+        assertTrue(s.canCancel);
+    }
+
+    @Test
+    public void put_back_with_the_original_installed_again_cannot_be_cancelled() {
+        Status s = MigrationState.of(facts(true, true, STOCK_SIG, true, false, true,
+                parked(ParkManifest.State.RESTORED)));
+        assertEquals(Step.INSTALL_PATCHED, s.step);
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void a_put_back_from_a_copy_can_be_cancelled() {
+        Status s = MigrationState.of(facts(true, false, null, false, false, true,
+                parked(ParkManifest.State.RESTORED)));
+        assertEquals(Step.PUT_BACK, s.step);
+        assertTrue(s.canCancel);
+    }
+
+    @Test
+    public void restoring_can_be_cancelled_but_a_proven_move_only_finishes() {
+        MoveRecord restoring = record(STOCK_SIG).withRestored(1L, MoveRecord.Source.SAVED);
+        Status verify = MigrationState.of(moved(true, PATCHED_SIG, false, true, false, false, null,
+                restoring, true, true, INSTALLED_AT, 2L, 1000L));
+        assertEquals(Step.VERIFY_AND_RESTORE, verify.step);
+        assertTrue(verify.canCancel);
+
+        MoveRecord proven = restoring.withEvidence(2L, 1000L, "e".repeat(64)).withChatsConfirmed(3L);
+        Status done = MigrationState.of(moved(true, PATCHED_SIG, false, true, false, false, null,
+                proven, true, true, INSTALLED_AT, 2L, 1000L));
+        assertEquals(Step.DONE, done.step);
+        assertFalse(done.canCancel);
+    }
+
+    @Test
+    public void a_folder_in_the_way_of_the_saved_copy_cannot_be_cancelled() {
+        Status s = MigrationState.of(recorded(true, PATCHED_SIG, true));
+        assertEquals(Step.PUT_BACK, s.step);
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void nothing_on_disk_is_nothing_for_the_engine_to_cancel() {
+        // A Start alone: the store forgets it without asking the engine.
+        Status s = MigrationState.of(facts(true, true, STOCK_SIG, true, false, false, null));
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void parked_and_the_original_installed_again_since_cannot_be_cancelled() {
+        // Its new folder is a fresh install's, not the same install's newer one: a cancel
+        // would merge the backup into a WhatsApp that has already registered without it.
+        long parkedAt = 1759000000000L;
+        Status s = MigrationState.of(moved(true, STOCK_SIG, false, true, true, false,
+                parkedWith(ParkManifest.State.PARKED, SAVED_BACKUP_MS, 1000L),
+                record(STOCK_SIG), true, true, parkedAt + 60_000L, parkedAt + 120_000L, 10L));
+        assertEquals(Step.UNINSTALL_WHATSAPP, s.step);
+        assertFalse(s.canCancel);
+        assertTrue(s.facts.reinstalledSincePark());
+    }
+
+    @Test
+    public void parked_and_installed_again_with_no_record_cannot_be_cancelled_either() {
+        long parkedAt = 1759000000000L;
+        Status s = MigrationState.of(moved(true, STOCK_SIG, false, true, true, false,
+                parkedWith(ParkManifest.State.PARKED, SAVED_BACKUP_MS, 1000L),
+                null, false, false, parkedAt + 60_000L, parkedAt + 120_000L, 10L));
+        assertEquals(Step.UNINSTALL_WHATSAPP, s.step);
+        assertFalse(s.canCancel);
+    }
+
+    @Test
+    public void an_unpark_stopped_before_the_manifest_went_can_be_finished() {
+        // Parking.unpark moved the folder back, then stopped: never put back, original installed.
+        Status s = MigrationState.of(moved(true, STOCK_SIG, false, true, false, false,
+                parkedWith(ParkManifest.State.PARKED, SAVED_BACKUP_MS, 1000L),
+                record(STOCK_SIG), true, true, INSTALLED_AT, SAVED_BACKUP_MS, 1000L));
+        assertTrue(s.facts.unparkInterrupted());
+        assertEquals(Step.UNINSTALL_WHATSAPP, s.step);
+        assertTrue(s.canCancel);
+        assertFalse(s.canPutBack);
+    }
+
+    @Test
+    public void a_put_back_stopped_before_the_manifest_flip_is_still_read_as_restored() {
+        // A put-back records restored_at before it moves anything, so this is not an unpark.
+        MoveRecord r = record(STOCK_SIG).withRestored(1_759_100_000_000L, MoveRecord.Source.PARKED);
+        Status s = MigrationState.of(moved(true, PATCHED_SIG, false, true, false, false,
+                parkedWith(ParkManifest.State.PARKED, SAVED_BACKUP_MS, 1000L),
+                r, true, true, INSTALLED_AT, SAVED_BACKUP_MS, 1000L));
+        assertFalse(s.facts.unparkInterrupted());
+        assertEquals(Step.VERIFY_AND_RESTORE, s.step);
+    }
+
+    @Test
+    public void an_interrupted_park_is_not_an_interrupted_unpark() {
+        // PARKING with nothing parked: the park stopped before its rename, nothing moved.
+        Status s = MigrationState.of(moved(true, STOCK_SIG, false, true, false, false,
+                parkedWith(ParkManifest.State.PARKING, SAVED_BACKUP_MS, 1000L),
+                record(STOCK_SIG), true, true, INSTALLED_AT, SAVED_BACKUP_MS, 1000L));
+        assertFalse(s.facts.unparkInterrupted());
+        assertEquals(Step.BACK_UP_AND_PARK, s.step);
     }
 }

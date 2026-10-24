@@ -23,8 +23,9 @@ public final class Status {
      */
     public final boolean canFinish;
     /**
-     * At the start, with a saved copy, while WhatsApp's own folder still holds the
-     * same backup or a newer one. Cancel deletes the copy, never the only one.
+     * Migration.cancel may run: at every step but DONE and NEEDS_ATTENTION (2026-10-24),
+     * with the exceptions MigrationState names. Cancel deletes the saved copy only
+     * while WhatsApp still holds the same backup, never the only one.
      */
     public final boolean canCancel;
     /** Plain sentences, ready to print. Never null, empty when nothing is wrong. */

@@ -399,15 +399,25 @@ final class Saving {
 
     /**
      * Cancel, at the start of a move: deletes this move's copy and its record, and
-     * nothing else (an earlier move's previous-* folders stay). Only while WhatsApp's
-     * own folder still holds the saved backup - the same SHA-256 - or a newer one
-     * nearly as big. That is checked here, by hash, just before the delete, because
-     * the copy must never be the only one.
+     * nothing else (an earlier move's previous-* folders stay). Deleted only while
+     * WhatsApp's own folder still holds the saved backup - the same SHA-256 - or a
+     * newer one nearly as big. That is checked here, by hash, just before the delete,
+     * because the copy must never be the only one. Otherwise the copy and its record
+     * are set aside instead (since 2026-10-24, when cancel became possible at every
+     * step), so the user can still start over.
      */
-    Result cancel(MoveRecord record) {
+    Result cancel(MoveRecord record, long nowMs) {
         ParkManifest.Db saved = record != null ? record.savedBackup() : null;
         if (saved != null && !stillInWhatsApp(saved)) {
-            return Result.failed("WhatsApp no longer holds the saved backup, so the copy was kept.");
+            try {
+                Leftovers.setAside(parkRoot, nowMs, folder(SAVED_TMP), folder(SAVED_OLD), folder(SAVED),
+                        MoveRecord.fileIn(parkRoot));
+            } catch (IOException e) {
+                return Result.failed("The move couldn't be cancelled: " + e.getMessage(),
+                        Collections.singletonList(e.getMessage()));
+            }
+            return Result.ok("Cancelled the move. WhatsApp no longer holds the saved backup, so the"
+                    + " copy was set aside.");
         }
         for (String name : new String[]{SAVED_TMP, SAVED_OLD, SAVED}) {
             File f = folder(name);

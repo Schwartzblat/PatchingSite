@@ -69,4 +69,26 @@ public class LeftoversTest {
         assertNull(Leftovers.setAside(root, at("2026-10-10 01:57"), new File(root, "not-there")));
         assertTrue(Leftovers.previousCopies(root).isEmpty());
     }
+
+    @Test
+    public void a_cancelled_move_is_set_aside_whole_and_earlier_ones_stay() throws Exception {
+        File root = tmp.newFolder("WAMigrate");
+        for (String name : new String[]{"Saved/Databases/msgstore.db.crypt14", "Saved.tmp/x", "Saved.old/y",
+                "Databases-kept/msgstore.db.crypt14", "manifest.txt", "move.txt"}) {
+            write(new File(root, name));
+        }
+        File earlier = new File(root, "previous-2026-10-01-1200/Saved/Databases/msgstore.db.crypt14");
+        write(earlier);
+
+        File folder = Leftovers.setAsideMove(root, at("2026-10-24 17:00"));
+
+        assertEquals("previous-2026-10-24-1700", folder.getName());
+        for (String name : new String[]{"Saved/Databases/msgstore.db.crypt14", "Saved.tmp/x", "Saved.old/y",
+                "Databases-kept/msgstore.db.crypt14", "manifest.txt", "move.txt"}) {
+            assertTrue(name, new File(folder, name).isFile());
+            assertFalse(name, new File(root, name).exists());
+        }
+        assertTrue(earlier.isFile());
+        assertEquals(2, Leftovers.previousCopies(root).size());
+    }
 }

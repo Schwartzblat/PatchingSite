@@ -65,6 +65,17 @@ final class MigrationState {
         boolean restored = (f.manifest != null && f.manifest.state == ParkManifest.State.RESTORED)
                 || (f.record != null && f.record.restoredAtMs > 0);
 
+        // A cancel that stopped part-way (Facts.unparkInterrupted): read as still parked
+        // from the original, so the guide offers the same way back and Cancel finishes it.
+        // Read as a put-back, this was an Attention whose blocker said to uninstall.
+        if (f.unparkInterrupted()) {
+            blockers.add("A cancel stopped part-way: the parked folder is back in WhatsApp's, and"
+                    + " only the park's manifest is left. Cancel again to finish.");
+            boolean readable = f.installedSignatureSha256 != null && !f.installedSignatureSha256.isEmpty();
+            return new Status(Step.UNINSTALL_WHATSAPP, !f.hasAllFilesAccess, false, false, false,
+                    f.hasAllFilesAccess && readable, blockers, warnings, f);
+        }
+
         // Check for interrupted put-back: PARKED manifest but park folder is gone
         if (f.manifest != null && f.manifest.state == ParkManifest.State.PARKED && !f.parkFolderPresent) {
             if (f.waFolderPresent) {
@@ -126,8 +137,15 @@ final class MigrationState {
                 blockers.add("WhatsApp is still installed. Uninstalling it deletes"
                         + " Android/media/com.whatsapp, so the backup stays parked until then.");
             }
+            // Cancel merges the parked folder back (Parking.unpark), even into a new one
+            // the same install made after the park. Not with its data kept: it is not
+            // installed. Not into a WhatsApp removed and installed again: its folder is
+            // a fresh install's, which has registered without the backup.
+            boolean cancel = f.hasAllFilesAccess && !f.whatsAppDataKept
+                    && f.installedSignatureSha256 != null && !f.installedSignatureSha256.isEmpty()
+                    && !f.originalReinstalled() && !f.reinstalledSincePark();
             return new Status(Step.UNINSTALL_WHATSAPP, !f.hasAllFilesAccess,
-                    false, false, false, false, blockers, warnings, f);
+                    false, false, false, cancel, blockers, warnings, f);
         }
         if (f.waFolderPresent) {
             blockers.add("Something is already in WhatsApp's folder and is in the way."
@@ -135,7 +153,7 @@ final class MigrationState {
         }
         boolean can = f.hasAllFilesAccess && !f.waFolderPresent;
         return new Status(Step.PUT_BACK, !f.hasAllFilesAccess,
-                false, can, false, false, blockers, warnings, f);
+                false, can, false, can && !olderThanTheBackup(f), blockers, warnings, f);
     }
 
     /**
@@ -185,8 +203,8 @@ final class MigrationState {
         // backup while Databases-kept still held one.
         if (!f.waFolderPresent && !f.installedIsTheOriginal()) {
             if (f.copyAvailable()) {
-                return new Status(Step.PUT_BACK, !access, false, access, false, false,
-                        blockers, warnings, f);
+                return new Status(Step.PUT_BACK, !access, false, access, false,
+                        access && !olderThanTheBackup(f), blockers, warnings, f);
             }
             blockers.add("The backup that was put back is gone from WhatsApp's folder, and no copy"
                     + " of it is left here.");
@@ -199,12 +217,13 @@ final class MigrationState {
                     blockers, warnings, f);
         }
         if (!f.whatsAppInstalled) {
-            return new Status(Step.INSTALL_PATCHED, !access, false, false, false, false,
+            return new Status(Step.INSTALL_PATCHED, !access, false, false, false, access,
                     blockers, warnings, f);
         }
         boolean done = proven(f);
+        // A proven move only finishes: the owner left Cancel off Finish up.
         return new Status(done ? Step.DONE : Step.VERIFY_AND_RESTORE, !access, false, false,
-                done && access, false, blockers, warnings, f);
+                done && access, !done && access, blockers, warnings, f);
     }
 
     /**
@@ -244,7 +263,8 @@ final class MigrationState {
             return new Status(Step.PUT_BACK, !access, false, false, false, false, blockers, warnings, f);
         }
         if (f.savedPresent && f.savedMatches) {
-            return new Status(Step.PUT_BACK, !access, false, access, false, false, blockers, warnings, f);
+            return new Status(Step.PUT_BACK, !access, false, access, false,
+                    access && !olderThanTheBackup(f), blockers, warnings, f);
         }
         blockers.add("WhatsApp was removed, and the saved copy of its backup is missing or doesn't"
                 + " match its record.");
@@ -252,24 +272,24 @@ final class MigrationState {
     }
 
     /**
-     * Only while WhatsApp's own folder still holds the saved backup, or a newer one
-     * nearly as big: cancelling deletes the saved copy, which must never be the only
-     * one. By name, size and time here, since status() never hashes; Saving.cancel
-     * checks the hash before it deletes anything.
+     * Cancel at the start. Saving.cancel deletes the saved copy only while WhatsApp's
+     * own folder still holds the same backup, or a newer one nearly as big (by hash),
+     * and sets it aside otherwise, so that is no reason to refuse. A WhatsApp removed
+     * and installed again is: the copy may be its only chats, and the guide sends the
+     * user to us instead.
      */
     private static boolean canCancel(Facts f) {
-        if (!f.hasAllFilesAccess || f.whatsAppDataKept || f.originalReinstalled()
-                || f.installedSignatureSha256 == null || f.installedSignatureSha256.isEmpty()) {
-            return false;
-        }
-        ParkManifest.Db saved = f.record.savedBackup();
-        if (saved == null) {
-            return true;
-        }
-        boolean same = (Parking.DATABASES + "/" + f.newestBackupName).equals(saved.name)
-                && f.newestBackupSize == saved.size && f.newestBackupMs == saved.mtimeMs;
-        boolean newer = f.newestBackupMs > saved.mtimeMs && f.newestBackupSize * 4 >= saved.size * 3;
-        return same || newer;
+        return f.hasAllFilesAccess && !f.whatsAppDataKept && !f.originalReinstalled()
+                && f.installedSignatureSha256 != null && !f.installedSignatureSha256.isEmpty();
+    }
+
+    /**
+     * Another WhatsApp is installed that is older than the backup, which it would
+     * refuse: going back, the Play Store's, until it updates (the guide's PLAY_TOO_OLD).
+     * A cancel there would put the backup in front of it, so there is none.
+     */
+    private static boolean olderThanTheBackup(Facts f) {
+        return f.whatsAppInstalled && f.installedVersionCode < f.backupVersionCode();
     }
 
     /** Nothing parked and nothing put back: the beginning. */

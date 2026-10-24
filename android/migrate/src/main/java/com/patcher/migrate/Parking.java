@@ -285,6 +285,130 @@ final class Parking {
                 + (kept.isEmpty() ? "" : " Kept a spare copy of " + kept.size() + "."), notes);
     }
 
+    /**
+     * Cancel with the original still installed (2026-10-24): the parked folder goes
+     * back into WhatsApp's, and the park is forgotten. Nothing is overwritten. Into
+     * an empty folder the whole tree goes back by one rename, as a put-back does.
+     * When WhatsApp made a new folder after the park, each parked file whose place is
+     * free goes back by rename, and one whose place is taken stays: WhatsApp's own is
+     * newer, since the same install kept writing after the park. What stays is set
+     * aside with the manifest, never deleted.
+     *
+     * Resumable: stopped part-way, it is still parked with the original installed,
+     * and running it again carries on. Stopped after the last file went back but before
+     * the manifest went, it reads as Facts.unparkInterrupted when the move has a record,
+     * and this finishes it; without one, as needing attention, with nothing lost.
+     *
+     * "Never overwrites" holds against what is there when each name is checked: the
+     * check and the rename are two calls, and a file WhatsApp created at that very
+     * path in between would be replaced. The paths are the parked install's own, which
+     * it does not write again, apart from its nightly backup; Java has no rename that
+     * refuses to replace here.
+     */
+    public Result unpark(long nowMs) {
+        ParkManifest manifest = readManifest();
+        File parked = parkedFolder();
+        if (manifest == null) {
+            return Result.failed("Nothing is parked to put back.");
+        }
+        if (manifest.state != ParkManifest.State.PARKED && manifest.state != ParkManifest.State.PARKING) {
+            return Result.failed("The manifest is in state " + manifest.state
+                    + ", not ready to put back.");
+        }
+        if (!hasChildren(parked)) {
+            // Stopped after everything went back, before the manifest went.
+            if (manifest.state != ParkManifest.State.PARKED || !hasChildren(waFolder)) {
+                return Result.failed("Nothing is parked to put back.");
+            }
+            removeEmptyFolders(parked);
+            if (!manifestFile().delete()) {
+                return Result.failed("Put back, but the manifest could not be removed.",
+                        Arrays.asList(manifestFile().getAbsolutePath()));
+            }
+            return Result.ok("Finished putting the parked folder back.");
+        }
+        File parent = waFolder.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            return Result.failed("Could not create " + parent.getAbsolutePath());
+        }
+        if (!hasChildren(waFolder)) {
+            if (waFolder.isDirectory() && !waFolder.delete()) {
+                return Result.failed("Could not clear the empty " + waFolder.getAbsolutePath());
+            }
+            if (!parked.renameTo(waFolder)) {
+                return Result.failed("The parked data is untouched. The move back was refused"
+                        + " by the filesystem.");
+            }
+            if (!manifestFile().delete()) {
+                return Result.failed("Put back, but the manifest could not be removed.",
+                        Arrays.asList(manifestFile().getAbsolutePath()));
+            }
+            return Result.ok("Put the parked folder back into WhatsApp's.");
+        }
+        int[] moved = {0};
+        try {
+            merge(parked, waFolder, moved);
+        } catch (IOException e) {
+            return Result.failed("Some of the parked files could not go back: " + e.getMessage()
+                    + " Nothing was overwritten; try again.", Arrays.asList(e.getMessage()));
+        }
+        removeEmptyFolders(parked);
+        try {
+            if (parked.exists()) {
+                // Only files whose place WhatsApp had already filled are left.
+                Leftovers.setAside(parkRoot, nowMs, parked, manifestFile());
+            } else if (!manifestFile().delete()) {
+                return Result.failed("Put back, but the manifest could not be removed.",
+                        Arrays.asList(manifestFile().getAbsolutePath()));
+            }
+        } catch (IOException e) {
+            return Result.failed("Put back, but what was left could not be set aside: " + e.getMessage(),
+                    Arrays.asList(e.getMessage()));
+        }
+        return Result.ok("Put " + moved[0] + " parked items back beside WhatsApp's newer files.");
+    }
+
+    /** Moves each child of [from] whose name is free in [into], a whole subtree per rename. */
+    private static void merge(File from, File into, int[] moved) throws IOException {
+        File[] children = from.listFiles();
+        if (children == null) {
+            return;
+        }
+        Arrays.sort(children);
+        for (File child : children) {
+            File target = new File(into, child.getName());
+            if (!target.exists()) {
+                if (!into.isDirectory() && !into.mkdirs()) {
+                    throw new IOException("could not create " + into.getAbsolutePath());
+                }
+                if (!child.renameTo(target)) {
+                    throw new IOException("could not move " + child.getAbsolutePath());
+                }
+                moved[0]++;
+            } else if (child.isDirectory() && target.isDirectory()) {
+                merge(child, target, moved);
+            }
+            // Otherwise the place is taken: the parked one stays.
+        }
+    }
+
+    /** Deletes [dir] and every folder under it that holds no file. Never a file. */
+    private static void removeEmptyFolders(File dir) {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            if (child.isDirectory()) {
+                removeEmptyFolders(child);
+            }
+        }
+        String[] left = dir.list();
+        if (left != null && left.length == 0) {
+            dir.delete();
+        }
+    }
+
     private List<String> keepDatabases(File parkedDatabases, ParkManifest manifest) throws IOException {
         List<String> kept = new ArrayList<>();
         File[] children = parkedDatabases.listFiles();

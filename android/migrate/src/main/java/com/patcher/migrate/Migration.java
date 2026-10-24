@@ -34,6 +34,7 @@ public final class Migration {
     private final Parking parking;
     private final Saving saving;
     private final Finishing finishing;
+    private final Cancelling cancelling;
     private static final AtomicBoolean running = new AtomicBoolean(false);
 
     public Migration(Context context) {
@@ -43,6 +44,7 @@ public final class Migration {
         this.saving = new Saving(Paths.waFolder(), Paths.parkRoot(),
                 () -> Environment.getExternalStorageDirectory().getUsableSpace());
         this.finishing = new Finishing(Paths.waFolder(), Paths.parkRoot());
+        this.cancelling = new Cancelling(Paths.parkRoot(), parking, saving);
     }
 
     public Status status() {
@@ -89,8 +91,20 @@ public final class Migration {
             hasAllFilesAccess = false;
         }
 
-        ParkManifest.Db newest = Verify.newestBackup(new File(Paths.waFolder(), Parking.DATABASES));
-        File parkRoot = Paths.parkRoot();
+        return facts(Paths.waFolder(), Paths.parkRoot(), parking, hasAllFilesAccess, whatsAppInstalled,
+                whatsAppDataKept, whatsAppVersionName, whatsAppVersionCode, whatsAppSignature,
+                whatsAppFirstInstallMs);
+    }
+
+    /**
+     * The folders' half of facts(), with the installed WhatsApp's facts as read from
+     * PackageManager. Static and Context-free so the JVM tests read temp folders
+     * exactly as the phone's are read.
+     */
+    static Facts facts(File waFolder, File parkRoot, Parking parking, boolean hasAllFilesAccess,
+                       boolean whatsAppInstalled, boolean whatsAppDataKept, String whatsAppVersionName,
+                       long whatsAppVersionCode, String whatsAppSignature, long whatsAppFirstInstallMs) {
+        ParkManifest.Db newest = Verify.newestBackup(new File(waFolder, Parking.DATABASES));
         File kept = new File(parkRoot, Parking.KEPT_DIR_NAME);
         File saved = new File(parkRoot, Saving.SAVED);
         ParkManifest manifest = parking.readManifest();
@@ -102,7 +116,7 @@ public final class Migration {
                 whatsAppVersionName,
                 whatsAppVersionCode,
                 whatsAppSignature,
-                Parking.hasChildren(Paths.waFolder()),
+                Parking.hasChildren(waFolder),
                 Parking.hasChildren(new File(parkRoot, Parking.PARKED_DIR_NAME)),
                 Parking.hasChildren(kept),
                 manifest,
@@ -214,20 +228,25 @@ public final class Migration {
             if (!s.canPutBack) {
                 return Result.failed("Cannot put the backup back right now.", s.blockers);
             }
-            boolean parked = f.parkFolderPresent && f.manifest != null
-                    && f.manifest.state != ParkManifest.State.RESTORED;
-            MoveRecord.Source from = parked ? MoveRecord.Source.PARKED : copyToPutBack(f);
-            MoveRecord base = f.record != null ? f.record : MoveRecord.fromManifest(f.manifest, 0L);
-            try {
-                MoveRecord.writeTo(Paths.parkRoot(), base.withRestored(System.currentTimeMillis(), from));
-            } catch (IOException e) {
-                return Result.failed("The move's record could not be updated, so nothing was put back: "
-                        + e.getMessage());
-            }
-            return parked ? parking.putBack() : saving.putBack(from, f.manifest, f.record);
+            return putBackFrom(f, Paths.parkRoot(), parking, saving, System.currentTimeMillis());
         } finally {
             running.set(false);
         }
+    }
+
+    /** putBack() once its checks have passed; Cancelling's put-back too. */
+    static Result putBackFrom(Facts f, File parkRoot, Parking parking, Saving saving, long nowMs) {
+        boolean parked = f.parkFolderPresent && f.manifest != null
+                && f.manifest.state != ParkManifest.State.RESTORED;
+        MoveRecord.Source from = parked ? MoveRecord.Source.PARKED : copyToPutBack(f);
+        MoveRecord base = f.record != null ? f.record : MoveRecord.fromManifest(f.manifest, 0L);
+        try {
+            MoveRecord.writeTo(parkRoot, base.withRestored(nowMs, from));
+        } catch (IOException e) {
+            return Result.failed("The move's record could not be updated, so nothing was put back: "
+                    + e.getMessage());
+        }
+        return parked ? parking.putBack() : saving.putBack(from, f.manifest, f.record);
     }
 
     /**
@@ -314,8 +333,10 @@ public final class Migration {
     }
 
     /**
-     * Cancel a move at its start: deletes its saved copy and record, only while
-     * WhatsApp still holds the same backup (Saving.cancel checks the hash).
+     * Cancel the move at any step but the last: the backup goes back where WhatsApp
+     * looks for it, then the move ends (Cancelling). The saved copy is deleted only
+     * while WhatsApp still holds the same backup (Saving.cancel checks the hash), and
+     * set aside otherwise.
      *
      * Blocking; must not be called on the main thread.
      */
@@ -324,12 +345,7 @@ public final class Migration {
             return Result.failed("Another operation is already running.");
         }
         try {
-            Facts f = facts();
-            Status s = MigrationState.of(f);
-            if (!s.canCancel) {
-                return Result.failed("The move can't be cancelled right now.", s.blockers);
-            }
-            return saving.cancel(f.record);
+            return cancelling.cancel(facts(), System.currentTimeMillis());
         } finally {
             running.set(false);
         }

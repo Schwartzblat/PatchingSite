@@ -169,6 +169,28 @@ public final class Facts {
                 && record.waFirstInstallMs != installedFirstInstallMs;
     }
 
+    /**
+     * The original was removed and installed again after the park: it was first
+     * installed later than the park. Its folder is then a fresh install's, not the same
+     * install's newer one, so a cancel must not merge the backup into it (Cancelling).
+     */
+    public boolean reinstalledSincePark() {
+        return manifest != null && installedIsTheOriginal() && installedFirstInstallMs > manifest.parkedAtMs;
+    }
+
+    /**
+     * Parking.unpark stopped after the folder went back but before the manifest went:
+     * still marked PARKED, nothing parked, the folder back, the original installed, and
+     * never put back - a put-back records restored_at before it moves anything, and an
+     * interrupted park leaves a PARKING manifest. Needs the record: without one this
+     * cannot be told from an older store's interrupted put-back.
+     */
+    public boolean unparkInterrupted() {
+        return manifest != null && manifest.state == ParkManifest.State.PARKED && !parkFolderPresent
+                && waFolderPresent && record != null && record.restoredAtMs == 0
+                && installedIsTheOriginal() && !whatsAppDataKept;
+    }
+
     /** A copy a put-back can use when WhatsApp's folder has been deleted again. */
     public boolean copyAvailable() {
         return (savedPresent && savedMatches)
