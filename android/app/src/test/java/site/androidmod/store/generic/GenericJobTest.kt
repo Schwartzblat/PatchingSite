@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -1231,47 +1232,62 @@ class GenericJobTest {
     }
 
     @Test
-    fun defaultIsAdsOnly() = runTest {
-        // A start that names no mix carries ads; the job patches ads-only.
-        assertEquals("ads", capabilitiesExtra(PatchService.DEFAULT_CAPABILITIES))
-        assertEquals(setOf(Capability.ADS), capabilitiesFromExtra("ads"))
+    fun startWithoutAChoiceCarriesNone() = runTest {
+        // Retry, Continue and Refresh start without a mix: no extra, so the job keeps the record's.
+        assertNull(capabilitiesExtra(null))
+        assertNull(capabilitiesFromExtra(capabilitiesExtra(null)))
 
+        // A PATCH record from before choices isn't stamped ads-only by such a start: a run that
+        // stops before its request leaves the record as it was.
         val f = fixture()
         f.records.put(f.record())
+        f.latestAnswer = { throw ApiException(0, "Network error") }
+        assertEquals(failed(GenericFailure.NETWORK), f.run(f.job(requested = capabilitiesFromExtra(capabilitiesExtra(null)))))
+        assertNull(f.records.get(PKG)!!.capabilities)
+    }
 
-        assertEquals(
-            GenericOutcome.Built,
-            f.run(f.job(requested = capabilitiesFromExtra(capabilitiesExtra(PatchService.DEFAULT_CAPABILITIES)))),
-        )
+    @Test
+    fun unknownOnlyExtraFallsBackToAds() = runTest {
+        // A start whose names select nothing (a newer store's, say) is no choice: the record isn't
+        // stamped with an empty mix, which every Retry would refuse, and the build falls back.
+        val f = fixture()
+        f.records.put(f.record())
+        f.latestAnswer = { throw ApiException(0, "Network error") }
+        f.run(f.job(requested = capabilitiesFromExtra("surprise")))
+        assertNull(f.records.get(PKG)!!.capabilities)
 
+        f.latestAnswer = { f.latest }
+        assertEquals(GenericOutcome.Built, f.run(f.job(requested = capabilitiesFromExtra("surprise"))))
         assertEquals(setOf(Capability.ADS), f.requests.single().capabilities)
         assertEquals(listOf("ads"), f.records.get(PKG)!!.capabilities)
     }
 
     @Test
-    fun unknownOnlyExtraRefuses() = runTest {
-        val f = fixture()
-        f.records.put(f.record())
-        // The engine's own first statement (GenericPatchEngine.run): an empty set is refused here,
-        // never duplicated in the job.
-        f.engineAction = { request, signer ->
-            if (request.capabilities.isEmpty()) throw PatchException.Unsupported("nothing to patch")
-            f.buildOutputs(request, signer)
+    fun recordWithNoKnownCapabilityFallsBack() = runTest {
+        // An empty or unknown-only list (a newer store's record, then a downgrade) names nothing:
+        // the build falls back, and writes what it patched with, so the record heals.
+        for (recorded in listOf(emptyList(), listOf("surprise"))) {
+            val f = fixture()
+            f.records.put(f.record(capabilities = recorded))
+            assertEquals("$recorded", GenericOutcome.Built, f.run())
+            assertEquals("$recorded", setOf(Capability.ADS), f.requests.single().capabilities)
+            assertEquals("$recorded", listOf("ads"), f.records.get(PKG)!!.capabilities)
         }
 
-        val outcome = f.run(f.job(requested = capabilitiesFromExtra("surprise")))
+        // A Refresh falls back to the installed copy's patch-info, as a record from before choices does.
+        val g = fixture()
+        g.records.put(g.record(intent = GenericIntent.REFRESH, patchedBundleId = "old-bundle", capabilities = listOf("surprise")))
+        g.installedApp = g.patchedZipCopy(capabilities = listOf("iap"))
+        assertEquals(GenericOutcome.Built, g.run())
+        assertEquals(setOf(Capability.IAP), g.requests.single().capabilities)
+    }
 
-        assertEquals(failed(GenericFailure.FAILED), outcome)
-        assertEquals(
-            "Patching failed. Nothing was removed. Try again, or send us a report.",
-            (outcome as GenericOutcome.Failed).message,
-        )
-        // The empty request reached the engine; nothing was built.
-        assertEquals(emptySet<Capability>(), f.requests.single().capabilities)
-        assertTrue("engine" in f.events)
-        assertEquals(emptyList<SavedApk>(), f.records.get(PKG)!!.built)
-        assertFalse(f.builtDir.exists())
-        f.assertNoTemporaryFiles()
+    @Test
+    fun resolverReadsTheBaseOnlyWhenTheRecordNamesNothing() {
+        // The run screen labels its step with the same resolver, so it must agree with the job.
+        assertEquals(setOf(Capability.ADS, Capability.IAP), resolveCapabilities(listOf("ads", "iap")) { fail("read the base"); null })
+        assertEquals(setOf(Capability.ADS), resolveCapabilities(listOf("surprise")) { null })
+        assertEquals(setOf(Capability.ADS), resolveCapabilities(null) { null })
     }
 
     @Test

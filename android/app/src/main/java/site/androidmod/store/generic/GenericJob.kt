@@ -172,12 +172,14 @@ fun genericPatchState(outcome: GenericOutcome, label: String, builtDir: File, ve
 /**
  * What a build patches with: [recorded] when the record has them (a confirmed choice, or one an
  * earlier run persisted), else the installed [base]'s patch-info (an adopted patch, or a record
- * from before choices), else ads-only. Shared so the run screen names the mix the job would patch
- * with; reads [base]'s file, so callers run it off the main thread.
+ * from before choices), else ads-only. A list that selects nothing (empty, or only names this
+ * store doesn't know) counts as none. Shared so the run screen names the mix the job would patch
+ * with. [base] is asked for only when the record names nothing; it reads a file, so callers run
+ * this off the main thread.
  */
-internal fun resolveCapabilities(recorded: List<String>?, base: File?): Set<Capability> =
-    recorded?.let(::capabilitiesOf)
-        ?: base?.let(::patchInfoCapabilities)?.let(::capabilitiesOf)
+internal fun resolveCapabilities(recorded: List<String>?, base: () -> File?): Set<Capability> =
+    recorded?.let(::capabilitiesOf)?.takeIf { it.isNotEmpty() }
+        ?: base()?.let(::patchInfoCapabilities)?.let(::capabilitiesOf)?.takeIf { it.isNotEmpty() }
         ?: setOf(Capability.ADS)
 
 /** The installed [base]'s recorded capabilities; null when it has no generic patch-info or can't be read. */
@@ -240,8 +242,9 @@ class GenericJob(
             if (intent != GenericIntent.PATCH && intent != GenericIntent.REFRESH) return failed(GenericFailure.FAILED, label)
             buildIntent = intent
             // The confirmed mix rides the start intent; it is the record's from the begin of a PATCH.
-            // A resumed PATCH, and every Refresh, keeps what its record already says.
-            if (intent == GenericIntent.PATCH && requested != null && record.capabilities == null) {
+            // A resumed PATCH, and every Refresh, keeps what its record already says. A start whose
+            // names select nothing is no choice: an empty mix on the record would refuse every Retry.
+            if (intent == GenericIntent.PATCH && !requested.isNullOrEmpty() && record.capabilities == null) {
                 record = blocking {
                     update(packageName, intent) { it.copy(capabilities = capabilityWires(requested)) }
                 }
@@ -531,7 +534,7 @@ class GenericJob(
      * record from before choices), else ads-only.
      */
     private suspend fun resolveCapabilities(record: GenericRecord, installedBase: File?): Set<Capability> =
-        blocking { resolveCapabilities(record.capabilities, installedBase) }
+        blocking { resolveCapabilities(record.capabilities) { installedBase } }
 
     /** Runs blocking work off the caller's thread; cancelling the job interrupts it. */
     private suspend fun <T> blocking(block: () -> T): T = runInterruptible(Dispatchers.IO, block)

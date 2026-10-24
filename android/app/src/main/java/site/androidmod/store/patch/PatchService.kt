@@ -60,9 +60,9 @@ internal fun foregroundStartAllowed(start: () -> Unit): Boolean = try {
     false
 }
 
-/** What [PatchService.start] carries for [capabilities]: their wire names, in enum order, comma-joined. */
-internal fun capabilitiesExtra(capabilities: Set<Capability>): String =
-    capabilityWires(capabilities).joinToString(",")
+/** What [PatchService.start] carries for [capabilities]: their wire names, in enum order, comma-joined; null (no extra) for no choice. */
+internal fun capabilitiesExtra(capabilities: Set<Capability>?): String? =
+    capabilities?.let { capabilityWires(it).joinToString(",") }
 
 /** What the start intent's capabilities extra names select; null when the intent carries none. */
 internal fun capabilitiesFromExtra(value: String?): Set<Capability>? =
@@ -462,17 +462,14 @@ class PatchService : Service() {
         /** The confirm flow's capability wire names, comma-joined, as [start] received them. */
         private const val EXTRA_PATCH_CAPABILITIES = "patch_capabilities"
 
-        /** What a start that names no mix carries: today's ads-only build. */
-        internal val DEFAULT_CAPABILITIES: Set<Capability> = setOf(Capability.ADS)
-
         /** On MainActivity's intent from a generic build's notification: the package whose run screen to open. */
         const val EXTRA_OPEN_GENERIC = "open_generic"
 
         /**
          * [name] is the catalogue's display name for the notifications; null uses the last
          * catalogue's name, then WhatsApp/the package; a generic build passes its record's label
-         * (null shows the package). [capabilities] is the confirm flow's mix for a generic build,
-         * ads-only when it passes none. False when Android refused the start
+         * (null shows the package). [capabilities] is the confirm flow's mix for a generic build;
+         * null (Retry, Continue, Refresh) leaves it to the record and the installed copy. False when Android refused the start
          * because the app is not in the foreground (see [foregroundStartAllowed]): nothing
          * runs, and the caller says so.
          */
@@ -481,13 +478,13 @@ class PatchService : Service() {
             pkg: String,
             mode: PatchMode,
             name: String? = null,
-            capabilities: Set<Capability> = DEFAULT_CAPABILITIES,
+            capabilities: Set<Capability>? = null,
         ): Boolean {
             val intent = Intent(context, PatchService::class.java).apply {
                 putExtra(EXTRA_PACKAGE, pkg)
                 putExtra(EXTRA_MODE, mode.name)
                 putExtra(EXTRA_NAME, name)
-                putExtra(EXTRA_PATCH_CAPABILITIES, capabilitiesExtra(capabilities))
+                capabilitiesExtra(capabilities)?.let { putExtra(EXTRA_PATCH_CAPABILITIES, it) }
             }
             return foregroundStartAllowed { context.startForegroundService(intent) }
         }

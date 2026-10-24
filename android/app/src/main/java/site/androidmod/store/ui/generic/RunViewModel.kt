@@ -288,7 +288,7 @@ class RunViewModel(
         }
         // The mix the job would patch with: the record's, else the installed base's patch-info, else ads.
         val capabilities = withContext(io) {
-            record?.let { resolveCapabilities(it.capabilities, if (it.capabilities == null) flow.installedBase(packageName) else null) }
+            record?.let { resolveCapabilities(it.capabilities) { flow.installedBase(packageName) } }
         }
         // The Library's rule (GenericLibrarySource): Attention without the key isn't shown.
         val unchecked = phase is GenericPhase.Attention && !keyKnown

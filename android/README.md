@@ -695,15 +695,18 @@ entries as patching the original.
 
 **What gets patched.** The confirm screen (`ConfirmScreen`, `ui/generic`) asks "Patch <App>?"
 before the build and carries two switches, "Remove ads" (on) and "Bypass in-app purchases"
-(off); each visit starts from those defaults and keeps no state. With both off the Patch button
+(off); each visit starts from those defaults, which survive a rotation but not the next visit. With both off the Patch button
 stays disabled and the screen's first bullet reads "Nothing will be patched."; otherwise that
 bullet follows the mix — ads only: the phone removes its ads; purchases only: the app's
 purchases succeed without paying; both: the phone removes its ads and makes its purchases
 succeed without paying — and every version ends "Nothing is uploaded." A bundle whose catalog
-has no `iap` section still patches: the run writes `IAP_ENABLED` with an empty census and no
-verifier keys, so purchases do nothing while the ads still come off. The confirmed mix is
-recorded on the patch record: the run screen shows it, a Refresh rebuilds with it, and a later
-start that carries no choice never resets it. `patch-cli` takes `--capabilities` on both
+has no `iap` section predates the purchase classes, so the engine refuses any mix with purchases
+from it (`Unsupported`, before anything is written or removed); ads-only still builds. The
+confirmed mix is recorded on the patch record: the run screen shows it, a Refresh rebuilds with
+it, and a later start that carries no choice (Retry, Continue, Refresh send no extra) never
+resets it. A recorded mix that names nothing this store knows, empty included, counts as none:
+the build falls back to the installed copy's patch-info, then ads, and records what it built.
+`patch-cli` takes `--capabilities` on both
 `generic` and `scan`: comma-separated `ads` and `iap`, case-insensitive, `ads` alone when it is
 absent, an unknown name a usage error (exit 2).
 
