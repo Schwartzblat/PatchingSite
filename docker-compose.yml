@@ -1,0 +1,130 @@
+# The live site in Docker: the API server (app), nginx with the website and
+# certificates (web), and the nightly database snapshot (backup).
+#
+#   cp .env.docker.example .env && chmod 600 .env    # then fill it in
+#   docker compose up -d --build
+#
+# .env does two jobs. Compose reads it to fill in the ${...} below, and the
+# server reads the whole file itself, mounted read-only at /app/.env, so
+# python-dotenv parses a pasted live .env exactly as on the old host. The
+# `environment:` values below beat anything in that file.
+#
+# app and web use the host network: nginx sees every client's real IPv4 and
+# IPv6 address, and the app listens on 127.0.0.1:APP_PORT only.
+
+name: patchingsite
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+  # APP_COMMIT is deliberately not passed: the Dockerfile declares it above
+  # `pip install`, so a new value each deploy would reinstall every wheel.
+
+# Forced over anything in .env, since the process environment beats
+# python-dotenv: production mode and the container paths, so that host paths in
+# a pasted live .env cannot break them. FRONTEND_URL and CORS_ORIGINS only
+# default from DOMAIN; .env may set them.
+x-app-environment: &app-environment
+  ENVIRONMENT: production
+  PYTHONUNBUFFERED: "1"
+  SERVER_DATA_DIR: /opt/server_data
+  DB_PATH: /opt/server_data/users.db
+  LOG_PATH: /opt/server_data/app.log
+  PATCHED_APPS_PATH: /opt/patched
+  STORE_APK_PATH: /opt/patched/store.apk
+  KEYSTORE_PATH: /run/keystore.jks
+  FRONTEND_URL: ${FRONTEND_URL:-https://${DOMAIN}}
+  CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOMAIN},https://www.${DOMAIN}}
+  APP_PORT: ${APP_PORT:-8000}
+
+services:
+  app:
+    build: *app-build
+    network_mode: host
+    # The owner of HOST_DATA_DIR and .env. With a wrong id the app does not
+    # start (restart loop, the reason in `docker compose logs app`): it cannot
+    # read .env, or `manage.py doctor` finds the data dir unwritable.
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    init: true
+    restart: unless-stopped
+    # A download being signed may take up to SIGNING_TIMEOUT_SECONDS (20 min);
+    # the server finishes the running ones before it exits.
+    stop_grace_period: 22m
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    volumes:
+      - ${HOST_DATA_DIR:-/opt/server_data}:/opt/server_data
+      - ${HOST_PATCHED_DIR:-/opt/patched}:/opt/patched:ro
+      # Long syntax for the two files: with create_host_path off, a missing
+      # one fails `up` instead of Docker creating an empty root-owned
+      # directory in its place.
+      - type: bind
+        source: ${HOST_KEYSTORE_FILE:?set HOST_KEYSTORE_FILE}
+        target: /run/keystore.jks
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.env
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
+    environment: *app-environment
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${APP_PORT:-8000}/api/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/web.Dockerfile
+      args:
+        DOMAIN: ${DOMAIN:?set DOMAIN}
+        APP_COMMIT: ${APP_COMMIT:-unknown}
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      # Certificates and certbot's state: a restart or a rebuild reuses them.
+      - letsencrypt:/etc/letsencrypt
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+      TLS_MODE: ${TLS_MODE:-letsencrypt}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-}
+      LETSENCRYPT_STAGING: ${LETSENCRYPT_STAGING:-0}
+      WWW_REDIRECT: ${WWW_REDIRECT:-1}
+      HTTP_PORT: ${HTTP_PORT:-80}
+      HTTPS_PORT: ${HTTPS_PORT:-443}
+      APP_PORT: ${APP_PORT:-8000}
+    # Started, not healthy: the website must serve even while the API is down.
+    depends_on:
+      app:
+        condition: service_started
+
+  backup:
+    build: *app-build
+    # Sleeps until 03:30 UTC, snapshots users.db into /backups, keeps the newest
+    # BACKUP_KEEP. By hand: docker compose exec backup backup-loop --now
+    entrypoint: ["backup-loop"]
+    network_mode: none
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    volumes:
+      # Read-write: reading a WAL database needs its -shm file.
+      - ${HOST_DATA_DIR:-/opt/server_data}:/opt/server_data
+      - ${HOST_BACKUP_DIR:-/var/lib/patchingsite-backups}:/backups
+    environment:
+      <<: *app-environment
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+    restart: unless-stopped
+
+volumes:
+  letsencrypt: {}
