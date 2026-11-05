@@ -52,12 +52,22 @@ services:
     stop_grace_period: 22m
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    # Every host path is long syntax with create_host_path off: a missing or
+    # mistyped one fails `up` ("bind source path does not exist") instead of
+    # Docker creating an empty root-owned directory there, which would leave a
+    # half-working site (an empty catalogue, backups that fail every night).
     volumes:
-      - ${HOST_DATA_DIR:-/opt/server_data}:/opt/server_data
-      - ${HOST_PATCHED_DIR:-/opt/patched}:/opt/patched:ro
-      # Long syntax for the two files: with create_host_path off, a missing
-      # one fails `up` instead of Docker creating an empty root-owned
-      # directory in its place.
+      - type: bind
+        source: ${HOST_DATA_DIR:-/opt/server_data}
+        target: /opt/server_data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOST_PATCHED_DIR:-/opt/patched}
+        target: /opt/patched
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: ${HOST_KEYSTORE_FILE:?set HOST_KEYSTORE_FILE}
         target: /run/keystore.jks
@@ -117,10 +127,19 @@ services:
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    # Long syntax with create_host_path off, as in app.
     volumes:
       # Read-write: reading a WAL database needs its -shm file.
-      - ${HOST_DATA_DIR:-/opt/server_data}:/opt/server_data
-      - ${HOST_BACKUP_DIR:-/var/lib/patchingsite-backups}:/backups
+      - type: bind
+        source: ${HOST_DATA_DIR:-/opt/server_data}
+        target: /opt/server_data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOST_BACKUP_DIR:-/var/lib/patchingsite-backups}
+        target: /backups
+        bind:
+          create_host_path: false
     environment:
       <<: *app-environment
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
