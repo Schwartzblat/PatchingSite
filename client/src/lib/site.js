@@ -4,7 +4,9 @@
  */
 
 export const SITE_NAME = 'AndroidMod';
-export const SITE_HOST = 'androidmod.site';
+/* A deployment under another domain sets VITE_SITE_HOST (a bare host) at build
+   time; the default is the live site. */
+export const SITE_HOST = import.meta.env.VITE_SITE_HOST || 'androidmod.site';
 export const SITE_URL = `https://${SITE_HOST}`;
 
 /* The server's SUPPORT_EMAIL defaults to the same address and embeds it in some

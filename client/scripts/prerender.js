@@ -188,4 +188,17 @@ await write('sitemap.xml', [
     '',
 ].join('\n'));
 
-console.log(`prerender: ${pages().length} pages (${indexable.length} indexable, all in sitemap.xml) and 404.html`);
+/* Written here, not kept in public/, because its Sitemap line names the domain
+   the site is built for. */
+await write('robots.txt', [
+    '# Everything public may be crawled. /api/ is JSON for the site\'s own pages and',
+    '# holds nothing a search result should link to.',
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /api/',
+    '',
+    `Sitemap: ${SITE_URL}/sitemap.xml`,
+    '',
+].join('\n'));
+
+console.log(`prerender: ${pages().length} pages (${indexable.length} indexable, all in sitemap.xml) plus 404.html and robots.txt`);
