@@ -30,6 +30,16 @@ component_paths() {
         client) paths=(client ':!*.md') ;;
         android) paths=(android ':!android/app/src/test' ':!*.md') ;;
     esac
+    # docker: also what the images and the compose file take from outside
+    # server/ and client/, since a change there only ships when they are rebuilt.
+    if [[ $RUNTIME == docker ]]; then
+        case $1 in
+            server) paths+=(Dockerfile deploy/docker/app-entrypoint.sh deploy/docker/backup-loop.sh
+                deploy/backup/patchingsite-backup.py docker-compose.yml .dockerignore) ;;
+            client) paths+=(deploy/docker/web.Dockerfile deploy/docker/web-entrypoint.sh deploy/docker/nginx
+                deploy/nginx/androidmod-headers.conf docker-compose.yml .dockerignore) ;;
+        esac
+    fi
 }
 
 APK=android/app/build/outputs/apk/release/app-release.apk
@@ -235,6 +245,20 @@ fi
 # --- host checkout ---------------------------------------------------------------
 
 step "Updating the host's checkout"
+# docker: a component without a marker was taken to be at the checkout, but what
+# runs is the images, built when they were. Once the checkout moves on, that
+# fallback would point past them, and a deploy failing after this point would
+# leave the next run seeing nothing to do. So pin the base the plan used first.
+if [[ $RUNTIME == docker ]]; then
+    unmarked=()
+    for c in "${COMPONENTS[@]}"; do
+        [[ -n ${deployed[$c]:-} ]] || unmarked+=("$c")
+    done
+    if ((${#unmarked[@]})); then
+        remote "mkdir -p '$STATE_DIR' && for c in ${unmarked[*]}; do echo '$host_head' > '$STATE_DIR'/\$c; done"
+        note "no marker for ${unmarked[*]}: marked as deployed at $(short "$host_head"), the checkout's commit"
+    fi
+fi
 # -A only here: the host has no GitHub key of its own and fetches with ours.
 ssh -A -o BatchMode=yes "$HOST" "
     set -e

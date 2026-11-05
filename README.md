@@ -459,10 +459,15 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
    sudo install -d -o ubuntu -g ubuntu /opt/patched
    ```
 
-   Restore the newest database snapshot (`/var/lib/patchingsite-backups` on the
-   old host) as `users.db`, mode 600, and copy the patched builds in:
+   Then, as the user, so it owns every copy, bring the data over. The data dir
+   also holds the on-device patching state, `bundles/` and
+   `bundle-signing.pub.pem`, so copy all of it except the database, restored
+   from the newest snapshot (`/var/lib/patchingsite-backups` on the old host),
+   and `download_cache/`, which refills on demand. Then the patched builds:
 
    ```bash
+   rsync -a --chmod=D700,F600 --exclude 'users.db*' --exclude download_cache/ \
+       old-host:/opt/server_data/ /opt/server_data/
    install -m 600 users-<stamp>.db /opt/server_data/users.db
    rsync -a old-host:/opt/patched/ /opt/patched/
    ```
@@ -505,23 +510,23 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
       or run with `TLS_MODE=selfsigned` until DNS has moved.
    2. Stop the old service: `ssh old-host sudo systemctl stop patchingsite`.
    3. Take a final snapshot, `ssh old-host sudo systemctl start
-      patchingsite-backup`, and copy it over: `docker compose stop app backup`,
-      restore it as in step 5 (delete any `users.db-wal` and `users.db-shm`
-      beside it), and run the `rsync` again.
+      patchingsite-backup`. Then `docker compose stop app backup`, delete any
+      `users.db-wal` and `users.db-shm` in `/opt/server_data` (they belong to
+      the database being replaced), and repeat step 5's copies with that
+      snapshot, which also brings over any bundle uploaded since.
    4. Start: `docker compose start app backup`.
    5. Move DNS (the domain, and `www.` with `WWW_REDIRECT=1`) to the VM.
    6. If you used `selfsigned`: set `TLS_MODE=letsencrypt` and
       `LETSENCRYPT_EMAIL` in `.env`, then `docker compose up -d web`.
 9. Point the crawler's upload host (its `-r user@host`, which writes under
    `/opt/patched`) and `deploy/deploy.env` at the VM: `DEPLOY_RUNTIME=docker`,
-   `DEPLOY_HOST=ubuntu@<vm>`, `DEPLOY_REPO=/home/ubuntu/PatchingSite` and
-   `DEPLOY_STORE_APK=$HOST_PATCHED_DIR/store.apk`; `DEPLOY_WEB_ROOT` is unused.
-   `deploy.sh` then rebuilds only what changed: `app` and `backup` for the
-   server, `web` for the website (restarting nginx, which drops its open
-   connections). A change only to what the images take from elsewhere
-   (`docker-compose.yml`, the Dockerfiles, `deploy/`) is not detected: deploy it
-   with `--force server` or `--force client`. `deploy/backup/pull-backups.sh`
-   works unchanged.
+   `DEPLOY_HOST=ubuntu@<vm>` and `DEPLOY_REPO=/home/ubuntu/PatchingSite`. Leave
+   `DEPLOY_STORE_APK` unset unless `HOST_PATCHED_DIR` is not `/opt/patched`;
+   then set it to that directory's literal path plus `/store.apk`, since
+   `deploy.env` expands no variables. `DEPLOY_WEB_ROOT` is unused. `deploy.sh`
+   then rebuilds only what changed, the Docker files included: `app` and
+   `backup` for the server, `web` for the website (restarting nginx, which drops
+   its open connections). `deploy/backup/pull-backups.sh` works unchanged.
 10. The domain: `DOMAIN` sets the website, nginx and the certificates, but the
     store app has its base URL built in (`-Pandroidmod.releaseBaseUrl`, default
     `https://androidmod.site`, and `Links.SITE`). Another domain also needs a
