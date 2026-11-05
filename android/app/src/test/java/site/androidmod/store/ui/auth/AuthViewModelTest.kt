@@ -221,6 +221,29 @@ class AuthViewModelTest {
     }
 
     @Test
+    fun `each sign-in starts a new session, even as the same account`() = runTest {
+        val model = viewModel()
+        model.settled()
+        val launch = model.session.value
+        val user = """{"username":"alice"}"""
+        repeat(2) {
+            server.enqueue(MockResponse(code = 200, body = """{"access_token":"t"}"""))
+            server.enqueue(MockResponse(code = 200, body = user))
+        }
+
+        model.signIn("alice", "pw")
+        model.state.first { it.user != null }
+        val first = model.session.value
+        model.signOut()
+        assertEquals(first, model.session.value)
+        model.signIn("alice", "pw")
+        model.state.first { it.user != null }
+
+        assertTrue(first != launch)
+        assertTrue(model.session.value != first)
+    }
+
+    @Test
     fun `the unreachable screen names the host the app talks to`() {
         assertEquals("androidmod.site", hostOf("https://androidmod.site"))
         assertEquals("10.0.0.20", hostOf("http://10.0.0.20:8000"))

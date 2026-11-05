@@ -6,6 +6,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import site.androidmod.store.StoreApp
 import site.androidmod.store.data.ApiException
@@ -66,6 +67,15 @@ class AuthViewModel(
     private val _state = MutableStateFlow(AuthState(restoring = true))
     val state: StateFlow<AuthState> = _state.asStateFlow()
 
+    private val _session = MutableStateFlow(0)
+
+    /**
+     * Counts sign-ins (and restores): it changes each time a user starts a session.
+     * Per-account view models are keyed by it, so signing out and back in as the same
+     * account builds them afresh instead of reviving ones whose data sign-out cleared.
+     */
+    val session: StateFlow<Int> = _session.asStateFlow()
+
     init {
         restore()
         observeExpiry()
@@ -111,7 +121,7 @@ class AuthViewModel(
             _state.value = _state.value.copy(loading = true, restoring = true, error = null)
             _state.value = try {
                 when (val restored = auth.restoreSession()) {
-                    is SessionRestore.Restored -> AuthState(user = restored.user, loading = false)
+                    is SessionRestore.Restored -> { _session.update { it + 1 }; AuthState(user = restored.user, loading = false) }
                     SessionRestore.SignedOut -> AuthState(loading = false)
                     SessionRestore.Expired -> AuthState(loading = false, error = SESSION_EXPIRED)
                 }
@@ -125,7 +135,9 @@ class AuthViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             try {
-                _state.value = AuthState(user = auth.login(username, password), loading = false)
+                val user = auth.login(username, password)
+                _session.update { it + 1 }
+                _state.value = AuthState(user = user, loading = false)
             } catch (error: ApiException) {
                 _state.value = AuthState(user = null, loading = false, error = error.message)
             }

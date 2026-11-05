@@ -1,5 +1,10 @@
 package site.androidmod.store.data
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -96,5 +101,39 @@ class IconCacheTest {
 
         assertNull(cache.pathFor("com.tranzmate"))
         assertFalse(dir.exists())
+    }
+
+    @Test
+    fun `two concurrent calls for one package share one download and both succeed`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder().code(200).body(String(bytes, Charsets.ISO_8859_1))
+                .bodyDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS).build()
+        )
+        server.enqueue(MockResponse(code = 200, body = String(bytes, Charsets.ISO_8859_1)))
+        cache.remember(listOf(app("com.tranzmate", "/api/apps/com.tranzmate/icon")))
+
+        val results = (1..2).map { async(Dispatchers.Default) { cache.file("com.tranzmate") } }.awaitAll()
+
+        assertArrayEquals(bytes, results[0]!!.readBytes())
+        assertArrayEquals(bytes, results[1]!!.readBytes())
+        assertEquals(1, server.requestCount)
+        assertEquals(listOf("com.tranzmate.webp"), dir.list()!!.toList())
+    }
+
+    @Test
+    fun `clearing the directory in the middle of a fetch yields null, not a crash`() = runBlocking {
+        server.enqueue(
+            MockResponse.Builder().code(200).body(String(bytes, Charsets.ISO_8859_1))
+                .headersDelay(300, java.util.concurrent.TimeUnit.MILLISECONDS).build()
+        )
+        cache.remember(listOf(app("com.tranzmate", "/api/apps/com.tranzmate/icon")))
+
+        val pending = async(Dispatchers.Default) { cache.file("com.tranzmate") }
+        delay(100)
+        cache.clear()
+
+        // Either outcome is acceptable; throwing is not.
+        pending.await()
+        Unit
     }
 }

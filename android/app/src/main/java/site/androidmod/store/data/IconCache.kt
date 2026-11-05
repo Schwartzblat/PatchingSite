@@ -1,6 +1,10 @@
 package site.androidmod.store.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -20,15 +24,31 @@ class IconCache(private val dir: File, private val api: ApiClient) {
 
     fun pathFor(packageName: String): String? = paths[packageName]
 
+    /** One lock per package: two icons for one app share a single download and temp file. */
+    private val locks = ConcurrentHashMap<String, Mutex>()
+
+    /**
+     * Never throws except for cancellation: a failed icon is a null, which shows the
+     * monogram. Concurrent calls for one package queue on its lock, so the second finds
+     * the file the first wrote instead of racing it for the same temp file.
+     */
     suspend fun file(packageName: String): File? {
         val path = paths[packageName] ?: return null
         val target = File(dir, "$packageName.webp")
         if (target.isFile) return target
-        return try {
-            api.fetchFile(path, target, null)
-            target.takeIf { it.isFile }
-        } catch (error: ApiException) {
-            null
+        return locks.getOrPut(packageName) { Mutex() }.withLock {
+            if (target.isFile) return@withLock target
+            try {
+                api.fetchFile(path, target, null)
+                target.takeIf { it.isFile }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: ApiException) {
+                null
+            } catch (error: IOException) {
+                // A sign-out clearing the directory mid-fetch, or a full disk.
+                null
+            }
         }
     }
 

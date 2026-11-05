@@ -88,7 +88,10 @@ class Container(private val context: Context) {
     // Cannot change while the process runs.
     private val storeVersionCode: Long by lazy { installedBuild().versionCode }
 
-    val auth by lazy { AuthRepository(api, tokens, subscriptions, onSignedOut = { signingKeys.clear(); forgetFriendCatalogue() }) }
+    /** Bumped when a session ends, so a catalogue still in flight then is not saved for the next one. */
+    private val sessionGeneration = java.util.concurrent.atomic.AtomicInteger()
+
+    val auth by lazy { AuthRepository(api, tokens, subscriptions, onSignedOut = { signingKeys.clear(); sessionGeneration.incrementAndGet(); forgetFriendCatalogue() }) }
 
     /** Display names from the last catalogue that loaded, for notifications; never needs the network. */
     @Volatile
@@ -106,13 +109,13 @@ class Container(private val context: Context) {
         settings.friendPackages = emptySet()
     }
 
-    val catalog by lazy { CatalogRepository(api) { apps ->
+    val catalog by lazy { CatalogRepository(api, session = sessionGeneration::get, onApps = { apps ->
         icons.remember(apps)
         settings.friendPackages = apps.filter { it.friendsOnly }.map { it.packageName }.toSet()
         appNames = apps.filter { it.name.isNotBlank() }.associate { it.packageName to it.name }
         settings.onDevicePackages = apps.filter { it.onDevice }.map { it.packageName }.toSet()
         settings.storePackages = apps.map { it.packageName }.toSet()
-    } }
+    }) }
 
     /** Our store's own apps, for the generic job and the picker; empty until a catalogue has loaded (see [refusedPackagesOf]). */
     fun refusedPackages(): Set<String> = refusedPackagesOf(saved = settings.storePackages, loaded = appNames.keys)

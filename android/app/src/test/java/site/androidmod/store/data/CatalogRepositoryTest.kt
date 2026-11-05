@@ -131,4 +131,37 @@ class CatalogRepositoryTest {
         assertEquals(apps, seen)
         assertEquals(listOf("com.whatsapp"), seen!!.filter { it.onDevice }.map { it.packageName })
     }
+
+    @Test
+    fun `a catalogue that lands after the session ended is not reported`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = """[{"key":"a","name":"A","package":"com.a"}]"""))
+        var generation = 0
+        var seen: List<CatalogApp>? = null
+        val reporting = CatalogRepository(
+            ApiClient(OkHttpClient(), baseUrl = { server.url("/").toString().trimEnd('/') }, token = {
+                generation++ // the sign-out lands while the request is being signed
+                null
+            }),
+            session = { generation },
+        ) { seen = it }
+
+        val apps = reporting.apps()
+
+        assertEquals(1, apps.size)
+        assertNull(seen)
+    }
+
+    @Test
+    fun `a catalogue in the same session is reported`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = """[{"key":"a","name":"A","package":"com.a"}]"""))
+        var seen: List<CatalogApp>? = null
+        val reporting = CatalogRepository(
+            ApiClient(OkHttpClient(), baseUrl = { server.url("/").toString().trimEnd('/') }, token = { null }),
+            session = { 7 },
+        ) { seen = it }
+
+        reporting.apps()
+
+        assertEquals(1, seen!!.size)
+    }
 }
