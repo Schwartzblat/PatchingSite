@@ -43,6 +43,32 @@ class CatalogRepositoryTest {
     }
 
     @Test
+    fun `parses a friends-only entry with its icon path`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = """
+            [{"key":"moovit","name":"Moovit","package":"com.tranzmate","features":[],
+              "friends_only":true,"name_he":"x","features_he":[],
+              "icon":"/api/apps/com.tranzmate/icon"}]
+        """.trimIndent()))
+
+        val app = repository.apps().single()
+
+        assertTrue(app.friendsOnly)
+        assertEquals("/api/apps/com.tranzmate/icon", app.icon)
+    }
+
+    @Test
+    fun `a public entry is not friends-only`() = runTest {
+        server.enqueue(MockResponse(code = 200, body = """
+            [{"key":"whatsapp","name":"WhatsApp","package":"com.whatsapp"}]
+        """.trimIndent()))
+
+        val app = repository.apps().single()
+
+        assertEquals(false, app.friendsOnly)
+        assertNull(app.icon)
+    }
+
+    @Test
     fun `parses versions and url-encodes the package`() = runTest {
         server.enqueue(MockResponse(code = 200, body = """
             [{"id":"com.tranzmate:5.199.1.1804","version":"5.199.1.1804","type":"xapk",

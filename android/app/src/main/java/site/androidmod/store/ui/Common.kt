@@ -20,6 +20,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import android.graphics.BitmapFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import site.androidmod.store.StoreApp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +59,14 @@ private val BundledIcons = mapOf(
 fun AppIcon(packageName: String, name: String, modifier: Modifier = Modifier, size: Dp = 52.dp) {
     val shape = MaterialTheme.shapes.small
     val drawable = BundledIcons[packageName]
+    val icons = StoreApp.instance.container.icons
+    val served by produceState<ImageBitmap?>(null, packageName) {
+        value = if (drawable == null && icons.pathFor(packageName) != null) {
+            icons.file(packageName)?.let { file ->
+                withContext(Dispatchers.IO) { BitmapFactory.decodeFile(file.path)?.asImageBitmap() }
+            }
+        } else null
+    }
     Box(
         modifier = modifier.size(size).clip(shape).background(PapAccentSoft),
         contentAlignment = Alignment.Center,
@@ -58,6 +74,12 @@ fun AppIcon(packageName: String, name: String, modifier: Modifier = Modifier, si
         if (drawable != null) {
             Image(
                 painter = painterResource(drawable),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (served != null) {
+            Image(
+                bitmap = served!!,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
             )

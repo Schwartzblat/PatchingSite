@@ -8,6 +8,7 @@ import site.androidmod.store.data.ApiClient
 import site.androidmod.store.data.AuthRepository
 import site.androidmod.store.data.BugReportRepository
 import site.androidmod.store.data.CatalogRepository
+import site.androidmod.store.data.IconCache
 import site.androidmod.store.data.DownloadRepository
 import site.androidmod.store.data.SettingsStore
 import site.androidmod.store.data.StoreUpdateRepository
@@ -87,14 +88,27 @@ class Container(private val context: Context) {
     // Cannot change while the process runs.
     private val storeVersionCode: Long by lazy { installedBuild().versionCode }
 
-    val auth by lazy { AuthRepository(api, tokens, subscriptions, onSignedOut = { signingKeys.clear() }) }
+    val auth by lazy { AuthRepository(api, tokens, subscriptions, onSignedOut = { signingKeys.clear(); forgetFriendCatalogue() }) }
 
     /** Display names from the last catalogue that loaded, for notifications; never needs the network. */
     @Volatile
     var appNames: Map<String, String> = emptyMap()
         private set
 
+    val icons by lazy { IconCache(File(context.cacheDir, "icons"), api) }
+
+    /** A friend's catalogue must not outlive their session: icons, names and the generic refusal list. */
+    private fun forgetFriendCatalogue() {
+        icons.clear()
+        val friend = settings.friendPackages
+        settings.storePackages = settings.storePackages - friend
+        appNames = appNames - friend
+        settings.friendPackages = emptySet()
+    }
+
     val catalog by lazy { CatalogRepository(api) { apps ->
+        icons.remember(apps)
+        settings.friendPackages = apps.filter { it.friendsOnly }.map { it.packageName }.toSet()
         appNames = apps.filter { it.name.isNotBlank() }.associate { it.packageName to it.name }
         settings.onDevicePackages = apps.filter { it.onDevice }.map { it.packageName }.toSet()
         settings.storePackages = apps.map { it.packageName }.toSet()

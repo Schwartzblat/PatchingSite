@@ -52,6 +52,10 @@ data class CatalogApp(
     val features: List<String> = emptyList(),
     /** True when the store patches this app on the phone instead of downloading a built one. */
     @SerialName("on_device") val onDevice: Boolean = false,
+    /** Set by the server for entries only friend accounts get. */
+    @SerialName("friends_only") val friendsOnly: Boolean = false,
+    /** Path (relative to the base URL) of the icon, for apps the store does not bundle one for. */
+    val icon: String? = null,
 )
 
 /** One entry of GET /api/list/{package}. `type` is advisory - the installer reads the file. */

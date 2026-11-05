@@ -170,8 +170,10 @@ fun AppNavigation() {
         return
     }
 
-    val catalogViewModel: CatalogViewModel = viewModel()
-    val libraryViewModel: LibraryViewModel = viewModel()
+    // Keyed per account so another user on this phone never sees the previous one's list.
+    val account = authState.user?.username
+    val catalogViewModel: CatalogViewModel = viewModel(key = "catalog:$account")
+    val libraryViewModel: LibraryViewModel = viewModel(key = "library:$account")
     // Here, not per screen, so the Apps banner and Settings share one update: one
     // started from either shows its progress in both. Checks once, on creation.
     val updateViewModel: UpdateViewModel = viewModel()
