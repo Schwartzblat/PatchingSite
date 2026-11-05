@@ -13,6 +13,8 @@
 # Runs from a developer machine, never on the host: the host has no JDK or Android
 # SDK, and the release signing secrets live in this machine's env files. The host
 # is named in deploy/deploy.env; copy deploy/deploy.env.example to start.
+# DEPLOY_RUNTIME there says how the host runs the site: systemd (the default) or
+# docker (docker-compose.yml, from the host's checkout).
 
 set -euo pipefail
 
@@ -42,7 +44,7 @@ healthy() { curl -fsS -m 5 "$SITE_URL/api/health" >/dev/null 2>&1; }
 # rather than failing, since the plan is printed before anything can go wrong.
 short() { git rev-parse -q --short --verify "$1^{commit}" 2>/dev/null || echo "unknown commit ${1:0:7}"; }
 
-usage() { sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 dry_run=0
 declare -A forced=() skipped=()
@@ -79,14 +81,22 @@ cd "$(git rev-parse --show-toplevel)"
 # Read only after the arguments, so --help works on a machine with no deploy.env.
 source deploy/deploy-env.sh
 load_deploy_env
+# systemd: a unit runs the server from the checkout's venv, and the host's nginx
+# serves the website from DEPLOY_WEB_ROOT. docker: docker-compose.yml in the
+# checkout runs both, and the website is built into the web image, so there is
+# no web root.
+RUNTIME=${DEPLOY_RUNTIME:-systemd}
+[[ $RUNTIME == systemd || $RUNTIME == docker ]] ||
+    die "DEPLOY_RUNTIME must be systemd or docker, not '$RUNTIME'"
 missing=()
 for var in DEPLOY_HOST DEPLOY_REPO DEPLOY_WEB_ROOT DEPLOY_SITE_URL; do
+    [[ $RUNTIME == docker && $var == DEPLOY_WEB_ROOT ]] && continue
     [[ -n ${!var:-} ]] || missing+=("$var")
 done
 ((${#missing[@]} == 0)) || die "set ${missing[*]} in deploy/deploy.env (see deploy/deploy.env.example)"
 HOST=$DEPLOY_HOST
 REMOTE_REPO=$DEPLOY_REPO
-WEB_ROOT=$DEPLOY_WEB_ROOT
+[[ $RUNTIME == docker ]] || WEB_ROOT=$DEPLOY_WEB_ROOT
 SITE_URL=$DEPLOY_SITE_URL
 # The server's own default (config.py) and the unit template's name.
 STORE_APK=${DEPLOY_STORE_APK:-/opt/patched/store.apk}
@@ -180,9 +190,16 @@ for c in "${COMPONENTS[@]}"; do
         note "$(printf '%-8s' "$c") up to date"
     fi
 done
-((pip_install)) && note "server   requirements.txt changed: pip install"
-((db_backup)) && note "server   database.py changed: back up the database first"
-((npm_install)) && note "client   package files changed: npm ci"
+if [[ $RUNTIME == docker ]]; then
+    # The image builds install requirements.txt and run npm ci themselves.
+    ((db_backup)) && note "server   database.py changed: back up the database first"
+    [[ -n ${needed[server]:-} ]] && note "server   docker compose up -d --build app backup"
+    [[ -n ${needed[client]:-} ]] && note "client   docker compose up -d --build web"
+else
+    ((pip_install)) && note "server   requirements.txt changed: pip install"
+    ((db_backup)) && note "server   database.py changed: back up the database first"
+    ((npm_install)) && note "client   package files changed: npm ci"
+fi
 
 if ((dry_run)); then
     step "Dry run: nothing was changed"
@@ -230,17 +247,13 @@ note "now at $(git rev-parse --short "$NEW")"
 
 # --- server --------------------------------------------------------------------------
 
-if [[ -n ${needed[server]:-} ]]; then
-    step "Deploying the server"
-    if ((pip_install)); then
-        remote "cd '$REMOTE_REPO/server' && .venv/bin/python -m pip install -q -r requirements.txt"
-        note "requirements installed"
-    fi
-    if ((db_backup)); then
-        # Python's backup API rather than cp: the database runs in WAL mode, so a
-        # plain copy can miss writes still in the -wal file. The host has no
-        # sqlite3 CLI.
-        backup=$(remote "cd '$REMOTE_REPO/server' && .venv/bin/python -" <<'PY'
+# Copies the database beside itself and prints the copy's path. $1 is the remote
+# command that runs Python, reading the script from stdin, where `import config`
+# finds the server's settings. Python's backup API rather than cp: the database
+# runs in WAL mode, so a plain copy can miss writes still in the -wal file. The
+# host has no sqlite3 CLI.
+back_up_database() {
+    remote "$1" <<'PY'
 import sqlite3, time, config
 target = f"{config.DB_PATH}.{time.strftime('%Y-%m-%d-%H%M%S')}.bak"
 source, copy = sqlite3.connect(config.DB_PATH), sqlite3.connect(target)
@@ -249,7 +262,56 @@ copy.close()
 source.close()
 print(target)
 PY
-        )
+}
+
+# Waits up to a minute for the site to answer /api/health. If it never does,
+# shows the output of the remote command $1, the logs, and stops.
+wait_healthy() {
+    for _ in $(seq 1 60); do
+        healthy && break
+        sleep 1
+    done
+    if ! healthy; then
+        remote "$1" >&2 || true
+        die "$SITE_URL/api/health did not come up after the restart"
+    fi
+    note "healthy"
+}
+
+if [[ -n ${needed[server]:-} && $RUNTIME == docker ]]; then
+    step "Deploying the server"
+    if ((db_backup)); then
+        # In the app container, so the copy lands in the data dir beside the
+        # database. exec skips the entrypoint and its umask 077, so sh sets it
+        # again: the copy must be 600 like the database.
+        backup=$(back_up_database "cd '$REMOTE_REPO' && docker compose exec -T app sh -c 'umask 077 && exec python -'")
+        note "database backed up to $backup in the app container (HOST_DATA_DIR on the host)"
+    fi
+    # compose builds the new image while the old container keeps serving, then
+    # stops that container and gives in-flight APK signings up to its
+    # stop_grace_period (22m) to finish. Queued downloads fail with "Server
+    # restarted, please try again". web (nginx) is never recreated here, which
+    # would drop every open connection; it is only started if it is not running,
+    # as on a new stack, since the health check goes through it.
+    note "rebuilding app and backup (waits for in-flight signings to finish)"
+    remote "
+        set -e
+        cd '$REMOTE_REPO'
+        docker compose up -d --build app backup
+        APP_COMMIT=$(git rev-parse --short "$NEW") docker compose up -d --no-recreate web
+    "
+    # Checked through nginx, as a user reaches it. The entrypoint runs `manage.py
+    # doctor` before the server, so a bad config shows up here: the container
+    # restarts over and over, and its logs say why.
+    wait_healthy "cd '$REMOTE_REPO' && docker compose logs --tail 30 app"
+elif [[ -n ${needed[server]:-} ]]; then
+    step "Deploying the server"
+    if ((pip_install)); then
+        remote "cd '$REMOTE_REPO/server' && .venv/bin/python -m pip install -q -r requirements.txt"
+        note "requirements installed"
+    fi
+    if ((db_backup)); then
+        backup=$(back_up_database "cd '$REMOTE_REPO/server' && .venv/bin/python -")
         note "database backed up to $backup"
     fi
     # systemctl blocks until the old process has stopped, and the unit gives
@@ -259,21 +321,23 @@ PY
     remote "sudo systemctl restart '$SERVICE'"
     # Checked through nginx, as a user reaches it. The unit's ExecStartPre runs
     # `manage.py doctor`, so a bad config fails the restart above, not this.
-    for _ in $(seq 1 60); do
-        healthy && break
-        sleep 1
-    done
-    if ! healthy; then
-        remote "sudo journalctl -u '$SERVICE' -n 30 --no-pager" >&2 || true
-        die "$SITE_URL/api/health did not come up after the restart"
-    fi
-    note "healthy"
+    wait_healthy "sudo journalctl -u '$SERVICE' -n 30 --no-pager"
 fi
 mark_deployed server
 
 # --- client --------------------------------------------------------------------------
 
-if [[ -n ${needed[client]:-} ]]; then
+if [[ -n ${needed[client]:-} && $RUNTIME == docker ]]; then
+    step "Deploying the website"
+    # Built into the web image from the checkout just updated, so the served
+    # files match the deployed commit exactly. --no-deps keeps app as it is:
+    # without it compose would build app too, and recreate it when it has
+    # changes not deployed yet (--skip server).
+    note "rebuilding web (restarting nginx drops its open connections)"
+    remote "cd '$REMOTE_REPO' && APP_COMMIT=$(git rev-parse --short "$NEW") docker compose up -d --build --no-deps web"
+    # nginx was recreated, so the site must answer again.
+    wait_healthy "cd '$REMOTE_REPO' && docker compose logs --tail 30 web"
+elif [[ -n ${needed[client]:-} ]]; then
     step "Deploying the website"
     # Built on the host from the checkout just updated, so the served files match
     # the deployed commit exactly. nginx cannot read the SSH user's home, hence

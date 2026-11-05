@@ -424,6 +424,111 @@ website:
 `deploy/deploy.sh` deploys only the live server. To update v2, pull the checkout
 and restart `patchingsite-v2`.
 
+## Deploy on a clean VM with Docker
+
+`docker-compose.yml` runs the live site: the API server (`app`), nginx with the
+website and its certificates (`web`), and the nightly database snapshot
+(`backup`). The VM must be x86-64. Below, its SSH login is `ubuntu` (uid 1000),
+which also owns the host dirs and is `APP_UID`, as on the old host. If another
+user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
+
+1. Install Docker Engine and the compose plugin
+   ([docs.docker.com/engine/install](https://docs.docker.com/engine/install/)),
+   then `sudo usermod -aG docker ubuntu` and log in again. Keep IPv6 enabled in
+   the kernel (the default): nginx also listens on `[::]`.
+2. Open ports 80 and 443 (the provider's firewall, and `ufw` if it is on).
+3. Clone the repo. It is public, so the VM needs no GitHub key:
+
+   ```bash
+   git clone https://github.com/Schwartzblat/PatchingSite.git && cd PatchingSite
+   ```
+4. Make `.env` and fill it in; its comments say what each value is:
+
+   ```bash
+   cp .env.docker.example .env && chmod 600 .env
+   ```
+
+   It must stay mode 600, owned by the user whose id is `APP_UID`. The old host's
+   `.env` can replace Section 2: paste it in place of that section, never above
+   the template's empty `KEY=` lines, since a key set twice takes its last value.
+   Copy the keystore to `HOST_KEYSTORE_FILE`, mode 600.
+5. Create the host dirs, owned by the user, with data and backups mode 700:
+
+   ```bash
+   sudo install -d -o ubuntu -g ubuntu -m 700 /opt/server_data /var/lib/patchingsite-backups
+   sudo install -d -o ubuntu -g ubuntu /opt/patched
+   ```
+
+   Restore the newest database snapshot (`/var/lib/patchingsite-backups` on the
+   old host) as `users.db`, mode 600, and copy the patched builds in:
+
+   ```bash
+   install -m 600 users-<stamp>.db /opt/server_data/users.db
+   rsync -a old-host:/opt/patched/ /opt/patched/
+   ```
+6. Start it:
+
+   ```bash
+   docker compose up -d          # builds the images the first time
+   docker compose ps             # app turns healthy within a minute
+   docker compose logs -f web    # nginx and the certificate
+   ```
+
+   A host path that does not exist fails `up` instead of being created. Until DNS
+   points here, `TLS_MODE=letsencrypt` serves only HTTP and retries every 15
+   minutes; see step 8. After editing `.env`, run `docker compose up -d
+   --force-recreate app`: compose notices a change only to the values it puts into
+   `docker-compose.yml` (a plain `up -d` applies those), not to the rest, which
+   the server reads itself.
+7. Admin commands run in the app container. Every command under "Operations"
+   works this way, with `docker compose exec app python manage.py` in place of
+   `.venv/bin/python manage.py`:
+
+   ```bash
+   docker compose exec app python manage.py friend list
+   docker compose exec app python manage.py doctor
+   docker compose exec backup backup-loop --now      # a database snapshot now
+   ```
+8. Cutover from the old host, in this order. Writes there after its final
+   snapshot are lost: Stripe retries its webhooks, but a registration or a
+   download in that window is not.
+   1. Certificates, before DNS moves. Either copy the old host's
+      `/etc/letsencrypt` into the volume, keeping its symlinks, for valid HTTPS
+      at once:
+
+      ```bash
+      ssh old-host 'sudo tar -C /etc -cf - letsencrypt' |
+          docker compose run --rm -T --no-deps --entrypoint tar web -C /etc -xf -
+      docker compose restart web
+      ```
+
+      or run with `TLS_MODE=selfsigned` until DNS has moved.
+   2. Stop the old service: `ssh old-host sudo systemctl stop patchingsite`.
+   3. Take a final snapshot, `ssh old-host sudo systemctl start
+      patchingsite-backup`, and copy it over: `docker compose stop app backup`,
+      restore it as in step 5 (delete any `users.db-wal` and `users.db-shm`
+      beside it), and run the `rsync` again.
+   4. Start: `docker compose start app backup`.
+   5. Move DNS (the domain, and `www.` with `WWW_REDIRECT=1`) to the VM.
+   6. If you used `selfsigned`: set `TLS_MODE=letsencrypt` and
+      `LETSENCRYPT_EMAIL` in `.env`, then `docker compose up -d web`.
+9. Point the crawler's upload host (its `-r user@host`, which writes under
+   `/opt/patched`) and `deploy/deploy.env` at the VM: `DEPLOY_RUNTIME=docker`,
+   `DEPLOY_HOST=ubuntu@<vm>`, `DEPLOY_REPO=/home/ubuntu/PatchingSite` and
+   `DEPLOY_STORE_APK=$HOST_PATCHED_DIR/store.apk`; `DEPLOY_WEB_ROOT` is unused.
+   `deploy.sh` then rebuilds only what changed: `app` and `backup` for the
+   server, `web` for the website (restarting nginx, which drops its open
+   connections). A change only to what the images take from elsewhere
+   (`docker-compose.yml`, the Dockerfiles, `deploy/`) is not detected: deploy it
+   with `--force server` or `--force client`. `deploy/backup/pull-backups.sh`
+   works unchanged.
+10. The domain: `DOMAIN` sets the website, nginx and the certificates, but the
+    store app has its base URL built in (`-Pandroidmod.releaseBaseUrl`, default
+    `https://androidmod.site`, and `Links.SITE`). Another domain also needs a
+    store build for it, and installed copies keep calling the old domain until
+    they update. Moving androidmod.site itself to the VM changes nothing on
+    phones.
+
 ## Operations
 
 ```bash
