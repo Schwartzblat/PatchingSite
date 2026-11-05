@@ -3,10 +3,11 @@
 # Container entrypoint for the website: renders the nginx config for $DOMAIN,
 # makes sure a certificate exists, and runs nginx.
 #
-#   TLS_MODE=letsencrypt  (default) certbot --webroot, retried every 15 minutes
-#                         until it succeeds. Until the first certificate arrives
-#                         nginx serves only the ACME path, over HTTP
-#                         (bootstrap.conf.template). Renews every 12 h.
+#   TLS_MODE=letsencrypt  (default) certbot --webroot, at most once per 15
+#                         minutes even across restarts, until it succeeds. Until
+#                         the first certificate arrives nginx serves only the
+#                         ACME path, over HTTP (bootstrap.conf.template). Renews
+#                         every 12 h.
 #   TLS_MODE=selfsigned   a 10-year self-signed certificate, made on first start.
 #                         Never contacts Let's Encrypt.
 #
@@ -153,6 +154,61 @@ if [ "$TLS_MODE" = selfsigned ]; then
     die "nginx exited (status $status)"
 fi
 
+# Proof that this nginx, not whatever else might hold the port, serves the ACME
+# path: a token written for the purpose, read back over loopback. certbot must
+# not run before that. A validation Let's Encrypt cannot complete still counts
+# against its 5 failures per hostname per hour, and an nginx that cannot bind
+# exits after a few seconds, so each restart would cost another one.
+wait_until_serving() {
+    local token i
+    local probe=/var/www/certbot/.well-known/acme-challenge/web-entrypoint-probe
+    local url=http://127.0.0.1:$HTTP_PORT/.well-known/acme-challenge/web-entrypoint-probe
+    token=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    mkdir -p "${probe%/*}"
+    printf %s "$token" >"$probe"
+    for ((i = 0; i < 30; i++)); do
+        if [ "$(wget -q -Y off -T 2 -O - "$url" 2>/dev/null)" = "$token" ]; then
+            rm -f "$probe"
+            return 0
+        fi
+        beside_nginx sleep 1
+    done
+    die "nginx is not serving the ACME path on port $HTTP_PORT after 30 s; not running certbot"
+}
+
+# When certonly may next run, kept in the volume so the 15-minute spacing holds
+# across restarts and recreated containers too. Claimed before each attempt
+# rather than after a failure: an attempt cut short (nginx died, the container
+# was stopped) may still have cost a validation.
+SLOT_FILE=/etc/letsencrypt/web-entrypoint/$DOMAIN.next-attempt
+RETRY_SECONDS=900
+attempted=0
+next_attempt=0
+
+utc() { date -u -d "@$1" '+%H:%M:%S UTC'; }
+
+take_attempt_slot() {
+    local next=0 now
+    if [ -f "$SLOT_FILE" ]; then next=$(<"$SLOT_FILE"); fi
+    [[ $next =~ ^[0-9]+$ ]] || next=0
+    now=$(date +%s)
+    # Further off than one interval means the clock went back; wait no longer
+    # than the interval itself.
+    if ((next > now + RETRY_SECONDS)); then next=$((now + RETRY_SECONDS)); fi
+    if ((next > now)); then
+        # After a failure in this run the wait was logged already.
+        if [ "$attempted" = 0 ]; then
+            log "the last certbot attempt for $DOMAIN was under 15 minutes ago; waiting until $(utc "$next")"
+        fi
+        beside_nginx sleep $((next - now))
+    fi
+    next_attempt=$(($(date +%s) + RETRY_SECONDS))
+    if ! { mkdir -p "${SLOT_FILE%/*}" && echo "$next_attempt" >"$SLOT_FILE"; }; then
+        die "cannot write $SLOT_FILE; not running certbot without it"
+    fi
+    attempted=1
+}
+
 if [ -f "$CERT_DIR/fullchain.pem" ]; then
     use_full_config
 else
@@ -160,6 +216,7 @@ else
     use_bootstrap_config
 fi
 start_nginx
+wait_until_serving
 
 # Run even when the certificate exists: --keep-until-expiring makes that a no-op
 # until it is due for renewal, and --expand adds www.$DOMAIN to a certificate
@@ -174,7 +231,10 @@ issued=0
 last_renew=$(date +%s)
 while :; do
     if [ "$issued" = 0 ]; then
+        # Waits, up to 15 minutes, if the last attempt was more recent.
+        take_attempt_slot
         if beside_nginx certbot "${certonly[@]}"; then
+            rm -f "$SLOT_FILE"
             issued=1
             use_full_config
             nginx -s reload || die "nginx -s reload failed"
@@ -184,7 +244,7 @@ while :; do
             # validations per hostname per hour, and a container that exited
             # here would restart into a loop that locks the domain out (DNS not
             # moved yet, say). Meanwhile nginx keeps serving the ACME path.
-            log "certbot could not get a certificate for ${names[*]}; retrying in 15 minutes"
+            log "certbot could not get a certificate for ${names[*]}; retrying in 15 minutes (at $(utc "$next_attempt"))"
         fi
     fi
 
@@ -200,5 +260,5 @@ while :; do
         last_renew=$(date +%s)
     fi
 
-    if [ "$issued" = 1 ]; then beside_nginx sleep 43200; else beside_nginx sleep 900; fi
+    if [ "$issued" = 1 ]; then beside_nginx sleep 43200; fi
 done

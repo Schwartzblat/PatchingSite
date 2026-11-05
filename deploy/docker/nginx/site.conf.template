@@ -113,16 +113,19 @@ server {
         include snippets/androidmod-proxy.conf;
     }
 
-    # Health endpoint, handy for uptime checks.
+    # Health endpoint, handy for uptime checks. The proxy snippet, unlike
+    # deploy/nginx's bare proxy_pass, so a client's own X-Real-IP never reaches
+    # the app.
     location = /api/health {
-        proxy_pass http://127.0.0.1:${APP_PORT};
+        include snippets/androidmod-proxy.conf;
         access_log off;
     }
 
     # Generic reports are stored without account or IP; keep the request out of the
-    # access log too.
+    # access log too. Its rate limit keys on X-Real-IP, hence the proxy snippet:
+    # deploy/nginx's bare proxy_pass let a client pick its own bucket.
     location = /api/generic/reports {
-        proxy_pass http://127.0.0.1:${APP_PORT};
+        include snippets/androidmod-proxy.conf;
         access_log off;
     }
 }
