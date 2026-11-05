@@ -320,6 +320,47 @@ def cmd_delete_user(args) -> int:
     return 0
 
 
+def cmd_friend(args) -> int:
+    """List, add or remove friends: accounts that see the friends-only apps.
+
+    The admin panel does the same; this is for the server shell. A database
+    that has not been migrated yet has no is_friend column, which is named
+    rather than left to crash as a sqlite error.
+    """
+    db_path = Path(config.DB_PATH)
+    if not db_path.exists():
+        print(f"no database at {db_path}: nothing to do")
+        return 1
+    conn = _ro(db_path)
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    finally:
+        conn.close()
+    if "is_friend" not in columns:
+        print("the users table has no is_friend column yet: run `manage.py migrate` first")
+        return 1
+
+    import database
+
+    if args.action == "list":
+        friends = database.list_friends()
+        print(f"friends: {len(friends)}")
+        for friend in friends:
+            print(f"  {friend.username} <{friend.email}>")
+        return 0
+
+    if not args.username:
+        print(f"friend {args.action} needs a username")
+        return 1
+    is_friend = args.action == "add"
+    user = database.get_user(args.username)
+    if user is None or not database.set_friend(user.username, is_friend):
+        print(f"no user named {args.username!r}")
+        return 1
+    print(f"{user.username} is now a friend" if is_friend else f"{user.username} is no longer a friend")
+    return 0
+
+
 TRIAL_METADATA = {"granted_by": "manage.py grant-trial"}
 
 
@@ -615,6 +656,7 @@ def cmd_doctor(_args) -> int:
         warnings += 1
     warnings += _doctor_signing_keys()
     warnings += _doctor_on_device()
+    warnings += _doctor_friend_apps()
     problems += _doctor_works_with()
     generic_warnings, generic_problems = _doctor_generic()
     warnings += generic_warnings
@@ -726,6 +768,24 @@ def _doctor_on_device() -> int:
     return warnings
 
 
+def _doctor_friend_apps() -> int:
+    """Warn about friends-only apps with no builds on disk: friends would see them and get nothing."""
+    warnings = 0
+    root = Path(config.PATCHED_APPS_PATH)
+    for app in config.FRIEND_APPS:
+        folder = root / app.package
+        try:
+            has_builds = folder.is_dir() and any(folder.iterdir())
+        except OSError:
+            has_builds = False
+        if has_builds:
+            print(f"[{OK}] friends-only: {app.package} has builds")
+        else:
+            print(f"[{WARN}] friends-only: {app.package} has no builds in {root}")
+            warnings += 1
+    return warnings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -742,6 +802,9 @@ def main() -> int:
     delete_user = sub.add_parser("delete-user", help="delete an account on request (asks first)")
     delete_user.add_argument("username")
     delete_user.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    friend = sub.add_parser("friend", help="list, add or remove friends (accounts that see the friends-only apps)")
+    friend.add_argument("action", choices=("list", "add", "remove"))
+    friend.add_argument("username", nargs="?")
     grant_trial = sub.add_parser("grant-trial", help="give an account a free trial on Stripe (asks first)")
     grant_trial.add_argument("username")
     trial_length = grant_trial.add_mutually_exclusive_group(required=True)
@@ -757,6 +820,7 @@ def main() -> int:
         "bug-reports": cmd_bug_reports,
         "generic-reports": cmd_generic_reports,
         "delete-user": cmd_delete_user,
+        "friend": cmd_friend,
         "grant-trial": cmd_grant_trial,
     }[args.command](args)
 

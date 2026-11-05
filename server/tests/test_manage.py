@@ -196,3 +196,73 @@ def test_check_reports_is_friend(tmp_db, capsys):
     conn.close()
     manage.cmd_check(None)
     assert "is_friend missing; migrate adds it (nobody is a friend)" in capsys.readouterr().out
+
+
+# --- friend -----------------------------------------------------------------------------
+
+def friend(action, username=None):
+    import manage
+
+    return manage.cmd_friend(argparse.Namespace(action=action, username=username))
+
+
+def test_friend_add_and_remove_flip_the_flag(tmp_db, capsys):
+    _register("alice")
+
+    assert friend("add", "ALICE") == 0
+    assert "alice is now a friend" in capsys.readouterr().out
+    assert database.get_user("alice").is_friend is True
+
+    assert friend("remove", "alice") == 0
+    assert "alice is no longer a friend" in capsys.readouterr().out
+    assert database.get_user("alice").is_friend is False
+
+
+def test_friend_list_names_the_friends(tmp_db, capsys):
+    _register("alice")
+    _register("bob")
+    _register("carol")
+    database.set_friend("carol", True)
+    database.set_friend("alice", True)
+
+    assert friend("list") == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert "friends: 2" in lines
+    assert any(line.strip().startswith("alice") for line in lines)
+    assert any(line.strip().startswith("carol") for line in lines)
+    assert not any("bob" in line for line in lines)
+
+
+def test_friend_rejects_an_unknown_username(tmp_db, capsys):
+    assert friend("add", "nobody") == 1
+    assert "no user named 'nobody'" in capsys.readouterr().out
+
+
+def test_friend_add_needs_a_username(tmp_db, capsys):
+    assert friend("add") == 1
+    assert friend("remove") == 1
+
+
+def test_friend_says_when_the_column_is_missing(tmp_db, capsys):
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("ALTER TABLE users DROP COLUMN is_friend")
+    conn.commit()
+    conn.close()
+
+    assert friend("list") == 1
+    assert "migrate" in capsys.readouterr().out
+    assert friend("add", "alice") == 1
+    assert "migrate" in capsys.readouterr().out
+
+
+def test_doctor_warns_about_a_friends_only_app_without_builds(monkeypatch, capsys, patched_apps_dir):
+    (patched_apps_dir / "com.tranzmate" / "1.0").mkdir(parents=True)
+
+    code_with, out = doctor(monkeypatch, capsys, APP_JWT_SECRET_KEY_EXPLICIT=True, **SMTP_ON)
+
+    assert f"[ warn ] friends-only: com.okcupid.okcupid has no builds in {patched_apps_dir}" in out
+    assert "[  ok  ] friends-only: com.tranzmate has builds" in out
+    (patched_apps_dir / "com.tranzmate" / "1.0").rmdir()
+    code_without, _ = doctor(monkeypatch, capsys, APP_JWT_SECRET_KEY_EXPLICIT=True, **SMTP_ON)
+    assert code_with == code_without

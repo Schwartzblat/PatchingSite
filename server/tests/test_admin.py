@@ -261,7 +261,7 @@ def test_the_list_is_newest_first_and_never_asks_stripe(client, admins, fake_str
     bob, alice, owner = body["users"]
     assert alice == {"username": "alice", "email": "alice@example.com", "email_verified": True,
                      "created_at": alice["created_at"], "customer_id": "cus_alice",
-                     "devices_used": 1, "is_admin": False}
+                     "devices_used": 1, "is_admin": False, "is_friend": False}
     assert datetime.strptime(alice["created_at"], "%Y-%m-%dT%H:%M:%SZ")
     assert bob["email_verified"] is False and bob["customer_id"] is None
     assert owner["is_admin"] is True
@@ -765,3 +765,65 @@ def test_a_refused_grant_is_logged(client, admins, fake_stripe, caplog):
     assert response.status_code == 409
     assert any("owner" in r.getMessage() and "alice" in r.getMessage() and "unverified" in r.getMessage()
                for r in caplog.records)
+
+
+# --- friends --------------------------------------------------------------------------
+
+def test_friend_switch_sets_and_clears_the_flag(client, admins):
+    as_admin(client)
+    register("alice")
+
+    response = client.post("/api/admin/users/alice/friend", json={"is_friend": True})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["is_friend"] is True
+    assert database.get_user("alice").is_friend is True
+
+    response = client.post("/api/admin/users/alice/friend", json={"is_friend": False})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["is_friend"] is False
+    assert database.get_user("alice").is_friend is False
+
+
+def test_friend_switch_404s_for_an_unknown_account(client, admins):
+    as_admin(client)
+
+    response = client.post("/api/admin/users/nobody/friend", json={"is_friend": True})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such user."
+
+
+def test_friend_switch_refuses_a_non_boolean(client, admins):
+    as_admin(client)
+    register("alice")
+
+    response = client.post("/api/admin/users/alice/friend", json={"is_friend": "yes"})
+
+    assert response.status_code == 422
+    assert database.get_user("alice").is_friend is False
+
+
+def test_friend_switch_is_admin_only(client, admins):
+    register("alice")
+    register("bob")
+    sign_in(client, "bob")
+
+    response = client.post("/api/admin/users/alice/friend", json={"is_friend": True})
+
+    assert response.status_code == 403
+    assert database.get_user("alice").is_friend is False
+
+
+def test_user_list_and_detail_carry_is_friend(client, admins, fake_stripe):
+    as_admin(client)
+    register("alice")
+    assert database.set_friend("alice", True)
+
+    rows = {user["username"]: user for user in client.get("/api/admin/users").json()["users"]}
+    detail = client.get("/api/admin/users/alice").json()["user"]
+
+    assert rows["alice"]["is_friend"] is True
+    assert rows["owner"]["is_friend"] is False
+    assert detail["is_friend"] is True

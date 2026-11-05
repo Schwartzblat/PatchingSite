@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, StrictBool
 from starlette import status
 from starlette.exceptions import HTTPException
 
@@ -95,6 +95,7 @@ def _summary(user: UserInDB) -> dict:
         "customer_id": user.customer_id or None,
         "devices_used": len(user.device_fingerprints),
         "is_admin": config.is_admin(user.username),
+        "is_friend": user.is_friend,
     }
 
 
@@ -227,6 +228,20 @@ def clear_devices(username: str, admin: RequiredAdmin) -> dict:
     stripe_utils.invalidate_subscription_status(user.customer_id)
     stripe_utils.forget_customer_lookup(user.username)
     logger.info('Admin %s cleared the device slots of %s', admin.username, user.username)
+    return {"user": _detail(_target(user.username))}
+
+
+class FriendSwitch(BaseModel):
+    is_friend: StrictBool
+
+
+@router.post("/users/{username}/friend")
+def set_friend(username: str, body: FriendSwitch, admin: RequiredAdmin) -> dict:
+    """Show or hide the friends-only apps (Moovit, 12+, Reshet 13+, OkCupid) for the account."""
+    user = _target(username)
+    if not database.set_friend(user.username, body.is_friend):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NO_SUCH_USER)
+    logger.info('Admin %s set is_friend=%s for %s', admin.username, body.is_friend, username)
     return {"user": _detail(_target(user.username))}
 
 
