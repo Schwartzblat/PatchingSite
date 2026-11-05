@@ -176,7 +176,8 @@ export const api = {
     listVersions: (packageName, opts) =>
         request(`/list/${encodeURIComponent(packageName)}`, opts),
 
-    // the public catalogue; each item has on_device (patched on the phone, not built here)
+    // the catalogue; each item has on_device (patched on the phone, not built here).
+    // A signed-in friend also gets friends-only items: friends_only, name_he, features_he, icon.
     listApps: (opts) => request('/apps', opts),
 
     // the Android store app itself; the file is a plain GET on storeDownloadUrl
@@ -209,7 +210,7 @@ export const api = {
     // the admin panel (server/api/admin.py): the session cookie of an account in
     // ADMIN_USERNAMES. Anyone else gets 403, which the page shows as it is.
     admin: {
-        // {users: [{username, email, email_verified, created_at, customer_id, devices_used, is_admin}],
+        // {users: [{username, email, email_verified, created_at, customer_id, devices_used, is_admin, is_friend}],
         //  total, limit, devices_limit}
         listUsers: (q, opts) => request(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ''}`, opts),
         // {user: {...a list row, devices_limit, devices_reset_at}, subscription: {...} | null,
@@ -220,6 +221,9 @@ export const api = {
             request(`${adminUser(username)}/email`, {method: 'POST', body: {email, verified}}),
         verifyEmail: (username) => request(`${adminUser(username)}/verify-email`, {method: 'POST'}),
         clearDevices: (username) => request(`${adminUser(username)}/devices/reset`, {method: 'POST'}),
+        // Answers {user}.
+        setFriend: (username, isFriend) =>
+            request(`${adminUser(username)}/friend`, {method: 'POST', body: {is_friend: isFriend}}),
         // `end` is {days} or {until: 'YYYY-MM-DD'}. The preview writes nothing.
         previewTrial: (username, end) => request(`${adminUser(username)}/trial/preview`, {method: 'POST', body: end}),
         grantTrial: (username, end) => request(`${adminUser(username)}/trial`, {method: 'POST', body: end}),

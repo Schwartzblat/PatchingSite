@@ -6,6 +6,7 @@ import {useAuth} from './lib/auth.jsx';
 import {loginPath} from './lib/redirect.js';
 import {apps, appText} from './apps.js';
 import {localPath, useLang} from './lib/i18n.js';
+import {friendAppText, useFriendApps} from './lib/friendApps.js';
 import PageTitle from './PageTitle.jsx';
 import AppSchema from './AppSchema.jsx';
 import Faq from './Faq.jsx';
@@ -245,22 +246,43 @@ function describeError(err, t) {
     return {kind: 'error', message: t.generic};
 }
 
+function MissingApp({appKey, lang, t}) {
+    return (
+        <div className="page-panel pap-panel">
+            <PageTitle title={t.notFoundTitle} noindex/>
+            <div className="pap-missing">
+                <h1 className="pap-missing-title">{t.missingHeading}</h1>
+                <p className="pap-missing-text">{t.missingText(appKey)}</p>
+                <Link className="main-button" to={localPath('/', lang)}>{t.backToApps}</Link>
+            </div>
+        </div>
+    );
+}
+
+/* An app that is not in the public catalogue may still be one a friend is
+   shown; everyone else gets the usual "we don't patch that" page. */
+function FriendAppOrMissing({appKey, lang, t}) {
+    const {loading, apps: friendApps} = useFriendApps();
+    if (loading) {
+        return (
+            <p className="layout-pending" role="status">
+                <PageTitle title={t.notFoundTitle} noindex/>
+                {t.fetching}
+            </p>
+        );
+    }
+    const entry = friendApps.find((item) => item.key === appKey);
+    if (!entry) return <MissingApp appKey={appKey} lang={lang} t={t}/>;
+    return <AppVersions key={appKey} app={friendAppText(entry, lang)} lang={lang} t={t}/>;
+}
+
 function PatchedAppPage() {
     const {appKey} = useParams();
     const lang = useLang();
     const t = COPY[lang];
 
     if (!Object.hasOwn(apps, appKey)) {
-        return (
-            <div className="page-panel pap-panel">
-                <PageTitle title={t.notFoundTitle} noindex/>
-                <div className="pap-missing">
-                    <h1 className="pap-missing-title">{t.missingHeading}</h1>
-                    <p className="pap-missing-text">{t.missingText(appKey)}</p>
-                    <Link className="main-button" to={localPath('/', lang)}>{t.backToApps}</Link>
-                </div>
-            </div>
-        );
+        return <FriendAppOrMissing appKey={appKey} lang={lang} t={t}/>;
     }
 
     /* Remounting on appKey resets the version list and any in-flight download
@@ -537,8 +559,8 @@ function AppVersions({app, lang, t}) {
 
     return (
         <div className="page-panel pap-panel">
-            <PageTitle title={t.title(app)} description={app.description}/>
-            <AppSchema app={app} name={heading} path={location.pathname} lang={lang}/>
+            <PageTitle title={t.title(app)} description={app.description} noindex={app.friendsOnly}/>
+            {!app.friendsOnly && <AppSchema app={app} name={heading} path={location.pathname} lang={lang}/>}
             <header className="pap-header">
                 <img className="pap-icon" src={app.icon} alt="" width="72" height="72"/>
                 <div className="pap-meta">
@@ -555,7 +577,7 @@ function AppVersions({app, lang, t}) {
 
             {/* What the build is, in a sentence or two, for a visitor who arrived
                 from a search result rather than from the home page's card. */}
-            <p className="pap-intro">{app.intro}</p>
+            {!app.friendsOnly && <p className="pap-intro">{app.intro}</p>}
 
             {onDevice && (
                 <section className="pap-section" aria-labelledby="pap-on-device-title">
@@ -707,15 +729,17 @@ function AppVersions({app, lang, t}) {
                     {app.features.map((feature) => (
                         <div key={feature.name} className="pap-patch">
                             <dt className="pap-patch-name">{feature.name}</dt>
-                            <dd className="pap-patch-detail">{feature.detail}</dd>
+                            {!app.friendsOnly && <dd className="pap-patch-detail">{feature.detail}</dd>}
                         </div>
                     ))}
                 </dl>
             </section>
 
-            <Faq id="pap-faq" heading={t.faqHeading} items={app.faq}>
-                <p className="faq-a"><Link to={installPath}>{t.guideLink}</Link></p>
-            </Faq>
+            {!app.friendsOnly && (
+                <Faq id="pap-faq" heading={t.faqHeading} items={app.faq}>
+                    <p className="faq-a"><Link to={installPath}>{t.guideLink}</Link></p>
+                </Faq>
+            )}
         </div>
     );
 }

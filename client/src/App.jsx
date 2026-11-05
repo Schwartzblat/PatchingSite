@@ -3,6 +3,7 @@ import {Link, NavLink} from 'react-router';
 import {apps, appText} from './apps.js';
 import {formatPrice, usePrice} from './lib/price.js';
 import {localPath, useLang} from './lib/i18n.js';
+import {friendAppText, useFriendApps} from './lib/friendApps.js';
 import {MAX_DEVICES} from './lib/site.js';
 import StoreDownload from './StoreDownload.jsx';
 import PageTitle from './PageTitle.jsx';
@@ -110,8 +111,32 @@ const COPY = {
     },
 };
 
+function HomeCard({appKey, app, t, lang}) {
+    return (
+        <article className="home-card">
+            <div className="home-card-head">
+                <img className="home-card-icon" src={app.icon} alt="" width="72" height="72"/>
+                <div>
+                    <h2 className="home-card-name">{app.name}</h2>
+                    {app.about && <p className="home-card-about">{app.about}</p>}
+                </div>
+            </div>
+            <ul className="home-features">
+                {app.features.map((feature) => (
+                    <li key={feature.name} className="home-feature">{feature.name}</li>
+                ))}
+            </ul>
+            <NavLink className="main-button home-card-action" to={localPath(`/apps/${appKey}`, lang)}>
+                {t.view}
+                <span className="visually-hidden">{t.viewFor(app.name)}</span>
+            </NavLink>
+        </article>
+    );
+}
+
 function App() {
     const lang = useLang();
+    const {apps: friendApps} = useFriendApps();
     const t = COPY[lang];
     // Omitted, not guessed, when Stripe cannot be reached (see lib/price.js).
     const price = formatPrice(usePrice(), lang);
@@ -129,29 +154,12 @@ function App() {
             </header>
 
             <section className="home-grid">
-                {Object.keys(apps).map((key) => {
-                    const app = appText(key, lang);
-                    return (
-                        <article key={key} className="home-card">
-                            <div className="home-card-head">
-                                <img className="home-card-icon" src={app.icon} alt="" width="72" height="72"/>
-                                <div>
-                                    <h2 className="home-card-name">{app.name}</h2>
-                                    {app.about && <p className="home-card-about">{app.about}</p>}
-                                </div>
-                            </div>
-                            <ul className="home-features">
-                                {app.features.map((feature) => (
-                                    <li key={feature.name} className="home-feature">{feature.name}</li>
-                                ))}
-                            </ul>
-                            <NavLink className="main-button home-card-action" to={localPath(`/apps/${key}`, lang)}>
-                                {t.view}
-                                <span className="visually-hidden">{t.viewFor(app.name)}</span>
-                            </NavLink>
-                        </article>
-                    );
-                })}
+                {Object.keys(apps).map((key) => (
+                    <HomeCard key={key} appKey={key} app={appText(key, lang)} t={t} lang={lang}/>
+                ))}
+                {friendApps.map((entry) => (
+                    <HomeCard key={entry.key} appKey={entry.key} app={friendAppText(entry, lang)} t={t} lang={lang}/>
+                ))}
             </section>
 
             <StoreDownload/>

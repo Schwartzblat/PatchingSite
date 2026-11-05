@@ -180,6 +180,40 @@ export function DevicesAction({user, onChanged}) {
     );
 }
 
+/** Show the account the friends-only apps, or stop showing them. No confirm step: it is undone by the same button. */
+export function FriendAction({user, onChanged}) {
+    const {busy, result, run} = useAction();
+
+    async function onToggle() {
+        const makeFriend = !user.is_friend;
+        const done = await run(
+            () => api.admin.setFriend(user.username, makeFriend),
+            makeFriend ? 'Marked as a friend.' : 'No longer a friend.',
+        );
+        if (done) onChanged();
+    }
+
+    return (
+        <div className="admin-action">
+            <h3 className="admin-action__title">Friend</h3>
+            <button
+                type="button"
+                className="subscription-btn"
+                onClick={onToggle}
+                disabled={busy}
+                aria-busy={busy || undefined}
+                aria-describedby="admin-friend-note"
+            >
+                {user.is_friend ? 'Remove friend' : 'Mark as friend'}
+            </button>
+            <p id="admin-friend-note" className="subscription-hint">
+                {user.is_friend ? 'Sees the friends-only apps.' : 'Sees the public catalogue only.'}
+            </p>
+            <ActionResult result={result}/>
+        </div>
+    );
+}
+
 /**
  * Delete the account, as `manage.py delete-user` does. The username has to be
  * typed out first. Not offered on the admin's own account (the server refuses

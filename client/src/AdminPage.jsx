@@ -131,6 +131,7 @@ function AdminPage() {
                                                         {row.username}
                                                     </Link>
                                                     {row.is_admin && <span className="admin-badge">admin</span>}
+                                                    {row.is_friend && <span className="admin-badge">friend</span>}
                                                 </td>
                                                 <td className="admin-table__email" title={row.email}>{row.email}</td>
                                                 <td>{row.email_verified ? 'yes' : <span className="admin-flag--warn">no</span>}</td>

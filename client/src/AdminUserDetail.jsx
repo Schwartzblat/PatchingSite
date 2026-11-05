@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useState} from 'react';
 import {api} from './lib/api.js';
 import {formatDate, formatUtcDate} from './lib/format.js';
-import {DeleteAction, DevicesAction, EmailAction} from './AdminActions.jsx';
+import {DeleteAction, DevicesAction, EmailAction, FriendAction} from './AdminActions.jsx';
 import AdminTrialForm from './AdminTrialForm.jsx';
 
 /* The pill colour for a Stripe status; anything unlisted is neutral. */
@@ -22,6 +22,7 @@ function AccountCard({user}) {
             <h2 id="admin-account-title" className="subscription-panel__title">
                 {user.username}
                 {user.is_admin && <span className="admin-badge">admin</span>}
+                {user.is_friend && <span className="admin-badge">friend</span>}
             </h2>
             <dl className="admin-facts">
                 <dt>Email</dt>
@@ -166,6 +167,7 @@ function AdminUserDetail({username, self, onChanged, onDeleted}) {
                 <h2 id="admin-actions-title" className="subscription-panel__title">Actions</h2>
                 <EmailAction user={user} onChanged={changed}/>
                 <DevicesAction user={user} onChanged={changed}/>
+                <FriendAction user={user} onChanged={changed}/>
                 <AdminTrialForm user={user} onGranted={changed}/>
             </section>
             {!isSelf && <DeleteAction user={user} onDeleted={onDeleted}/>}
