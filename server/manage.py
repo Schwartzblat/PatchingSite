@@ -559,8 +559,7 @@ def cmd_doctor(_args) -> int:
         from stitch.common import FASTSIGNER_PATH
         print(f"[{OK}] stitch importable")
     except ImportError:
-        print(f"[{BAD}] stitch 1.4+ not importable; it is not on PyPI - install the")
-        print(f"         local checkout with `pip install -e /path/to/Stitch`")
+        print(f"[{BAD}] stitch 1.4+ not importable; install it with `pip install -r requirements.txt`")
         problems += 1
     else:
         # A non-editable install can drop the executable bit from package data.

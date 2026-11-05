@@ -15,11 +15,8 @@ argon2-cffi==25.1.0
 # encrypts the per-user signing keys at rest (SIGNING_KEYS_MASTER_KEY)
 cryptography==50.0.2
 
-# stitch is NOT on PyPI. It is a local checkout installed in editable mode:
-#     git clone <internal stitch repo> /path/to/Stitch
-#     pip install -e /path/to/Stitch
-# 1.5.0 is the minimum: it adds stitch.bundle (on-device patching bundle uploads;
-# without it those uploads answer 503). 1.6.0 is needed to build generic bundles
-# (build_bundle's extra_files, which carry catalog.json). 1.4.0 replaced
-# uber-apk-signer with the fastsigner binary utils/apps_utils.py signs with.
+# The owner's package on PyPI; it ships stitch/bin/fastsigner, which
+# utils/apps_utils.py signs with. 1.5.0 added stitch.bundle (on-device bundle
+# uploads), 1.6.0 build_bundle's extra_files (catalog.json for generic bundles).
 # It pulls in androguard, pyaxml and PyYAML itself, so they are not listed here.
+stitch==1.6.0
