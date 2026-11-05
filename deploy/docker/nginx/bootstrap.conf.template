@@ -1,0 +1,21 @@
+# HTTP only, until Let's Encrypt has issued the first certificate for ${DOMAIN}.
+# Rendered by web-entrypoint into /etc/nginx/conf.d/androidmod.conf in place of
+# the full config, which cannot load without a certificate file; replaced and
+# reloaded as soon as certbot succeeds. Nothing listens on HTTPS meanwhile.
+#
+# The only server, so it answers for every name, www.${DOMAIN} included.
+
+server {
+    listen ${HTTP_PORT};
+    listen [::]:${HTTP_PORT};
+    server_name ${DOMAIN};
+    server_tokens off;
+
+    include snippets/androidmod-acme.conf;
+
+    # Not a redirect: there is no HTTPS to send anyone to yet.
+    location / {
+        default_type text/plain;
+        return 503 "${DOMAIN} is waiting for its TLS certificate. Try again in a few minutes.\n";
+    }
+}

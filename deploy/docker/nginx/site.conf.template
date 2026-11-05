@@ -1,0 +1,128 @@
+# Reverse proxy + prerendered site for ${DOMAIN}, in the web container.
+#
+# Rendered by web-entrypoint into /etc/nginx/conf.d/androidmod.conf once a
+# certificate exists (bootstrap.conf.template serves until then). The port of
+# deploy/nginx/androidmod.site.conf, the old host's config; the www redirect
+# lives in www.conf.template.
+
+server {
+    listen ${HTTP_PORT};
+    listen [::]:${HTTP_PORT};
+    server_name ${DOMAIN};
+    # http.conf already turns server_tokens off; every server block repeats
+    # it, as on the old host, where it could only be set per server.
+    server_tokens off;
+
+    include snippets/androidmod-acme.conf;
+
+    # Everything else is HTTPS, on the bare domain. The session cookie is Secure
+    # in production, so the site simply will not log anyone in over plaintext.
+    # Inside a location, not at server level: a server-level return would run
+    # before the ACME location above is ever matched.
+    location / {
+        return 301 https://${DOMAIN}${HTTPS_SUFFIX}$request_uri;
+    }
+}
+
+server {
+    listen ${HTTPS_PORT} ssl;
+    listen [::]:${HTTPS_PORT} ssl;
+    http2 on;
+    server_name ${DOMAIN};
+    server_tokens off;
+
+    ssl_certificate     ${CERT_DIR}/fullchain.pem;
+    ssl_certificate_key ${CERT_DIR}/privkey.pem;
+    include snippets/androidmod-tls.conf;
+
+    # add_header is inherited only by locations that declare no add_header of
+    # their own. Every location below that adds a header therefore includes the
+    # snippet again; without that, /assets/ silently lost HSTS and nosniff.
+    include snippets/androidmod-headers.conf;
+
+    # The built site, baked into the image by web.Dockerfile.
+    root /usr/share/nginx/androidmod;
+    index index.html;
+
+    # Hashed asset filenames, so they can be cached hard. ^~ keeps the regex
+    # location for unhashed files below from claiming /assets/*.png.
+    location ^~ /assets/ {
+        include snippets/androidmod-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    # Every page is its own prerendered file (client/scripts/prerender.js):
+    # index.html for "/", <path>.html for the rest, 404.html for anything else.
+    # They must all be revalidated on every visit. A new image carries only the
+    # new build's hashed bundles, so a browser that heuristically cached an old
+    # page would request assets that are gone and render a blank page.
+    location = / {
+        include snippets/androidmod-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files /index.html =404;
+    }
+
+    # Unhashed public files (favicon, share image, robots.txt): a day is short
+    # enough that a changed image shows up without a rename. `expires` is not
+    # add_header, so the server-level headers still apply here.
+    location ~* \.(?:ico|png|webp|svg|txt|xml)$ {
+        expires 1d;
+        try_files $uri =404;
+    }
+
+    # /apps/whatsapp is served from apps/whatsapp.html. A path with no file gets
+    # 404.html and a real 404: falling back to one app shell answered 200 with
+    # the home page's head for any URL at all, which search engines index as soft
+    # 404s and duplicates of the home page. The build writes a file for every
+    # route the app has, including the ones it renders only in the browser
+    # (/login, /reset-password), so nothing the app links to lands here.
+    #
+    # A trailing slash is redirected away rather than given its own copy; the
+    # router used to accept both, and an old link with one should still work.
+    # /api/ and /assets/ are ^~ locations, so the rewrite never sees them.
+    location / {
+        include snippets/androidmod-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        rewrite ^/(.+)/$ /$1 permanent;
+        try_files $uri $uri.html =404;
+        error_page 404 /404.html;
+    }
+
+    # ^~ for the same reason: an API path must never reach the static-file regex.
+    location ^~ /api/ {
+        include snippets/androidmod-proxy.conf;
+    }
+
+    # Bundle uploads are raw zips of up to 16 MiB (the server enforces that);
+    # nginx's 1 MB default would refuse them with a 413 before they arrive.
+    # Exact match, so every other route keeps the default limit. The upload is
+    # authenticated by X-Internal-Token; the client_max_body_size only bounds
+    # what nginx buffers, 17m leaving headroom over the application's cap.
+    location = /api/internal/bundles {
+        client_max_body_size 17m;
+        include snippets/androidmod-proxy.conf;
+    }
+
+    # The store APK (~28MB) is public, so it is the cheapest thing on the site
+    # to hammer. Downloads through the signed-URL endpoint need a subscription
+    # and are already limited per user by the app.
+    location = /api/store/download {
+        limit_req zone=androidmod_store burst=5 nodelay;
+        limit_conn androidmod_conn 3;
+        include snippets/androidmod-proxy.conf;
+    }
+
+    # Health endpoint, handy for uptime checks.
+    location = /api/health {
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        access_log off;
+    }
+
+    # Generic reports are stored without account or IP; keep the request out of the
+    # access log too.
+    location = /api/generic/reports {
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        access_log off;
+    }
+}

@@ -1,0 +1,32 @@
+# www only redirects, to the bare domain. Rendered by web-entrypoint ahead of
+# site.conf.template, into the same file, only when WWW_REDIRECT=1; the
+# entrypoint then also asks for a certificate that names www.${DOMAIN}. It needs
+# its own DNS record too, or nobody reaches these blocks at all.
+
+server {
+    listen ${HTTP_PORT};
+    listen [::]:${HTTP_PORT};
+    server_name www.${DOMAIN};
+    server_tokens off;
+
+    include snippets/androidmod-acme.conf;
+
+    location / {
+        return 301 https://${DOMAIN}${HTTPS_SUFFIX}$request_uri;
+    }
+}
+
+server {
+    listen ${HTTPS_PORT} ssl;
+    listen [::]:${HTTPS_PORT} ssl;
+    http2 on;
+    server_name www.${DOMAIN};
+    server_tokens off;
+
+    ssl_certificate     ${CERT_DIR}/fullchain.pem;
+    ssl_certificate_key ${CERT_DIR}/privkey.pem;
+    include snippets/androidmod-tls.conf;
+
+    include snippets/androidmod-headers.conf;
+    return 301 https://${DOMAIN}${HTTPS_SUFFIX}$request_uri;
+}
