@@ -180,3 +180,19 @@ def test_delete_user_treats_a_closed_stdin_as_no(tmp_db, monkeypatch):
 def test_delete_user_rejects_an_unknown_username(tmp_db, capsys):
     assert delete_user("ghost") == 1
     assert "no user" in capsys.readouterr().out.lower()
+
+
+def test_check_reports_is_friend(tmp_db, capsys):
+    import manage
+
+    _register("alice")
+    database.set_friend("alice", True)
+    manage.cmd_check(None)
+    assert "is_friend present (1 friend(s))" in capsys.readouterr().out
+
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("ALTER TABLE users DROP COLUMN is_friend")
+    conn.commit()
+    conn.close()
+    manage.cmd_check(None)
+    assert "is_friend missing; migrate adds it (nobody is a friend)" in capsys.readouterr().out

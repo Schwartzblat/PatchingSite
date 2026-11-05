@@ -135,3 +135,71 @@ def test_clear_devices_keeps_the_users_own_reset_stamp(tmp_db):
     assert user.device_fingerprints == []
     assert user.devices_reset_at == datetime(2026, 10, 1, tzinfo=timezone.utc)
     assert database.clear_devices("ghost") is False
+
+
+# --- is_friend ----------------------------------------------------------------------
+
+def test_new_accounts_are_not_friends(tmp_db):
+    register("alice")
+    assert database.get_user("alice").is_friend is False
+
+
+def test_set_friend_flips_the_flag_case_insensitively(tmp_db):
+    register("alice")
+
+    assert database.set_friend("ALICE", True) is True
+    assert database.get_user("alice").is_friend is True
+
+    assert database.set_friend("alice", False) is True
+    assert database.get_user("alice").is_friend is False
+
+
+def test_set_friend_reports_an_unknown_account(tmp_db):
+    assert database.set_friend("nobody", True) is False
+
+
+def test_list_friends_returns_only_friends(tmp_db):
+    for name in ("carol", "bob", "alice"):
+        register(name)
+    database.set_friend("alice", True)
+    database.set_friend("carol", True)
+
+    assert [u.username for u in database.list_friends()] == ["alice", "carol"]
+
+
+def test_init_adds_is_friend_to_an_old_table(tmp_db):
+    import os
+    os.remove(tmp_db)
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("""CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL, email TEXT NOT NULL,
+        password_hash TEXT NOT NULL, password_salt TEXT NOT NULL,
+        password_scheme TEXT NOT NULL DEFAULT 'legacy',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        customer_id TEXT DEFAULT NULL,
+        device_fingerprints TEXT DEFAULT "[]",
+        devices_reset_at TEXT DEFAULT NULL,
+        email_verified_at TEXT DEFAULT NULL)""")
+    conn.execute("INSERT INTO users (username, email, password_hash, password_salt) "
+                 "VALUES ('alice', 'alice@example.com', 'h', 's')")
+    conn.commit()
+    conn.close()
+
+    database.init()
+
+    conn = sqlite3.connect(tmp_db)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    conn.close()
+    assert "is_friend" in columns
+    assert database.get_user("alice").is_friend is False
+
+
+def test_a_row_with_an_unknown_column_still_reads(tmp_db):
+    register("alice")
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("ALTER TABLE users ADD COLUMN zz_later TEXT")
+    conn.commit()
+    conn.close()
+
+    assert database.get_user("alice").username == "alice"

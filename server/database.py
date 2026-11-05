@@ -205,7 +205,8 @@ def init():
                          customer_id TEXT DEFAULT NULL,
                          device_fingerprints TEXT DEFAULT "[]",
                          devices_reset_at TEXT DEFAULT NULL,
-                         email_verified_at TEXT DEFAULT NULL
+                         email_verified_at TEXT DEFAULT NULL,
+                         is_friend INTEGER NOT NULL DEFAULT 0
                      )
                      """)
 
@@ -221,6 +222,9 @@ def init():
             conn.execute("ALTER TABLE users ADD COLUMN devices_reset_at TEXT DEFAULT NULL")
         if "email_verified_at" not in columns:
             _add_email_verified_at(conn)
+        if "is_friend" not in columns:
+            logger.info('Migrating users: adding is_friend')
+            conn.execute("ALTER TABLE users ADD COLUMN is_friend INTEGER NOT NULL DEFAULT 0")
 
         _username_index_enforced = _ensure_unique_index(
             conn,
@@ -672,6 +676,27 @@ def clear_devices(username: str) -> bool:
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+def set_friend(username: str, is_friend: bool) -> bool:
+    """Mark or unmark an account as a friend, for the admin panel. False when there is no such account."""
+    conn = _connect()
+    try:
+        cursor = conn.execute("UPDATE users SET is_friend = ? WHERE lower(username) = lower(?)",
+                              (1 if is_friend else 0, username))
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def list_friends() -> list[UserInDB]:
+    """Every account marked as a friend, ordered by username without regard to case."""
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM users WHERE is_friend = 1 ORDER BY lower(username)").fetchall()
+    finally:
+        conn.close()
+    return [row_to_user(row) for row in rows]
 
 
 def set_password(user: UserInDB, new_password: str, email_verified_at: Optional[datetime] = None) -> bool:

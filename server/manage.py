@@ -93,6 +93,12 @@ def cmd_check(_args) -> int:
             print(f"[{OK}] email_verified_at missing; migrate adds it and marks all {total} existing")
             print(f"         account(s) verified (they signed up before verification existed)")
 
+        if "is_friend" in columns:
+            friends = conn.execute("SELECT COUNT(*) FROM users WHERE is_friend = 1").fetchone()[0]
+            print(f"[{OK}] is_friend present ({friends} friend(s))")
+        else:
+            print(f"[{OK}] is_friend missing; migrate adds it (nobody is a friend)")
+
         for column, index, label in (
             ("username", "idx_users_username_unique", "usernames"),
             ("email", "idx_users_email_unique", "email addresses"),

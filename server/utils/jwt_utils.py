@@ -120,6 +120,10 @@ class UserInDB(User):
     # Deliberately not a session token claim: a token outlives the moment it was
     # minted, so anything that depends on verification reads the row instead.
     email_verified_at: datetime | None = None
+    # Whether an admin marked the account as a friend (extra apps in the
+    # catalogue). Read from the row on every request, never a token claim, so
+    # unmarking takes effect at once instead of when a token expires.
+    is_friend: bool = False
 
 
 def create_access_token(
