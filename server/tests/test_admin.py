@@ -76,6 +76,14 @@ def test_me_says_whether_the_account_is_an_admin(client, admins):
     assert client.get("/api/users/me").json()["is_admin"] is False
 
 
+def test_me_says_whether_the_account_is_a_friend(client):
+    register("alice")
+    sign_in(client, "alice")
+    assert client.get("/api/users/me").json()["is_friend"] is False
+    assert database.set_friend("alice", True)
+    assert client.get("/api/users/me").json()["is_friend"] is True
+
+
 def test_admin_names_match_in_any_case(client, admins):
     admins("OWNER")
     as_admin(client)

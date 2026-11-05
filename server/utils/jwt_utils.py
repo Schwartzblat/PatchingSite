@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 from datetime import timedelta, datetime, timezone
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 import jwt
 from fastapi import Depends
@@ -331,6 +331,9 @@ def get_optional_token_data(request: Request) -> TokenData | None:
         return get_token_data(request)
     except HTTPException:
         return None
+
+
+OptionalToken = Annotated[Optional[TokenData], Depends(get_optional_token_data)]
 
 
 def _legacy_app_token_data(token: str) -> AppTokenData:

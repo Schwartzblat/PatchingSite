@@ -39,6 +39,8 @@ class Me(User):
     # the web client knows whether to offer the link. It only ever describes
     # the caller; every admin endpoint checks for itself.
     is_admin: bool
+    # Whether the account sees the friends-only apps (database.set_friend).
+    is_friend: bool = False
 
 
 TAKEN_MESSAGE = "That username or email is already in use."
@@ -102,6 +104,7 @@ async def read_users_me(current_user: RequiredUser):
         created_at=current_user.created_at,
         email_verified=current_user.email_verified_at is not None,
         is_admin=config.is_admin(current_user.username),
+        is_friend=current_user.is_friend,
     )
 
 

@@ -14,7 +14,7 @@ from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_valida
 import config
 import database
 from utils import mailer
-from utils.jwt_utils import TokenData, get_optional_token_data
+from utils.jwt_utils import OptionalToken, TokenData
 from utils.logging_config import logger
 from utils.ratelimit import GLOBAL_KEY, bug_report_mail_budget, bug_report_rate_limit, client_ip
 
@@ -44,9 +44,6 @@ class BugReportRequest(BaseModel):
         if isinstance(value, str) and not value.strip():
             return None
         return value
-
-
-OptionalToken = Annotated[Optional[TokenData], Depends(get_optional_token_data)]
 
 
 def _mail_body(report_id: int, report: BugReportRequest, username, account_email, ip, received) -> str:

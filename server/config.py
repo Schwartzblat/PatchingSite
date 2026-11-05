@@ -105,6 +105,10 @@ class AppConfig:
     # already called this file the source of truth; a third client made that true.
     key: str
     features: tuple = ()
+    # Hebrew text, set only for the friends-only apps (their clients show it
+    # next to the English). Same length and order as `features`.
+    name_he: str = ""
+    features_he: tuple = ()
 
 
 APPS = (
@@ -133,6 +137,49 @@ APPS = (
     ),
 )
 APPS_BY_PACKAGE = {app.package: app for app in APPS}
+
+# Apps shown only to accounts flagged as friends (database.set_friend). To
+# everyone else they do not exist: not in /api/apps, and their packages answer
+# like any unknown one. They are kept out of APPS and APPS_BY_PACKAGE on
+# purpose, so nothing that reads the public catalogue can leak them.
+FRIEND_APPS = (
+    AppConfig(
+        name="Moovit", package="com.tranzmate", key="moovit",
+        features=("No Ads", "Live Location Enabled"),
+        name_he="מוביט",
+        features_he=("בלי פרסומות", "מיקום חי"),
+    ),
+    AppConfig(
+        name="12+", package="com.keshet.mako.VOD", key="mako",
+        features=("No Ads",),
+        name_he="\u200e12+\u200e",
+        features_he=("בלי פרסומות",),
+    ),
+    AppConfig(
+        name="Reshet 13+", package="com.applicaster.iReshet", key="reshet",
+        # The ReshetPatcher README's feature list, regrouped by what a viewer
+        # sees: the player's video ads, then every other ad in the app.
+        features=("No Video Ads", "No Full-Screen or Banner Ads"),
+        name_he="רשת \u200e13+\u200e",
+        features_he=("בלי פרסומות וידאו", "בלי פרסומות במסך מלא ובאנרים"),
+    ),
+    AppConfig(
+        name="OkCupid", package="com.okcupid.okcupid", key="okcupid",
+        # A deliberate subset of the OkCupidPremiumPatcher README's feature
+        # list: the patched build also unblurs and names the gated "Interested
+        # in You" cards, which the catalogue does not advertise.
+        features=(
+            "Unlimited Rewinds",
+            "See who viewed/liked you (full profile)",
+            "Regular Like on OkCupid Picks",
+        ),
+        name_he="OkCupid",
+        features_he=("חזרות ללא הגבלה", "לראות מי צפה או עשה לייק (פרופיל מלא)", "לייק רגיל ב-OkCupid Picks"),
+    ),
+)
+FRIEND_APPS_BY_PACKAGE = {app.package: app for app in FRIEND_APPS}
+# Their icons, served only to friends (the public ones ship inside the clients).
+FRIEND_ICONS_DIR = SERVER_DIR / "friend_icons"
 
 # Defaults to production so the failure mode is safe: this flag decides whether
 # session cookies get `Secure` and whether X-Forwarded-For is trusted, and an

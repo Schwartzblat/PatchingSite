@@ -65,8 +65,13 @@ def _inside_root(path: Path, root: Path) -> bool:
 
 
 def package_dir(package_name: str) -> Path:
-    """Resolved <PATCHED_APPS_PATH>/<package>, 404 unless it really is a directory in there."""
-    validate_package_name(package_name)
+    """Resolved <PATCHED_APPS_PATH>/<package>, 404 unless it really is a directory in there.
+
+    Accepts friends-only packages too. Whether the caller may see one is the
+    endpoint's call (utils.friends.require_visible_package), made before this.
+    """
+    if package_name not in config.FRIEND_APPS_BY_PACKAGE:
+        validate_package_name(package_name)
     root = Path(config.PATCHED_APPS_PATH).resolve()
     path = (root / package_name).resolve()
     if not _inside_root(path, root) or not path.is_dir():

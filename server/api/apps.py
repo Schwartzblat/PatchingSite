@@ -5,15 +5,17 @@ from typing import List
 from fastapi import HTTPException, Query
 from fastapi.routing import APIRouter
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse
 
 import config
 from utils import downloads
 from utils.apps_utils import find_patched_apk
-from utils.jwt_utils import RequiredToken, create_app_jwt
+from utils.friends import require_visible_package, visible_apps
+from utils.jwt_utils import OptionalToken, RequiredToken, create_app_jwt
 from utils.logging_config import logger
 from utils.stripe_utils import RequiredSubscription
-from utils.utils import ValidPackage, package_dir, validate_package_name, version_dir, version_sort_key
+from utils.utils import PACKAGE_NOT_FOUND, package_dir, version_dir, version_sort_key
 
 router = APIRouter()
 
@@ -24,26 +26,50 @@ class DownloadRequest(BaseModel):
 
 
 @router.get("/apps")
-def list_apps() -> List[dict]:
-    """The catalogue. Public, like the website's app grid.
+def list_apps(token: OptionalToken) -> List[dict]:
+    """The catalogue. Public, like the website's app grid, plus the friends-only
+    apps for an account flagged as a friend.
 
-    Icons are deliberately absent: the Android client bundles its own, so this
-    endpoint stays free of static-file concerns.
+    Icons of the public apps are bundled by the clients. The friends-only icons
+    are served here (/apps/<package>/icon), to friends only, so their names and
+    pictures are not in the clients at all.
     """
-    return [
-        {
+    entries = []
+    for app in visible_apps(token.username if token else None):
+        entry = {
             "key": app.key,
             "name": app.name,
             "package": app.package,
             "features": list(app.features),
             "on_device": app.package in config.ON_DEVICE_PACKAGES,
         }
-        for app in config.APPS
-    ]
+        if app.package in config.FRIEND_APPS_BY_PACKAGE:
+            entry.update(
+                friends_only=True,
+                name_he=app.name_he,
+                features_he=list(app.features_he),
+                icon=f"/api/apps/{app.package}/icon",
+            )
+        entries.append(entry)
+    return entries
+
+
+@router.get("/apps/{package_name}/icon")
+def get_icon(package_name: str, token: OptionalToken):
+    """A friends-only app's icon. Anyone else gets the unknown-package 404."""
+    require_visible_package(package_name, token.username if token else None)
+    app = config.FRIEND_APPS_BY_PACKAGE.get(package_name)
+    if app is None:
+        raise PACKAGE_NOT_FOUND
+    return FileResponse(
+        str(config.FRIEND_ICONS_DIR / f"{app.key}.webp"),
+        media_type="image/webp",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @router.get("/list/{package_name}")
-def list_versions(package_name: ValidPackage) -> List[dict]:
+def list_versions(package_name: str, token: OptionalToken) -> List[dict]:
     """
     returns sorted [{
         id: str,  # stable, used as a react key
@@ -54,9 +80,16 @@ def list_versions(package_name: ValidPackage) -> List[dict]:
         updated_at: str
     }]
     """
+    require_visible_package(package_name, token.username if token else None)
     if package_name in config.ON_DEVICE_PACKAGES:
         return []
-    package_path = package_dir(package_name)
+    try:
+        package_path = package_dir(package_name)
+    except StarletteHTTPException:
+        # A friends-only app nobody has built yet is not an unknown package.
+        if package_name in config.FRIEND_APPS_BY_PACKAGE:
+            return []
+        raise
     versions = []
     for version_directory in sorted(os.listdir(package_path)):
         directory = package_path / version_directory
@@ -92,7 +125,7 @@ def create_download(request: DownloadRequest, token: RequiredToken, subscription
     must carry: the session token's claim is empty for an account linked after
     it signed in.
     """
-    package_name = validate_package_name(request.package)
+    package_name = require_visible_package(request.package, token.username)
     if package_name in config.ON_DEVICE_PACKAGES:
         raise HTTPException(
             status_code=410,
