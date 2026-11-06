@@ -6,7 +6,8 @@
 #   deploy/deploy.sh                    deploy whatever changed
 #   deploy/deploy.sh --dry-run          print the plan, change nothing
 #   deploy/deploy.sh --force client     also deploy a component with no code change
-#                                       (server | client | android | all; repeatable)
+#                                       (server | client | android | all; repeatable);
+#                                       with docker, its containers are recreated even so
 #   deploy/deploy.sh --skip android     leave a changed component undeployed for now
 #                                       (server | client | android; repeatable)
 #
@@ -49,12 +50,16 @@ step() { printf '\n==> %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 die() { printf 'deploy: %s\n' "$*" >&2; exit 1; }
 remote() { ssh -o BatchMode=yes "$HOST" "$@"; }
+# docker: for the remote commands that run compose. An image build, or a stop
+# grace period, can leave the connection silent for minutes, which some NAT and
+# firewall boxes take as dead; a keepalive every 30 s holds it open.
+remote_compose() { ssh -o BatchMode=yes -o ServerAliveInterval=30 "$HOST" "$@"; }
 healthy() { curl -fsS -m 5 "$SITE_URL/api/health" >/dev/null 2>&1; }
 # A short hash for display. A commit this clone does not know is shown as such
 # rather than failing, since the plan is printed before anything can go wrong.
 short() { git rev-parse -q --short --verify "$1^{commit}" 2>/dev/null || echo "unknown commit ${1:0:7}"; }
 
-usage() { sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 dry_run=0
 declare -A forced=() skipped=()
@@ -271,13 +276,13 @@ note "now at $(git rev-parse --short "$NEW")"
 
 # --- server --------------------------------------------------------------------------
 
-# Copies the database beside itself and prints the copy's path. $1 is the remote
+# Copies the database beside itself and prints the copy's path. $2 is the remote
 # command that runs Python, reading the script from stdin, where `import config`
-# finds the server's settings. Python's backup API rather than cp: the database
-# runs in WAL mode, so a plain copy can miss writes still in the -wal file. The
-# host has no sqlite3 CLI.
+# finds the server's settings, and $1 the function that runs it on the host.
+# Python's backup API rather than cp: the database runs in WAL mode, so a plain
+# copy can miss writes still in the -wal file. The host has no sqlite3 CLI.
 back_up_database() {
-    remote "$1" <<'PY'
+    "$1" "$2" <<'PY'
 import sqlite3, time, config
 target = f"{config.DB_PATH}.{time.strftime('%Y-%m-%d-%H%M%S')}.bak"
 source, copy = sqlite3.connect(config.DB_PATH), sqlite3.connect(target)
@@ -308,7 +313,7 @@ if [[ -n ${needed[server]:-} && $RUNTIME == docker ]]; then
         # In the app container, so the copy lands in the data dir beside the
         # database. exec skips the entrypoint and its umask 077, so sh sets it
         # again: the copy must be 600 like the database.
-        backup=$(back_up_database "cd '$REMOTE_REPO' && docker compose exec -T app sh -c 'umask 077 && exec python -'")
+        backup=$(back_up_database remote_compose "cd '$REMOTE_REPO' && docker compose exec -T app sh -c 'umask 077 && exec python -'")
         note "database backed up to $backup in the app container (HOST_DATA_DIR on the host)"
     fi
     # compose builds the new image while the old container keeps serving, then
@@ -316,13 +321,19 @@ if [[ -n ${needed[server]:-} && $RUNTIME == docker ]]; then
     # stop_grace_period (22m) to finish. Queued downloads fail with "Server
     # restarted, please try again". web (nginx) is never recreated here, which
     # would drop every open connection; it is only started if it is not running,
-    # as on a new stack, since the health check goes through it.
+    # as on a new stack, since the health check goes through it. --force
+    # recreates app and backup even when nothing changed, as systemctl restart
+    # would. The images the rebuild replaced are left untagged; pruning them
+    # keeps deploys from filling the disk.
+    up_flags=--build
+    if [[ -n ${forced[server]:-} ]]; then up_flags+=' --force-recreate'; fi
     note "rebuilding app and backup (waits for in-flight signings to finish)"
-    remote "
+    remote_compose "
         set -e
         cd '$REMOTE_REPO'
-        docker compose up -d --build app backup
+        docker compose up -d $up_flags app backup
         APP_COMMIT=$(git rev-parse --short "$NEW") docker compose up -d --no-recreate web
+        docker image prune -f >/dev/null || echo 'docker image prune failed; the old images stay on disk' >&2
     "
     # Checked through nginx, as a user reaches it. The entrypoint runs `manage.py
     # doctor` before the server, so a bad config shows up here: the container
@@ -335,7 +346,7 @@ elif [[ -n ${needed[server]:-} ]]; then
         note "requirements installed"
     fi
     if ((db_backup)); then
-        backup=$(back_up_database "cd '$REMOTE_REPO/server' && .venv/bin/python -")
+        backup=$(back_up_database remote "cd '$REMOTE_REPO/server' && .venv/bin/python -")
         note "database backed up to $backup"
     fi
     # systemctl blocks until the old process has stopped, and the unit gives
@@ -356,11 +367,20 @@ if [[ -n ${needed[client]:-} && $RUNTIME == docker ]]; then
     # Built into the web image from the checkout just updated, so the served
     # files match the deployed commit exactly. --no-deps keeps app as it is:
     # without it compose would build app too, and recreate it when it has
-    # changes not deployed yet (--skip server).
+    # changes not deployed yet (--skip server). --force recreates web even when
+    # nothing changed. Then the replaced image is pruned, as for the server.
+    up_flags='--build --no-deps'
+    if [[ -n ${forced[client]:-} ]]; then up_flags+=' --force-recreate'; fi
     note "rebuilding web (restarting nginx drops its open connections)"
-    remote "cd '$REMOTE_REPO' && APP_COMMIT=$(git rev-parse --short "$NEW") docker compose up -d --build --no-deps web"
-    # nginx was recreated, so the site must answer again.
-    wait_healthy "cd '$REMOTE_REPO' && docker compose logs --tail 30 web"
+    remote_compose "
+        set -e
+        cd '$REMOTE_REPO'
+        APP_COMMIT=$(git rev-parse --short "$NEW") docker compose up -d $up_flags web
+        docker image prune -f >/dev/null || echo 'docker image prune failed; the old images stay on disk' >&2
+    "
+    # nginx was recreated, so the site must answer again. A long tail: nginx
+    # logs a line per worker started, which can fill a short one.
+    wait_healthy "cd '$REMOTE_REPO' && docker compose logs --tail 80 web"
 elif [[ -n ${needed[client]:-} ]]; then
     step "Deploying the website"
     # Built on the host from the checkout just updated, so the served files match

@@ -12,15 +12,14 @@ WORKDIR /src/client
 COPY client/package.json client/package-lock.json ./
 RUN npm ci
 COPY client/ ./
-# Declared after npm ci: a changed ARG invalidates every later RUN's cache.
+# Declared after npm ci, right where they are used: a changed ARG invalidates
+# every later RUN's cache, and these change with every deploy.
 ARG DOMAIN=androidmod.site
 # No .git in the build context, so the commit the bundle reports comes from here.
 ARG APP_COMMIT=unknown
 RUN VITE_SITE_HOST=$DOMAIN APP_COMMIT=$APP_COMMIT npm run build
 
 FROM nginx:stable-alpine
-ARG APP_COMMIT=unknown
-LABEL org.opencontainers.image.revision=$APP_COMMIT
 
 # The base image's default.conf would answer on port 80 alongside ours.
 RUN apk add --no-cache certbot openssl bash gettext \
@@ -43,3 +42,8 @@ RUN chmod 755 /usr/local/bin/web-entrypoint
 # turns TERM into `nginx -s quit` itself.
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/local/bin/web-entrypoint"]
+
+# Last: every RUN after an ARG sees it, so a new commit declared any higher would
+# run `apk add` again on every deploy.
+ARG APP_COMMIT=unknown
+LABEL org.opencontainers.image.revision=$APP_COMMIT

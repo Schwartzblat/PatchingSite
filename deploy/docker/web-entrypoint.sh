@@ -227,13 +227,40 @@ certonly=(certonly --webroot -w /var/www/certbot --cert-name "$DOMAIN"
 for name in "${names[@]}"; do certonly+=(-d "$name"); done
 if [ "$LETSENCRYPT_STAGING" = 1 ]; then certonly+=(--staging); fi
 
+# certonly picks an account by itself only when there is one. With two it must
+# ask, and under --non-interactive it fails, on every attempt. Two exist once
+# the old host's /etc/letsencrypt is copied over an account certbot registered
+# here (a first start in letsencrypt mode before DNS moved, say). The lineage's
+# renewal conf names its own account, the one renew uses, so certonly gets that
+# one too: only a plain id, and only one stored for the ACME server in use, since
+# --account with any other fails outright. Otherwise certbot chooses as before.
+# Read before every attempt, so a copy made while this runs is picked up.
+certonly_account=()
+pick_account() {
+    local conf=/etc/letsencrypt/renewal/$DOMAIN.conf line id=
+    local server=acme-v02.api.letsencrypt.org/directory
+    if [ "$LETSENCRYPT_STAGING" = 1 ]; then server=acme-staging-v02.api.letsencrypt.org/directory; fi
+    certonly_account=()
+    if [ ! -f "$conf" ] || [ ! -r "$conf" ]; then return 0; fi
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [[ $line =~ ^[[:space:]]*account[[:space:]]*=[[:space:]]*(.*[^[:space:]])[[:space:]]*$ ]]; then
+            id=${BASH_REMATCH[1]}
+            break
+        fi
+    done <"$conf"
+    if [[ $id =~ ^[A-Za-z0-9]+$ ]] && [ -d "/etc/letsencrypt/accounts/$server/$id" ]; then
+        certonly_account=(--account "$id")
+    fi
+}
+
 issued=0
 last_renew=$(date +%s)
 while :; do
     if [ "$issued" = 0 ]; then
         # Waits, up to 15 minutes, if the last attempt was more recent.
         take_attempt_slot
-        if beside_nginx certbot "${certonly[@]}"; then
+        pick_account
+        if beside_nginx certbot "${certonly[@]}" "${certonly_account[@]}"; then
             rm -f "$SLOT_FILE"
             issued=1
             use_full_config

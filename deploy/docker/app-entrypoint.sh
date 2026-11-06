@@ -14,6 +14,19 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
+# Both are host files that must belong to APP_UID. doctor only checks that the
+# keystore exists, so an unreadable one would give a healthy site on which every
+# paid download fails; an unreadable .env, a bare PermissionError. Checked here,
+# not above the branch, so `docker compose run app sh` can still look into it.
+must_read() {
+    if [ ! -r "$1" ]; then
+        echo "app-entrypoint: uid $(id -u) cannot read $1 ($2 on the host); it must be owned by APP_UID, mode 600" >&2
+        exit 1
+    fi
+}
+must_read /app/.env "the checkout's .env"
+must_read /run/keystore.jks HOST_KEYSTORE_FILE
+
 python manage.py doctor
 
 # Loopback only: nginx (host network) is the sole client, and

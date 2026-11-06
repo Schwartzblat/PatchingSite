@@ -13,6 +13,17 @@ snapshot() {
     patchingsite-backup /opt/server_data/users.db /backups --keep "${BACKUP_KEEP:-14}"
 }
 
+# Checked at start, so a wrong owner is a restart loop in `docker compose ps`
+# now rather than a snapshot that fails every night with the container "Up".
+if [ ! -w /backups ]; then
+    echo "backup-loop: uid $(id -u) cannot write /backups (HOST_BACKUP_DIR on the host); it must be owned by APP_UID" >&2
+    exit 1
+fi
+if [ ! -r /opt/server_data/users.db ]; then
+    echo "backup-loop: uid $(id -u) cannot read /opt/server_data/users.db (HOST_DATA_DIR on the host); it must exist and be owned by APP_UID" >&2
+    exit 1
+fi
+
 if [ "${1:-}" = "--now" ]; then
     snapshot
     exit $?

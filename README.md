@@ -435,7 +435,8 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
 1. Install Docker Engine and the compose plugin
    ([docs.docker.com/engine/install](https://docs.docker.com/engine/install/)),
    then `sudo usermod -aG docker ubuntu` and log in again. Keep IPv6 enabled in
-   the kernel (the default): nginx also listens on `[::]`.
+   the kernel (the default): nginx also listens on `[::]`. If the old host has
+   a public IPv6 address (the domain has AAAA records), give the VM one too.
 2. Open ports 80 and 443 (the provider's firewall, and `ufw` if it is on).
 3. Clone the repo. It is public, so the VM needs no GitHub key:
 
@@ -448,10 +449,12 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
    cp .env.docker.example .env && chmod 600 .env
    ```
 
-   It must stay mode 600, owned by the user whose id is `APP_UID`. The old host's
-   `.env` can replace Section 2: paste it in place of that section, never above
-   the template's empty `KEY=` lines, since a key set twice takes its last value.
-   Copy the keystore to `HOST_KEYSTORE_FILE`, mode 600.
+   Copy the keystore to `HOST_KEYSTORE_FILE`. `.env` and the keystore must both
+   be owned by the `APP_UID` user, mode 600: the app refuses to start with
+   either one it cannot read, and `docker compose logs app` names it. The old
+   host's `.env` can replace Section 2: paste it in place of that section, never
+   above the template's empty `KEY=` lines, since a key set twice takes its last
+   value.
 5. Create the host dirs, owned by the user, with data and backups mode 700:
 
    ```bash
@@ -462,16 +465,41 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
    Then, as the user, so it owns every copy, bring the data over. The data dir
    also holds the on-device patching state, `bundles/` and
    `bundle-signing.pub.pem`, so copy all of it except the database, restored
-   from the newest snapshot (`/var/lib/patchingsite-backups` on the old host),
-   and `download_cache/`, which refills on demand. Then the patched builds:
+   from the old host's newest snapshot, and `download_cache/`, which refills on
+   demand. Then the patched builds:
 
    ```bash
    rsync -a --chmod=D700,F600 --exclude 'users.db*' --exclude download_cache/ \
        old-host:/opt/server_data/ /opt/server_data/
-   install -m 600 users-<stamp>.db /opt/server_data/users.db
+   ssh old-host 'ls /var/lib/patchingsite-backups/users-*.db | tail -n 1'   # the newest snapshot
+   scp old-host:/var/lib/patchingsite-backups/users-<stamp>.db ~/
+   install -m 600 ~/users-<stamp>.db /opt/server_data/users.db
    rsync -a old-host:/opt/patched/ /opt/patched/
    ```
-6. Start it:
+6. Put a certificate in place, then start. Best: before the first `up`, copy the
+   old host's `/etc/letsencrypt` into the certificate volume, keeping its
+   symlinks, and keep `TLS_MODE=letsencrypt`. The VM then serves valid HTTPS
+   from its first start, and renews with the old host's Let's Encrypt account
+   once DNS points here:
+
+   ```bash
+   ssh old-host 'sudo tar -C /etc -cf - letsencrypt' |
+       docker compose run --rm -T --no-deps --entrypoint tar web -C /etc -xf -
+   # The old host's renewal hooks reload its own nginx; none of that is here.
+   docker compose run --rm --no-deps --entrypoint find web /etc/letsencrypt/renewal-hooks -type f -print -delete
+   ```
+
+   `WWW_REDIRECT` must match the copied certificate: 1 if it names
+   `www.<domain>` (`ssh old-host sudo openssl x509 -noout -ext subjectAltName
+   -in /etc/letsencrypt/live/<domain>/cert.pem`), 0 if not. Otherwise certbot
+   asks for a new certificate, which cannot succeed until DNS moves.
+
+   Without the copy, set `TLS_MODE=selfsigned` until the cutover (step 8). Never
+   start in `letsencrypt` mode with no certificate while DNS still points at the
+   old host: certbot would fail every 15 minutes, and after some days of that
+   Let's Encrypt pauses the account for the domain.
+
+   Then start it:
 
    ```bash
    docker compose up -d          # builds the images the first time
@@ -479,12 +507,12 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
    docker compose logs -f web    # nginx and the certificate
    ```
 
-   A host path that does not exist fails `up` instead of being created. Until DNS
-   points here, `TLS_MODE=letsencrypt` serves only HTTP and retries every 15
-   minutes; see step 8. After editing `.env`, run `docker compose up -d
-   --force-recreate app`: compose notices a change only to the values it puts into
-   `docker-compose.yml` (a plain `up -d` applies those), not to the rest, which
-   the server reads itself.
+   A host path that does not exist fails `up` instead of being created. What the
+   containers print is in `docker compose logs <service>`, rotated at 5 files of
+   10 MB each; the server also writes `app.log` in the data dir. After editing
+   `.env`, run `docker compose up -d --force-recreate app`: compose notices a
+   change only to the values it puts into `docker-compose.yml` (a plain `up -d`
+   applies those), not to the rest, which the server reads itself.
 7. Admin commands run in the app container. Every command under "Operations"
    works this way, with `docker compose exec app python manage.py` in place of
    `.venv/bin/python manage.py`:
@@ -497,36 +525,73 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
 8. Cutover from the old host, in this order. Writes there after its final
    snapshot are lost: Stripe retries its webhooks, but a registration or a
    download in that window is not.
-   1. Certificates, before DNS moves. Either copy the old host's
-      `/etc/letsencrypt` into the volume, keeping its symlinks, for valid HTTPS
-      at once:
+   1. Certificates, before DNS moves. If step 6 copied them, copy them again
+      (its two commands, then `docker compose restart web`): the old host may
+      have renewed since. If the VM runs `selfsigned`, copy them now as in
+      step 6 (`WWW_REDIRECT` included) and switch to Let's Encrypt: set
+      `TLS_MODE=letsencrypt` and `LETSENCRYPT_EMAIL` in `.env`, then
 
       ```bash
-      ssh old-host 'sudo tar -C /etc -cf - letsencrypt' |
-          docker compose run --rm -T --no-deps --entrypoint tar web -C /etc -xf -
-      docker compose restart web
+      docker compose up -d --force-recreate web
       ```
 
-      or run with `TLS_MODE=selfsigned` until DNS has moved.
-   2. Stop the old service: `ssh old-host sudo systemctl stop patchingsite`.
-   3. Take a final snapshot, `ssh old-host sudo systemctl start
-      patchingsite-backup`. Then `docker compose stop app backup`, delete any
-      `users.db-wal` and `users.db-shm` in `/opt/server_data` (they belong to
-      the database being replaced), and repeat step 5's copies with that
-      snapshot, which also brings over any bundle uploaded since.
-   4. Start: `docker compose start app backup`.
-   5. Move DNS (the domain, and `www.` with `WWW_REDIRECT=1`) to the VM.
-   6. If you used `selfsigned`: set `TLS_MODE=letsencrypt` and
-      `LETSENCRYPT_EMAIL` in `.env`, then `docker compose up -d web`.
+      If they cannot be copied, stay on `selfsigned` and switch at step 7.
+   2. Pause the crawler (its timer or cron job, and let a run in progress
+      finish), so that it uploads nothing to the old host and posts nothing to
+      it after the final snapshot.
+   3. Stop the old service: `ssh old-host sudo systemctl stop patchingsite`.
+   4. Take a final snapshot: `ssh old-host sudo systemctl start
+      patchingsite-backup`, which returns once it is written. Then `docker
+      compose stop app backup`, delete any `users.db-wal` and `users.db-shm` in
+      `/opt/server_data` (they belong to the database being replaced), and
+      repeat step 5's copies with that snapshot, now the newest, which also
+      brings over any bundle uploaded since.
+   5. Start: `docker compose start app backup`.
+   6. Move DNS to the VM: the A and the AAAA records, of the domain and of
+      `www.` (with `WWW_REDIRECT=1`). If the VM has no IPv6 address, delete the
+      AAAA records instead; one left behind sends IPv6 visitors to the old
+      host. Resolvers keep the old records until their TTL runs out, so keep the
+      old host up until then (lowering the TTL a day ahead shortens the wait).
+   7. Only if the VM still runs `selfsigned`: switch to Let's Encrypt now, as in
+      step 1, as soon as DNS has moved. Not before: certbot succeeds only once
+      Let's Encrypt finds the domain at the VM, and every failure counts
+      against the domain. Not later: the site sends HSTS for a year, so a
+      browser that has been here refuses the self-signed certificate outright,
+      with no way past it. certbot retries every 15 minutes, so visitors whose
+      DNS has moved can get errors until it succeeds. Copying the certificate
+      avoids all of this.
+   8. Check, once DNS has moved:
+
+      ```bash
+      docker compose exec web certbot renew --dry-run --webroot -w /var/www/certbot   # renewal works from here
+      docker compose exec backup backup-loop --now      # snapshots work
+      curl -6 -sSI https://<domain>/ | head -n 1        # from another machine; and curl -4
+      ```
+
+      and download one app as a subscribed account, which exercises the
+      keystore and the signing. The dry run uses Let's Encrypt's staging
+      server, and changes no certificate.
 9. Point the crawler's upload host (its `-r user@host`, which writes under
-   `/opt/patched`) and `deploy/deploy.env` at the VM: `DEPLOY_RUNTIME=docker`,
-   `DEPLOY_HOST=ubuntu@<vm>` and `DEPLOY_REPO=/home/ubuntu/PatchingSite`. Leave
-   `DEPLOY_STORE_APK` unset unless `HOST_PATCHED_DIR` is not `/opt/patched`;
-   then set it to that directory's literal path plus `/store.apk`, since
-   `deploy.env` expands no variables. `DEPLOY_WEB_ROOT` is unused. `deploy.sh`
-   then rebuilds only what changed, the Docker files included: `app` and
-   `backup` for the server, `web` for the website (restarting nginx, which drops
-   its open connections). `deploy/backup/pull-backups.sh` works unchanged.
+   `/opt/patched`) at the VM, and resume it. Point `deploy/deploy.env` at the
+   VM: `DEPLOY_RUNTIME=docker`, `DEPLOY_HOST=ubuntu@<vm>` and
+   `DEPLOY_REPO=/home/ubuntu/PatchingSite`. Leave `DEPLOY_STORE_APK` unset
+   unless `HOST_PATCHED_DIR` is not `/opt/patched`; then set it to that
+   directory's literal path plus `/store.apk`, since `deploy.env` expands no
+   variables. `DEPLOY_WEB_ROOT` is unused. Before the first `deploy.sh` run,
+   copy the old host's deploy markers to the VM user's home, on the VM:
+
+   ```bash
+   ssh old-host 'tar -C ~ -cf - .deploy-state' | tar -C ~ -xf -
+   ```
+
+   Without them, `deploy.sh` would take every component as deployed at the
+   VM's checkout, which is wrong for the store app: `store.apk` came from the
+   old host. With them, the server and the website redeploy once, since the
+   Docker files count as changed, which is harmless. `deploy.sh` then rebuilds
+   only what changed, the Docker files included: `app` and `backup` for the
+   server, `web` for the website (restarting nginx, which drops its open
+   connections). It removes the images a rebuild replaced (`docker image
+   prune`). `deploy/backup/pull-backups.sh` works unchanged.
 10. The domain: `DOMAIN` sets the website, nginx and the certificates, but the
     store app has its base URL built in (`-Pandroidmod.releaseBaseUrl`, default
     `https://androidmod.site`, and `Links.SITE`). Another domain also needs a

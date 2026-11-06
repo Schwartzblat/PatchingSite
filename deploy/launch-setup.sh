@@ -45,6 +45,10 @@ cd "$(git rev-parse --show-toplevel)"
 # deploy.env. The same file and variables deploy.sh uses.
 source deploy/deploy-env.sh
 load_deploy_env
+# Every step below sets up the host's own nginx, systemd units and venv, which a
+# Docker host does not have.
+[[ ${DEPLOY_RUNTIME:-systemd} != docker ]] ||
+    die "DEPLOY_RUNTIME=docker: this sets up a systemd host only; see README.md, \"Deploy on a clean VM with Docker\""
 missing=()
 for var in DEPLOY_HOST DEPLOY_REPO DEPLOY_SITE_URL; do
     [[ -n ${!var:-} ]] || missing+=("$var")

@@ -20,6 +20,15 @@ x-app-build: &app-build
   # APP_COMMIT is deliberately not passed: the Dockerfile declares it above
   # `pip install`, so a new value each deploy would reinstall every wheel.
 
+# What each container prints, kept by Docker and read with `docker compose
+# logs`. Rotated, so a chatty or crash-looping container cannot fill the disk:
+# at most 5 files of 10 MB per container.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 # Forced over anything in .env, since the process environment beats
 # python-dotenv: production mode and the container paths, so that host paths in
 # a pasted live .env cannot break them. FRONTEND_URL and CORS_ORIGINS only
@@ -40,10 +49,13 @@ x-app-environment: &app-environment
 services:
   app:
     build: *app-build
+    # One image for app and backup, built once (here) and run by both.
+    image: patchingsite-app
     network_mode: host
-    # The owner of HOST_DATA_DIR and .env. With a wrong id the app does not
-    # start (restart loop, the reason in `docker compose logs app`): it cannot
-    # read .env, or `manage.py doctor` finds the data dir unwritable.
+    # The owner of HOST_DATA_DIR, .env and the keystore. With a wrong id the app
+    # does not start (restart loop, the reason in `docker compose logs app`): it
+    # cannot read .env or the keystore, or `manage.py doctor` finds the data dir
+    # unwritable.
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
     init: true
     restart: unless-stopped
@@ -81,6 +93,7 @@ services:
         bind:
           create_host_path: false
     environment: *app-environment
+    logging: *logging
     healthcheck:
       test:
         - CMD
@@ -101,6 +114,13 @@ services:
         APP_COMMIT: ${APP_COMMIT:-unknown}
     network_mode: host
     restart: unless-stopped
+    # Docker's default, made explicit, and short on purpose. On stop nginx
+    # closes its listening sockets at once, then finishes the responses in
+    # flight, so this is how long a recreate leaves the site unreachable for
+    # everyone. A long one would turn every new visitor away to spare the few
+    # downloads still running; those are cut after 10 s instead.
+    stop_grace_period: 10s
+    logging: *logging
     volumes:
       # Certificates and certbot's state: a restart or a rebuild reuses them.
       - letsencrypt:/etc/letsencrypt
@@ -119,7 +139,8 @@ services:
         condition: service_started
 
   backup:
-    build: *app-build
+    # app's image: compose builds it for app and never pulls it for this.
+    image: patchingsite-app
     # Sleeps until 03:30 UTC, snapshots users.db into /backups, keeps the newest
     # BACKUP_KEEP. By hand: docker compose exec backup backup-loop --now
     entrypoint: ["backup-loop"]
@@ -143,6 +164,7 @@ services:
     environment:
       <<: *app-environment
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
+    logging: *logging
     restart: unless-stopped
 
 volumes:
