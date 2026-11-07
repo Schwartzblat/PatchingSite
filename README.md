@@ -494,6 +494,18 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
    -in /etc/letsencrypt/live/<domain>/cert.pem`), 0 if not. Otherwise certbot
    asks for a new certificate, which cannot succeed until DNS moves.
 
+   The `sudo` commands on the old host, here and in step 8, need sudo there to
+   run without a password prompt. If it asks for one, add `-t` to those `ssh`
+   calls, and make the certificate archive in two steps instead of the pipe
+   above:
+
+   ```bash
+   ssh -t old-host 'sudo sh -c "umask 077 && tar -C /etc -cf $HOME/le.tar letsencrypt && chown $(id -u) $HOME/le.tar"'
+   ssh old-host 'cat le.tar' |
+       docker compose run --rm -T --no-deps --entrypoint tar web -C /etc -xf -
+   ssh old-host 'rm le.tar'
+   ```
+
    Without the copy, set `TLS_MODE=selfsigned` until the cutover (step 8). Never
    start in `letsencrypt` mode with no certificate while DNS still points at the
    old host: certbot would fail every 15 minutes, and after some days of that
@@ -539,7 +551,10 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
    2. Pause the crawler (its timer or cron job, and let a run in progress
       finish), so that it uploads nothing to the old host and posts nothing to
       it after the final snapshot.
-   3. Stop the old service: `ssh old-host sudo systemctl stop patchingsite`.
+   3. Stop the old services: `ssh old-host sudo systemctl stop patchingsite
+      patchingsite-v2` (drop `patchingsite-v2` if that host runs no v2). v2
+      shares the database, so it would keep writing to it after the final
+      snapshot.
    4. Take a final snapshot: `ssh old-host sudo systemctl start
       patchingsite-backup`, which returns once it is written. Then `docker
       compose stop app backup`, delete any `users.db-wal` and `users.db-shm` in
