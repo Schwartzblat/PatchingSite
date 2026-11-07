@@ -10,6 +10,11 @@
 #                         every 12 h.
 #   TLS_MODE=selfsigned   a 10-year self-signed certificate, made on first start.
 #                         Never contacts Let's Encrypt.
+#   TLS_MODE=external     no certificate here: the host's own nginx keeps ports
+#                         80 and 443, terminates TLS and forwards the site to
+#                         127.0.0.1:$HTTP_PORT (deploy/nginx/androidmod-docker.conf),
+#                         where this nginx serves it over plain HTTP, taking the
+#                         visitor's address from X-Real-IP. HTTPS_PORT is unused.
 #
 # Certificates live in /etc/letsencrypt, a volume, so a restart or a rebuild
 # reuses them instead of issuing again. A copy of the old host's /etc/letsencrypt
@@ -49,11 +54,13 @@ case $TLS_MODE in
         CERT_DIR=/etc/letsencrypt/live/$DOMAIN
         ;;
     selfsigned) CERT_DIR=/etc/letsencrypt/selfsigned/$DOMAIN ;;
-    *) die "TLS_MODE must be letsencrypt or selfsigned, not '$TLS_MODE'" ;;
+    external) CERT_DIR= ;;
+    *) die "TLS_MODE must be letsencrypt, selfsigned or external, not '$TLS_MODE'" ;;
 esac
 
-# The default HTTPS port stays out of redirect URLs.
-if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
+# The default HTTPS port stays out of redirect URLs. Behind the host's nginx
+# (external) visitors always arrive on 443.
+if [ "$HTTPS_PORT" = 443 ] || [ "$TLS_MODE" = external ]; then HTTPS_SUFFIX=; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
 
 # The names the certificate must cover.
 names=("$DOMAIN")
@@ -87,6 +94,16 @@ use_full_config() {
 
 use_bootstrap_config() {
     render bootstrap.conf.template >"$SITE_CONF"
+    check_config
+}
+
+use_external_config() {
+    render proxy.conf.template >/etc/nginx/snippets/androidmod-proxy.conf
+    {
+        # www first, for the same reason as in use_full_config.
+        if [ "$WWW_REDIRECT" = 1 ]; then render external-www.conf.template; fi
+        render external.conf.template
+    } >"$SITE_CONF"
     check_config
 }
 
@@ -144,11 +161,17 @@ beside_nginx() {
     return "$status"
 }
 
-if [ "$TLS_MODE" = selfsigned ]; then
-    if [ ! -f "$CERT_DIR/fullchain.pem" ]; then make_selfsigned; fi
-    use_full_config
-    start_nginx
-    log "serving ${names[*]} with the self-signed certificate in $CERT_DIR"
+if [ "$TLS_MODE" = selfsigned ] || [ "$TLS_MODE" = external ]; then
+    if [ "$TLS_MODE" = external ]; then
+        use_external_config
+        start_nginx
+        log "serving ${names[*]} on 127.0.0.1:$HTTP_PORT, behind the host's nginx"
+    else
+        if [ ! -f "$CERT_DIR/fullchain.pem" ]; then make_selfsigned; fi
+        use_full_config
+        start_nginx
+        log "serving ${names[*]} with the self-signed certificate in $CERT_DIR"
+    fi
     status=0
     wait "$nginx_pid" || status=$?
     die "nginx exited (status $status)"

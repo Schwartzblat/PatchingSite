@@ -1,0 +1,17 @@
+# The site for ${DOMAIN} behind the host's own nginx (TLS_MODE=external).
+#
+# The host keeps ports 80 and 443 (it serves other sites too), holds the
+# certificate, and forwards every request for ${DOMAIN} here over loopback:
+# deploy/nginx/androidmod-docker.conf. So this server speaks plain HTTP on
+# 127.0.0.1 only and never sees the internet directly. The routes, headers and
+# rate limits are the same snippet the HTTPS server includes in the other modes.
+# Rendered by web-entrypoint after external-www.conf.template, if that is used.
+
+server {
+    listen 127.0.0.1:${HTTP_PORT};
+    server_name ${DOMAIN};
+    server_tokens off;
+
+    include snippets/androidmod-realip.conf;
+    include snippets/androidmod-site.conf;
+}

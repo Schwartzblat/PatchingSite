@@ -32,8 +32,11 @@ COPY deploy/docker/nginx/tls.conf /etc/nginx/snippets/androidmod-tls.conf
 COPY deploy/docker/nginx/acme.conf /etc/nginx/snippets/androidmod-acme.conf
 # The old host's headers snippet, unchanged: one CSP for both deploys.
 COPY deploy/nginx/androidmod-headers.conf /etc/nginx/snippets/androidmod-headers.conf
+COPY deploy/docker/nginx/site-body.conf /etc/nginx/snippets/androidmod-site.conf
+COPY deploy/docker/nginx/realip.conf /etc/nginx/snippets/androidmod-realip.conf
 COPY deploy/docker/nginx/site.conf.template deploy/docker/nginx/www.conf.template \
      deploy/docker/nginx/bootstrap.conf.template deploy/docker/nginx/proxy.conf.template \
+     deploy/docker/nginx/external.conf.template deploy/docker/nginx/external-www.conf.template \
      /etc/nginx/androidmod-templates/
 COPY deploy/docker/web-entrypoint.sh /usr/local/bin/web-entrypoint
 RUN chmod 755 /usr/local/bin/web-entrypoint

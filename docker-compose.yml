@@ -10,7 +10,10 @@
 # `environment:` values below beat anything in that file.
 #
 # app and web use the host network: nginx sees every client's real IPv4 and
-# IPv6 address, and the app listens on 127.0.0.1:APP_PORT only.
+# IPv6 address, and the app listens on 127.0.0.1:APP_PORT only. With
+# TLS_MODE=external the host's own nginx is in front instead, web listens on
+# 127.0.0.1:HTTP_PORT only and takes the client's address from its X-Real-IP
+# (README, "Switch a host to Docker in place").
 
 name: patchingsite
 

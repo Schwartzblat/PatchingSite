@@ -430,7 +430,9 @@ and restart `patchingsite-v2`.
 website and its certificates (`web`), and the nightly database snapshot
 (`backup`). The VM must be x86-64. Below, its SSH login is `ubuntu` (uid 1000),
 which also owns the host dirs and is `APP_UID`, as on the old host. If another
-user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
+user owns the dirs, set `APP_UID` and `APP_GID` to its ids. To switch the
+current host instead, whose nginx serves other sites on ports 80 and 443 too,
+see "Switch a host to Docker in place" below.
 
 1. Install Docker Engine and the compose plugin
    ([docs.docker.com/engine/install](https://docs.docker.com/engine/install/)),
@@ -613,6 +615,89 @@ user owns the dirs, set `APP_UID` and `APP_GID` to its ids.
     store build for it, and installed copies keep calling the old domain until
     they update. Moving androidmod.site itself to the VM changes nothing on
     phones.
+
+## Switch a host to Docker in place
+
+The same stack on the host that runs the site today, without moving anything:
+its data, patched builds, backups, keystore, checkout and `.env` stay where
+they are. The host's own nginx keeps ports 80 and 443, since it serves other
+sites too, and keeps the certificate, renewed by its own certbot as before. For
+androidmod.site it only forwards: `deploy/nginx/androidmod-docker.conf` sends
+every request to the `web` container on 127.0.0.1:8081 (`TLS_MODE=external`),
+which has the site's routes, headers and rate limits. Commands run on the host,
+in the live checkout (`DEPLOY_REPO`), as the user that owns it.
+
+1. Install Docker and let the user run it, then log in again:
+
+   ```bash
+   sudo apt-get install -y docker.io docker-compose-v2 docker-buildx
+   sudo usermod -aG docker ubuntu
+   ```
+2. Bring the checkout to the latest main. It fetches with your GitHub key, as
+   `deploy.sh` does, so connect with `ssh -A`:
+
+   ```bash
+   git pull --ff-only origin main
+   ```
+3. Add Section 1 to the existing `.env`, at its end. The server running today
+   ignores these keys; `HOST_KEYSTORE_FILE` is the `KEYSTORE_PATH` already in
+   that file:
+
+   ```bash
+   cat >> .env <<'EOF'
+
+   # Docker (README, "Switch a host to Docker in place")
+   DOMAIN=androidmod.site
+   TLS_MODE=external
+   WWW_REDIRECT=1
+   HTTP_PORT=8081
+   APP_PORT=8000
+   HOST_DATA_DIR=/opt/server_data
+   HOST_PATCHED_DIR=/opt/patched
+   HOST_BACKUP_DIR=/var/lib/patchingsite-backups
+   HOST_KEYSTORE_FILE=/path/to/keystore.jks
+   APP_UID=1000
+   APP_GID=1000
+   EOF
+   ```
+4. Build the images while the site keeps running: `docker compose build`.
+5. Switch, at a quiet hour. The old nginx file still sends `/api/` to
+   127.0.0.1:8000, which the `app` container takes over, so the API is back as
+   soon as `app` is healthy, while the website stays up throughout:
+
+   ```bash
+   sudo systemctl disable --now patchingsite patchingsite-backup.timer
+   docker compose up -d
+   docker compose ps                 # app turns healthy within a minute
+   sudo cp -p /etc/nginx/sites-available/androidmod.site /etc/nginx/sites-available/androidmod.site.pre-docker
+   sudo install -m 644 deploy/nginx/androidmod-docker.conf /etc/nginx/sites-available/androidmod.site
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+   Stopping `patchingsite` waits for downloads being signed, up to 22 minutes;
+   `curl -s 127.0.0.1:8000/api/health` failing means it has let go of the port.
+6. Check:
+
+   ```bash
+   curl -sSI https://androidmod.site/ | head -n 1
+   sudo certbot renew --dry-run --cert-name androidmod.site   # renewal still works
+   docker compose exec backup backup-loop --now
+   ```
+
+   and download one app as a subscribed account.
+7. In `deploy/deploy.env` on your machine, set `DEPLOY_RUNTIME=docker`; the
+   host, the repo and the deploy markers stay as they are. The next deploy
+   rebuilds the server and the website once, since the Docker files count as
+   changed. `DEPLOY_WEB_ROOT` is unused from now on.
+8. To go back: `docker compose down`, put `androidmod.site.pre-docker` back
+   (the same `install` and reload), `sudo systemctl enable --now patchingsite
+   patchingsite-backup.timer`, and `DEPLOY_RUNTIME=systemd`. The website then
+   serves `/var/www/androidmod.site`, the last build deployed without Docker.
+
+Once it has run for a while, these are unused and can go: `/var/www/androidmod.site`,
+`server/.venv`, the `patchingsite` units, and the `androidmod-proxy.conf` and
+`androidmod-headers.conf` snippets and `conf.d/androidmod-http.conf` in
+`/etc/nginx`.
 
 ## Operations
 

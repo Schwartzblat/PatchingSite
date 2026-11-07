@@ -14,7 +14,10 @@ proxy_set_header Host              $host;
 # --forwarded-allow-ips=127.0.0.1 so only this proxy is trusted.
 proxy_set_header X-Real-IP         $remote_addr;
 proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
+# Always https: the API is proxied only from the HTTPS server, or, with
+# TLS_MODE=external, from the plain-HTTP loopback server the host's nginx
+# forwards HTTPS visitors to, where $scheme would say http.
+proxy_set_header X-Forwarded-Proto https;
 
 # Signed APKs are 40-155MB. Stream them straight through instead of
 # spooling to nginx's temp dir first.

@@ -1,0 +1,15 @@
+# www behind the host's own nginx (TLS_MODE=external): only redirects, to the
+# bare domain. Rendered ahead of external.conf.template, only when
+# WWW_REDIRECT=1, so it is the default server for the port, as www.conf.template
+# is in the other modes. The host's forwarder sends www.${DOMAIN} here too, and
+# its certificate must name it.
+
+server {
+    listen 127.0.0.1:${HTTP_PORT};
+    server_name www.${DOMAIN};
+    server_tokens off;
+
+    include snippets/androidmod-realip.conf;
+    include snippets/androidmod-headers.conf;
+    return 301 https://${DOMAIN}$request_uri;
+}
